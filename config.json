@@ -2,5 +2,6 @@
   "sentence_field": "Sentence",
   "meaning_field": "Meaning",
   "word_field": "Word",
-  "api_key": "your_openAI_api_key"
+  "api_key": "your_openAI_api_key",
+  "model": "gpt-3.5-turbo-1106"
 }
