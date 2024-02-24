@@ -32,8 +32,10 @@ def get_single_meaning_from_chatGPT(vocab, sentence, dict_entry):
 
 def get_translated_field_from_chatGPT(sentence):
     return_field = "english_sentence"
-    prompt = f"sentence_to_translate_into_english: {sentence}\n\nIgnore any HTML in the sentence.\nReturn an HTML-free English translation of the sentence in a JSON string as the value of the key \"{return_field}\"."
-    result = get_response_from_chatGPT(prompt, return_field)
+    # HTML-keeping prompt
+    # keep_html_prompt = f"sentence_to_translate_into_english: {sentence}\n\nTranslate the sentence into English. Copy the HTML structure into the English translation. Return the translation in a JSON string as the value of the key \"{return_field}\". Convert \" characters into ' withing the value to keep the JSON valid."
+    no_html_prompt = f"sentence_to_translate_into_english: {sentence}\n\nIgnore any HTML in the sentence.\nReturn an HTML-free English translation of the sentence in a JSON string as the value of the key \"{return_field}\"."
+    result = get_response_from_chatGPT(no_html_prompt, return_field)
     if result is None:
         # If translation failed, return nothing
         return None
@@ -88,12 +90,12 @@ def extract_json_string(response_text):
         print("Did not return JSON parseable result")
         return (response_text)
 
-
 # Function to be executed when the add_cards_did_add_note hook is triggered
 def clean_meaning_in_note(note: Note, config):
-    meaning_field = config['meaning_field']
-    word_field = config['word_field']
-    sentence_field = config['sentence_field']
+    model = mw.col.models.get(note.mid)
+    meaning_field = config['meaning_field'][model['name']]
+    word_field = config['word_field'][model['name']]
+    sentence_field = config['sentence_field'][model['name']]
     if debug:
         print('cleaning meaning in note', note.id)
         print('meaning_field in note', meaning_field in note)
@@ -127,8 +129,7 @@ def clean_meaning_in_note(note: Note, config):
 
 def bulk_clean_notes_op(col, notes: Sequence[Note], editedNids: list):
     config = mw.addonManager.getConfig(__name__)
-    meaning_field = config["meaning_field"]
-    message = f"Clean {meaning_field}"
+    message = f"Cleaning meaning"
     op = clean_meaning_in_note
     return bulk_notes_op(message, config, op, col, notes, editedNids)
 
@@ -143,8 +144,9 @@ def clean_selected_notes(nids: Sequence[NoteId], parent: Browser):
 
 # Function to be executed when the add_cards_did_add_note hook is triggered
 def translate_sentence_in_note(note: Note, config):
-    sentence_field = config['sentence_field']
-    translated_sentence_field = config['translated_sentence_field']
+    model = mw.col.models.get(note.mid)
+    sentence_field = config['sentence_field'][model['name']]
+    translated_sentence_field = config['translated_sentence_field'][model['name']]
     if debug:
         print('sentence_field in note', sentence_field in note)
         print('translated_sentence_field in note',
@@ -176,8 +178,7 @@ def translate_sentence_in_note(note: Note, config):
 
 def bulk_translate_notes_op(col, notes: Sequence[Note], editedNids: list):
     config = mw.addonManager.getConfig(__name__)
-    sentence_field = config["sentence_field"]
-    message = f"Translate {sentence_field}"
+    message = f"Translating sentences"
     op = translate_sentence_in_note
     return bulk_notes_op(message, config, op, col, notes, editedNids)
 
