@@ -45,11 +45,11 @@ def get_translated_field_from_chatGPT(sentence):
 def get_response_from_chatGPT(prompt, return_field):
     if debug:
         print('prompt', prompt)
-    
+
     config = mw.addonManager.getConfig(__name__)
 
     model = config["model"]
-        
+
     # Make the API call
     response = client.chat.completions.create(
         model=model,
@@ -58,7 +58,7 @@ def get_response_from_chatGPT(prompt, return_field):
             {"role": "system", "content": "You are a helpful assistant for creating flash cards in Anki for Japanese studying. You are designed to output JSON."},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=200  # Adjust max_tokens as needed
+        max_tokens=2000  # Adjust max_tokens as needed
     )
 
     # Extract the cleaned meaning from the response
@@ -91,6 +91,8 @@ def extract_json_string(response_text):
         return (response_text)
 
 # Function to be executed when the add_cards_did_add_note hook is triggered
+
+
 def clean_meaning_in_note(note: Note, config):
     model = mw.col.models.get(note.mid)
     meaning_field = config['meaning_field'][model['name']]
