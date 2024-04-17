@@ -190,6 +190,7 @@ def translate_selected_notes(nids: Sequence[NoteId], parent: Browser):
     bulk_op = bulk_translate_notes_op
     return selected_notes_op(title, done_text, bulk_op, nids, parent)
 
+
 def bulk_notes_op(message, config, op, col, notes: Sequence[Note], editedNids: list):
     pos = col.add_custom_undo_entry(
         f"{message} for {len(notes)} notes.")
@@ -237,8 +238,8 @@ def on_browser_menus_did_init(browser: Browser):
 # Register to card adding hook
 hooks.note_will_be_added.append(lambda _col, note, _deck_id: clean_meaning_in_note(
     note, config=mw.addonManager.getConfig(__name__)))
-hooks.note_will_be_added.append(lambda _col, note, _deck_id: translate_sentence_in_note(
-    note, config=mw.addonManager.getConfig(__name__)))
+# hooks.note_will_be_added.append(lambda _col, note, _deck_id: translate_sentence_in_note(
+    # note, config=mw.addonManager.getConfig(__name__)))
 
 # Register to browser menu initialization hook
 gui_hooks.browser_menus_did_init.append(on_browser_menus_did_init)
