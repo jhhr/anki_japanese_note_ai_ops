@@ -75,7 +75,7 @@ class SSLConfig:
         self.ssl_context = self.load_ssl_context()
 
     def load_ssl_context(self) -> ssl.SSLContext:
-        logger.debug(
+        logger.DEBUG(
             "load_ssl_context verify=%r cert=%r trust_env=%r http2=%r",
             self.verify,
             self.cert,
@@ -141,11 +141,11 @@ class SSLConfig:
 
         if ca_bundle_path.is_file():
             cafile = str(ca_bundle_path)
-            logger.debug("load_verify_locations cafile=%r", cafile)
+            logger.DEBUG("load_verify_locations cafile=%r", cafile)
             context.load_verify_locations(cafile=cafile)
         elif ca_bundle_path.is_dir():
             capath = str(ca_bundle_path)
-            logger.debug("load_verify_locations capath=%r", capath)
+            logger.DEBUG("load_verify_locations capath=%r", capath)
             context.load_verify_locations(capath=capath)
 
         self._load_client_certs(context)

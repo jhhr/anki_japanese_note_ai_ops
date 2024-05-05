@@ -1,30 +1,21 @@
-import json
-from collections.abc import Sequence
-from openai import OpenAI
+
 from anki import hooks
 from aqt import mw
-from aqt.browser import Browser
-from anki.notes import Note, NoteId
-from aqt import gui_hooks
-from aqt.qt import QAction, qconnect
-from aqt.operations import CollectionOp
-from aqt.utils import showInfo
 import sys
 import os
+from aqt.browser import Browser
+from aqt import gui_hooks
+from aqt.qt import QAction, qconnect
 
-from clean_meaning import (
+from .clean_meaning import (
     clean_meaning_in_note,
     clean_selected_notes,
 )
-from translate_field import (
+from .translate_field import (
     translate_selected_notes,
 )
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-
-debug = True
-api_key = mw.addonManager.getConfig(__name__)["api_key"]
-client = OpenAI(api_key=api_key)
 
 
 # Function to be executed when the browser menus are initialized
