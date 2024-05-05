@@ -1,7 +1,8 @@
-from aqt.browser import Browser
 from collections.abc import Sequence
-from aqt import mw
+
 from anki.notes import Note, NoteId
+from aqt import mw
+from aqt.browser import Browser
 
 from .base_ops import (
     get_response_from_chat_gpt,
@@ -11,23 +12,23 @@ from .base_ops import (
 
 DEBUG = True
 
+
 def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
     return_field = "cleaned_meaning"
-    prompt = """word: {vocab}
-    sentence: {sentence}
-    dictionary_entry_for_word: {dict_entry}
-
-    The dictionary entry may contain multiple meanings for the word.
-    Extract the one meaning matching the usage of the word in the sentence.
-    Omit any example sentences the matching meaning included.
-    If the meaning is more than four sentences long, shorten it to explain the basics only.
-    Otherwise, keep an already short meaning as-is.
-    In case there is only meaning, return that.
-
-    Return the extracted meaning in a JSON string as the value of the key \"{return_field}\".
-    """.format(
-        vocab=vocab, sentence=sentence, dict_entry=dict_entry, return_field=return_field
-    )
+    prompt = f'\
+    word: {vocab}\
+    sentence: {sentence}\
+    dictionary_entry_for_word: {dict_entry}\
+    \
+    The dictionary entry may contain multiple meanings for the word.\
+    Extract the one meaning matching the usage of the word in the sentence.\
+    Omit any example sentences the matching meaning included.\
+    If the meaning is more than four sentences long, shorten it to explain the basics only.\
+    Otherwise, keep an already short meaning as-is.\
+    In case there is only meaning, return that.\
+    \
+    Return the extracted meaning in a JSON string as the value of the key "{return_field}".\
+    '
     result = get_response_from_chat_gpt(prompt, return_field)
     if result is None:
         # Return original dict_entry unchanged if the cleaning failed
@@ -37,23 +38,24 @@ def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
 
 def generate_meaning_from_chatGPT(vocab, sentence):
     return_field = "new_meaning"
-    prompt = """word: {vocab}
-    sentence: {sentence}
-
-    Genarate a short dictionary-style explanation of the usage pattern fitting how the word is used in the sentence.
-    The explanation should be in the same language as the sentence.
-    Generally aim to explain the meaning shortly in a single sentence.
-    If it is necessary to explain more, the maximum length should be 3 sentences.
-
-    Return the meaning in a JSON string as the value of the key \"{return_field}\".
-    Translate the meaning you generated into English as the value of the key "english_meaning".
-    """.format(
-        vocab=vocab, sentence=sentence, dict_entry=dict_entry, return_field=return_field
-    )
+    prompt = f'\
+    word_or_phrase: {vocab}\
+    sentence: {sentence}\
+    \
+    Generate a short monolingual dictionary style general definition of the word or phrase.\
+    If there exists more than one usage pattern for this word or phrase, describe the one used in the sentence.\
+    The word itself should not be used in the definition. If any synonyms exist, mention at most two.\
+    Generally aim to for the definition to be a single sentence.\
+    If it is necessary to explain more, the maximum length should be 3 sentences.\
+    The definition should be in the same language as the sentence.\
+    \
+    Return the meaning in a JSON string as the value of the key "{return_field}".\
+    Translate the meaning you generated into English as the value of the key "english_meaning".\
+    '
     result = get_response_from_chat_gpt(prompt, return_field)
     if result is None:
-        # Return original dict_entry unchanged if the cleaning failed
-        return dict_entry
+        # Return nothing if the generating failed
+        return ""
     return result
 
 
@@ -88,8 +90,14 @@ def clean_meaning_in_note(note: Note, config):
             if modified_meaning_jp != dict_entry:
                 return True
             return False
+        else:
+            # If there's no dict_entry, we'll use chatGPT to generate one from scratch
+            new_meaning = generate_meaning_from_chatGPT(word, sentence)
+            note[meaning_field] = new_meaning
+            if new_meaning != "":
+                return True
+            return False
 
-        return False
     elif DEBUG:
         print("note is missing fields")
     return False
