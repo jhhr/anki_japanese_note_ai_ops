@@ -14,30 +14,41 @@ log = logging.getLogger(__name__)
 
 
 def cast(val, typ):
-    log.DEBUG((val, typ))
+    log.debug((val, typ))
     if " or " in typ:
         for t in typ.split(" or "):
             try:
                 return cast(val, t)
             except TqdmTypeError:
                 pass
-        raise TqdmTypeError(val + ' : ' + typ)
+        raise TqdmTypeError(f"{val} : {typ}")
 
     # sys.stderr.write('\ndebug | `val:type`: `' + val + ':' + typ + '`.\n')
     if typ == 'bool':
         if (val == 'True') or (val == ''):
             return True
-        elif val == 'False':
+        if val == 'False':
             return False
-        else:
-            raise TqdmTypeError(val + ' : ' + typ)
-    try:
-        return eval(typ + '("' + val + '")')
-    except Exception:
-        if typ == 'chr':
-            return chr(ord(eval('"' + val + '"'))).encode()
-        else:
-            raise TqdmTypeError(val + ' : ' + typ)
+        raise TqdmTypeError(val + ' : ' + typ)
+    if typ == 'chr':
+        if len(val) == 1:
+            return val.encode()
+        if re.match(r"^\\\w+$", val):
+            return eval(f'"{val}"').encode()
+        raise TqdmTypeError(f"{val} : {typ}")
+    if typ == 'str':
+        return val
+    if typ == 'int':
+        try:
+            return int(val)
+        except ValueError as exc:
+            raise TqdmTypeError(f"{val} : {typ}") from exc
+    if typ == 'float':
+        try:
+            return float(val)
+        except ValueError as exc:
+            raise TqdmTypeError(f"{val} : {typ}") from exc
+    raise TqdmTypeError(f"{val} : {typ}")
 
 
 def posix_pipe(fin, fout, delim=b'\\n', buf_size=256,
@@ -174,7 +185,7 @@ def main(fp=sys.stderr, argv=None):
     for o in UNSUPPORTED_OPTS:
         opt_types.pop(o)
 
-    log.DEBUG(sorted(opt_types.items()))
+    log.debug(sorted(opt_types.items()))
 
     # d = RE_OPTS.sub(r'  --\1=<\1>  : \2', d)
     split = RE_OPTS.split(d)
@@ -204,7 +215,7 @@ Options:
     argv = RE_SHLEX.split(' '.join(["tqdm"] + argv))
     opts = dict(zip(argv[1::3], argv[3::3]))
 
-    log.DEBUG(opts)
+    log.debug(opts)
     opts.pop('log', True)
 
     tqdm_args = {'file': fp}
@@ -215,7 +226,7 @@ Options:
                 tqdm_args[o] = cast(v, opt_types[o])
             except KeyError as e:
                 raise TqdmKeyError(str(e))
-        log.DEBUG('args:' + str(tqdm_args))
+        log.debug('args:' + str(tqdm_args))
 
         delim_per_char = tqdm_args.pop('bytes', False)
         update = tqdm_args.pop('update', False)
@@ -275,11 +286,11 @@ Options:
             tqdm_args.setdefault('unit', 'B')
             tqdm_args.setdefault('unit_scale', True)
             tqdm_args.setdefault('unit_divisor', 1024)
-            log.DEBUG(tqdm_args)
+            log.debug(tqdm_args)
             with tqdm(**tqdm_args) as t:
                 posix_pipe(stdin, stdout, '', buf_size, t.update)
         elif delim == b'\\n':
-            log.DEBUG(tqdm_args)
+            log.debug(tqdm_args)
             write = stdout.write
             if update or update_to:
                 with tqdm(**tqdm_args) as t:
@@ -296,7 +307,7 @@ Options:
                 for i in tqdm(stdin, **tqdm_args):
                     write(i)
         else:
-            log.DEBUG(tqdm_args)
+            log.debug(tqdm_args)
             with tqdm(**tqdm_args) as t:
                 callback_len = False
                 if update:

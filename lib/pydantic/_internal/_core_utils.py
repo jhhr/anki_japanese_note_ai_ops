@@ -40,13 +40,6 @@ _CORE_SCHEMA_FIELD_TYPES = {'typed-dict-field', 'dataclass-field', 'model-field'
 _FUNCTION_WITH_INNER_SCHEMA_TYPES = {'function-before', 'function-after', 'function-wrap'}
 _LIST_LIKE_SCHEMA_WITH_ITEMS_TYPES = {'list', 'set', 'frozenset'}
 
-_DEFINITIONS_CACHE_METADATA_KEY = 'pydantic.definitions_cache'
-
-NEEDS_APPLY_DISCRIMINATED_UNION_METADATA_KEY = 'pydantic.internal.needs_apply_discriminated_union'
-"""Used to mark a schema that has a discriminated union that needs to be checked for validity at the end of
-schema building because one of it's members refers to a definition that was not yet defined when the union
-was first encountered.
-"""
 TAGGED_UNION_TAG_KEY = 'pydantic.internal.tagged_union_tag'
 """
 Used in a `Tag` schema to specify the tag used for a discriminated union.

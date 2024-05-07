@@ -7,6 +7,8 @@ from aqt.browser import Browser
 from aqt import gui_hooks
 from aqt.qt import QAction, qconnect
 
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+
 from .clean_meaning import (
     clean_meaning_in_note,
     clean_selected_notes,
@@ -15,7 +17,6 @@ from .translate_field import (
     translate_selected_notes,
 )
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
 
 # Function to be executed when the browser menus are initialized

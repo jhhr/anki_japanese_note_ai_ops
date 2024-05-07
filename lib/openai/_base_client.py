@@ -430,7 +430,7 @@ class BaseClient(Generic[_HttpxClientT, _DefaultStreamT]):
         options: FinalRequestOptions,
     ) -> httpx.Request:
         if log.isEnabledFor(logging.DEBUG):
-            log.DEBUG("Request options: %s", model_dump(options, exclude_unset=True))
+            log.debug("Request options: %s", model_dump(options, exclude_unset=True))
 
         kwargs: dict[str, Any] = {}
 
@@ -646,33 +646,33 @@ class BaseClient(Generic[_HttpxClientT, _DefaultStreamT]):
 
         # If the server explicitly says whether or not to retry, obey.
         if should_retry_header == "true":
-            log.DEBUG("Retrying as header `x-should-retry` is set to `true`")
+            log.debug("Retrying as header `x-should-retry` is set to `true`")
             return True
         if should_retry_header == "false":
-            log.DEBUG("Not retrying as header `x-should-retry` is set to `false`")
+            log.debug("Not retrying as header `x-should-retry` is set to `false`")
             return False
 
         # Retry on request timeouts.
         if response.status_code == 408:
-            log.DEBUG("Retrying due to status code %i", response.status_code)
+            log.debug("Retrying due to status code %i", response.status_code)
             return True
 
         # Retry on lock timeouts.
         if response.status_code == 409:
-            log.DEBUG("Retrying due to status code %i", response.status_code)
+            log.debug("Retrying due to status code %i", response.status_code)
             return True
 
         # Retry on rate limits.
         if response.status_code == 429:
-            log.DEBUG("Retrying due to status code %i", response.status_code)
+            log.debug("Retrying due to status code %i", response.status_code)
             return True
 
         # Retry internal errors.
         if response.status_code >= 500:
-            log.DEBUG("Retrying due to status code %i", response.status_code)
+            log.debug("Retrying due to status code %i", response.status_code)
             return True
 
-        log.DEBUG("Not retrying")
+        log.debug("Not retrying")
         return False
 
     def _idempotency_key(self) -> str:
@@ -890,7 +890,7 @@ class SyncAPIClient(BaseClient[httpx.Client, Stream[Any]]):
                 **kwargs,
             )
         except httpx.TimeoutException as err:
-            log.DEBUG("Encountered httpx.TimeoutException", exc_info=True)
+            log.debug("Encountered httpx.TimeoutException", exc_info=True)
 
             if retries > 0:
                 return self._retry_request(
@@ -902,10 +902,10 @@ class SyncAPIClient(BaseClient[httpx.Client, Stream[Any]]):
                     response_headers=None,
                 )
 
-            log.DEBUG("Raising timeout error")
+            log.debug("Raising timeout error")
             raise APITimeoutError(request=request) from err
         except Exception as err:
-            log.DEBUG("Encountered Exception", exc_info=True)
+            log.debug("Encountered Exception", exc_info=True)
 
             if retries > 0:
                 return self._retry_request(
@@ -917,17 +917,17 @@ class SyncAPIClient(BaseClient[httpx.Client, Stream[Any]]):
                     response_headers=None,
                 )
 
-            log.DEBUG("Raising connection error")
+            log.debug("Raising connection error")
             raise APIConnectionError(request=request) from err
 
-        log.DEBUG(
+        log.debug(
             'HTTP Request: %s %s "%i %s"', request.method, request.url, response.status_code, response.reason_phrase
         )
 
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as err:  # thrown on 4xx and 5xx status code
-            log.DEBUG("Encountered httpx.HTTPStatusError", exc_info=True)
+            log.debug("Encountered httpx.HTTPStatusError", exc_info=True)
 
             if retries > 0 and self._should_retry(err.response):
                 err.response.close()
@@ -945,7 +945,7 @@ class SyncAPIClient(BaseClient[httpx.Client, Stream[Any]]):
             if not err.response.is_closed:
                 err.response.read()
 
-            log.DEBUG("Re-raising status error")
+            log.debug("Re-raising status error")
             raise self._make_status_error_from_response(err.response) from None
 
         return self._process_response(
@@ -968,9 +968,9 @@ class SyncAPIClient(BaseClient[httpx.Client, Stream[Any]]):
     ) -> ResponseT | _StreamT:
         remaining = remaining_retries - 1
         if remaining == 1:
-            log.DEBUG("1 retry left")
+            log.debug("1 retry left")
         else:
-            log.DEBUG("%i retries left", remaining)
+            log.debug("%i retries left", remaining)
 
         timeout = self._calculate_retry_timeout(remaining, options, response_headers)
         log.info("Retrying request to %s in %f seconds", options.url, timeout)
@@ -1370,7 +1370,7 @@ class AsyncAPIClient(BaseClient[httpx.AsyncClient, AsyncStream[Any]]):
                 **kwargs,
             )
         except httpx.TimeoutException as err:
-            log.DEBUG("Encountered httpx.TimeoutException", exc_info=True)
+            log.debug("Encountered httpx.TimeoutException", exc_info=True)
 
             if retries > 0:
                 return await self._retry_request(
@@ -1382,10 +1382,10 @@ class AsyncAPIClient(BaseClient[httpx.AsyncClient, AsyncStream[Any]]):
                     response_headers=None,
                 )
 
-            log.DEBUG("Raising timeout error")
+            log.debug("Raising timeout error")
             raise APITimeoutError(request=request) from err
         except Exception as err:
-            log.DEBUG("Encountered Exception", exc_info=True)
+            log.debug("Encountered Exception", exc_info=True)
 
             if retries > 0:
                 return await self._retry_request(
@@ -1397,17 +1397,17 @@ class AsyncAPIClient(BaseClient[httpx.AsyncClient, AsyncStream[Any]]):
                     response_headers=None,
                 )
 
-            log.DEBUG("Raising connection error")
+            log.debug("Raising connection error")
             raise APIConnectionError(request=request) from err
 
-        log.DEBUG(
+        log.debug(
             'HTTP Request: %s %s "%i %s"', request.method, request.url, response.status_code, response.reason_phrase
         )
 
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as err:  # thrown on 4xx and 5xx status code
-            log.DEBUG("Encountered httpx.HTTPStatusError", exc_info=True)
+            log.debug("Encountered httpx.HTTPStatusError", exc_info=True)
 
             if retries > 0 and self._should_retry(err.response):
                 await err.response.aclose()
@@ -1425,7 +1425,7 @@ class AsyncAPIClient(BaseClient[httpx.AsyncClient, AsyncStream[Any]]):
             if not err.response.is_closed:
                 await err.response.aread()
 
-            log.DEBUG("Re-raising status error")
+            log.debug("Re-raising status error")
             raise self._make_status_error_from_response(err.response) from None
 
         return self._process_response(
@@ -1448,9 +1448,9 @@ class AsyncAPIClient(BaseClient[httpx.AsyncClient, AsyncStream[Any]]):
     ) -> ResponseT | _AsyncStreamT:
         remaining = remaining_retries - 1
         if remaining == 1:
-            log.DEBUG("1 retry left")
+            log.debug("1 retry left")
         else:
-            log.DEBUG("%i retries left", remaining)
+            log.debug("%i retries left", remaining)
 
         timeout = self._calculate_retry_timeout(remaining, options, response_headers)
         log.info("Retrying request to %s in %f seconds", options.url, timeout)

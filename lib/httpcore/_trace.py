@@ -42,7 +42,7 @@ class Trace:
             else:
                 args = " ".join([f"{key}={value!r}" for key, value in info.items()])
                 message = f"{name} {args}"
-            self.logger.DEBUG(message)
+            self.logger.debug(message)
 
     def __enter__(self) -> "Trace":
         if self.should_trace:
@@ -82,7 +82,7 @@ class Trace:
             else:
                 args = " ".join([f"{key}={value!r}" for key, value in info.items()])
                 message = f"{name} {args}"
-            self.logger.DEBUG(message)
+            self.logger.debug(message)
 
     async def __aenter__(self) -> "Trace":
         if self.should_trace:

@@ -180,7 +180,7 @@ class APIResponse(Generic[R]):
                 try:
                     data = response.json()
                 except Exception as exc:
-                    log.DEBUG("Could not read JSON from response data due to %s - %s", type(exc), exc)
+                    log.debug("Could not read JSON from response data due to %s - %s", type(exc), exc)
                 else:
                     return self._client._process_response_data(
                         data=data,
