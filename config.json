@@ -1,7 +1,8 @@
 {
-  "sentence_field": "Sentence",
-  "meaning_field": "Meaning",
-  "word_field": "Word",
+  "meaning_field": { "Japanese vocab": "Meaning" },
+  "word_field": {"Japanese vocab": "Word" },
+  "translated_sentence_field": { "Japanese vocab": "Translated_sentence" },
+  "sentence_field": { "Japanese vocab": "Sentence" },
   "api_key": "your_openAI_api_key",
   "model": "gpt-3.5-turbo-1106"
 }

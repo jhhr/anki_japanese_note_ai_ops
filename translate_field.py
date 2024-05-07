@@ -25,8 +25,16 @@ def get_translated_field_from_chat_gpt(sentence):
 
 def translate_sentence_in_note(note: Note, config):
     model = mw.col.models.get(note.mid)
-    sentence_field = config["sentence_field"][model["name"]]
-    translated_sentence_field = config["translated_sentence_field"][model["name"]]
+    try:
+        sentence_field = config["sentence_field"][model["name"]]
+    except TypeError:
+        raise Exception("Missing config for \"sentence_field\"")
+
+    try:
+        translated_sentence_field = config["translated_sentence_field"][model["name"]]
+    except TypeError:
+        raise Exception("Missing config for \"translated_sentence_field\"")
+
     if DEBUG:
         print("sentence_field in note", sentence_field in note)
         print("translated_sentence_field in note", translated_sentence_field in note)

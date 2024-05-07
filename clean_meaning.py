@@ -61,9 +61,20 @@ def generate_meaning_from_chatGPT(vocab, sentence):
 
 def clean_meaning_in_note(note: Note, config):
     model = mw.col.models.get(note.mid)
-    meaning_field = config["meaning_field"][model["name"]]
-    word_field = config["word_field"][model["name"]]
-    sentence_field = config["sentence_field"][model["name"]]
+    try:
+        meaning_field = config["meaning_field"][model["name"]]
+    except TypeError:
+        raise Exception("Missing config for \"meaning_field\"")
+    
+    try:
+        word_field = config["word_field"][model["name"]]
+    except TypeError:
+        raise Exception("Missing config for \"word_field\"")
+    
+    try:
+        sentence_field = config["sentence_field"][model["name"]]
+    except TypeError:
+        raise Exception("Missing config for \"sentence_field\"")
     if DEBUG:
         print("cleaning meaning in note", note.id)
         print("meaning_field in note", meaning_field in note)
