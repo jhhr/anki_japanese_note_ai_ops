@@ -5,7 +5,7 @@ from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
 from aqt.operations import CollectionOp
-from aqt.utils import showInfo
+from aqt.utils import tooltip
 from openai import OpenAI
 
 DEBUG = True
@@ -79,9 +79,7 @@ def bulk_notes_op(message, config, op, col, notes: Sequence[Note], edited_nids: 
     return col.merge_undo_entries(pos)
 
 
-def selected_notes_op(
-    title, done_text, bulk_op, nids: Sequence[NoteId], parent: Browser
-):
+def selected_notes_op(done_text, bulk_op, nids: Sequence[NoteId], parent: Browser):
     edited_nids = []
     return (
         CollectionOp(
@@ -93,11 +91,10 @@ def selected_notes_op(
             ),
         )
         .success(
-            lambda out: showInfo(
+            lambda out: tooltip(
+                f"{done_text} in {len(edited_nids)}/{len(nids)} selected notes.",
                 parent=parent,
-                title=title,
-                textFormat="rich",
-                text=f"{done_text} in {len(edited_nids)}/{len(nids)} selected notes.",
+                period=5000,
             )
         )
         .run_in_background()

@@ -122,7 +122,6 @@ def bulk_clean_notes_op(col, notes: Sequence[Note], editedNids: list):
 
 
 def clean_selected_notes(nids: Sequence[NoteId], parent: Browser):
-    title = "Cleaning done"
     done_text = "Updated meaning"
     bulk_op = bulk_clean_notes_op
-    return selected_notes_op(title, done_text, bulk_op, nids, parent)
+    return selected_notes_op(done_text, bulk_op, nids, parent)

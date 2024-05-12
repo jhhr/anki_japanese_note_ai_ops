@@ -1,11 +1,11 @@
+import os
+import sys
 
 from anki import hooks
-from aqt import mw
-import sys
-import os
-from aqt.browser import Browser
 from aqt import gui_hooks
-from aqt.qt import QAction, qconnect
+from aqt import mw
+from aqt.browser import Browser
+from aqt.qt import QAction, qconnect, QMenu
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
@@ -20,11 +20,11 @@ from .translate_field import (
 
 
 # Function to be executed when the browser menus are initialized
-def on_browser_menus_did_init(browser: Browser):
-    # Create a new action for the browser menu
+def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
+    # Create a new action for the context menu
     meaning_action = QAction("Clean dictionary meaning", mw)
     translation_action = QAction("Translate sentence", mw)
-    # Connect the action to the convert_selected_notes function
+    # Connect the action to the operation
     qconnect(
         meaning_action.triggered,
         lambda: clean_selected_notes(browser.selectedNotes(), parent=browser),
@@ -33,9 +33,10 @@ def on_browser_menus_did_init(browser: Browser):
         translation_action.triggered,
         lambda: translate_selected_notes(browser.selectedNotes(), parent=browser),
     )
+    ai_menu = menu.addMenu("AI helper")
     # Add the action to the browser's card context menu
-    browser.form.menuEdit.addAction(meaning_action)
-    browser.form.menuEdit.addAction(translation_action)
+    ai_menu.addAction(meaning_action)
+    ai_menu.addAction(translation_action)
 
 
 # Register to card adding hook
@@ -47,5 +48,5 @@ hooks.note_will_be_added.append(
 # hooks.note_will_be_added.append(lambda _col, note, _deck_id: translate_sentence_in_note(
 # note, config=mw.addonManager.getConfig(__name__)))
 
-# Register to browser menu initialization hook
-gui_hooks.browser_menus_did_init.append(on_browser_menus_did_init)
+# Register to context menu initialization hook
+gui_hooks.browser_will_show_context_menu.append(on_browser_will_show_context_menu)

@@ -1,7 +1,8 @@
-from aqt.browser import Browser
 from collections.abc import Sequence
-from aqt import mw
+
 from anki.notes import Note, NoteId
+from aqt import mw
+from aqt.browser import Browser
 
 from .base_ops import (
     get_response_from_chat_gpt,
@@ -10,6 +11,7 @@ from .base_ops import (
 )
 
 DEBUG = True
+
 
 def get_translated_field_from_chat_gpt(sentence):
     return_field = "english_sentence"
@@ -71,7 +73,6 @@ def bulk_translate_notes_op(col, notes: Sequence[Note], editedNids: list):
 
 
 def translate_selected_notes(nids: Sequence[NoteId], parent: Browser):
-    title = "Translating done"
     done_text = "Updated translation"
     bulk_op = bulk_translate_notes_op
-    return selected_notes_op(title, done_text, bulk_op, nids, parent)
+    return selected_notes_op(done_text, bulk_op, nids, parent)
