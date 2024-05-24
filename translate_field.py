@@ -3,12 +3,14 @@ from collections.abc import Sequence
 from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
+from aqt.utils import showWarning
 
 from .base_ops import (
     get_response_from_chat_gpt,
     bulk_notes_op,
     selected_notes_op,
 )
+from .utils import get_field_config
 
 DEBUG = True
 
@@ -25,17 +27,19 @@ def get_translated_field_from_chat_gpt(sentence):
     return result
 
 
-def translate_sentence_in_note(note: Note, config):
+def translate_sentence_in_note(
+    note: Note, config: dict, show_warning: bool = True
+) -> bool:
     model = mw.col.models.get(note.mid)
     try:
-        sentence_field = config["sentence_field"][model["name"]]
-    except TypeError:
-        raise Exception("Missing config for \"sentence_field\"")
-
-    try:
-        translated_sentence_field = config["translated_sentence_field"][model["name"]]
-    except TypeError:
-        raise Exception("Missing config for \"translated_sentence_field\"")
+        sentence_field = get_field_config(config, "sentence_field", model)
+        translated_sentence_field = get_field_config(
+            config, "translated_sentence_field", model
+        )
+    except Exception as e:
+        if show_warning:
+            showWarning(str(e))
+        return False
 
     if DEBUG:
         print("sentence_field in note", sentence_field in note)

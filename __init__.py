@@ -18,7 +18,6 @@ from .translate_field import (
 )
 
 
-
 # Function to be executed when the browser menus are initialized
 def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     # Create a new action for the context menu
@@ -42,7 +41,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
 # Register to card adding hook
 hooks.note_will_be_added.append(
     lambda _col, note, _deck_id: clean_meaning_in_note(
-        note, config=mw.addonManager.getConfig(__name__)
+        note, config=mw.addonManager.getConfig(__name__), show_warning=False
     )
 )
 # hooks.note_will_be_added.append(lambda _col, note, _deck_id: translate_sentence_in_note(

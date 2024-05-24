@@ -1,14 +1,17 @@
 from collections.abc import Sequence
+from typing import Dict
 
 from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
+from aqt.utils import showWarning
 
 from .base_ops import (
     get_response_from_chat_gpt,
     bulk_notes_op,
     selected_notes_op,
 )
+from .utils import get_field_config
 
 DEBUG = True
 
@@ -59,22 +62,20 @@ def generate_meaning_from_chatGPT(vocab, sentence):
     return result
 
 
-def clean_meaning_in_note(note: Note, config):
+def clean_meaning_in_note(
+    note: Note, config: Dict[str, str], show_warning: bool = True
+):
     model = mw.col.models.get(note.mid)
+
     try:
-        meaning_field = config["meaning_field"][model["name"]]
-    except TypeError:
-        raise Exception("Missing config for \"meaning_field\"")
-    
-    try:
-        word_field = config["word_field"][model["name"]]
-    except TypeError:
-        raise Exception("Missing config for \"word_field\"")
-    
-    try:
-        sentence_field = config["sentence_field"][model["name"]]
-    except TypeError:
-        raise Exception("Missing config for \"sentence_field\"")
+        meaning_field = get_field_config(config, "meaning_field", model)
+        word_field = get_field_config(config, "word_field", model)
+        sentence_field = get_field_config(config, "sentence_field", model)
+    except Exception as e:
+        if show_warning:
+            showWarning(str(e))
+        return False
+
     if DEBUG:
         print("cleaning meaning in note", note.id)
         print("meaning_field in note", meaning_field in note)
