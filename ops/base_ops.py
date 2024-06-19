@@ -56,8 +56,9 @@ def extract_json_string(response_text):
     # based on the structure of the response.
 
     # For simplicity, let's assume that the cleaned meaning is surrounded by curly braces in the response.
+    # Find the first occurrence of "{" and the last occurrence of "}" in the response.
     start_index = response_text.find("{")
-    end_index = response_text.find("}")
+    end_index = response_text.rfind("}")
 
     if start_index != -1 and end_index != -1:
         return response_text[start_index : end_index + 1]
