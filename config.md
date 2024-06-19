@@ -10,15 +10,20 @@ Add the fields by note type like this. You can set multiple different note types
 multiple fields per note type though.
 
 ```json
-"meaning_field: {
-  "note type name A"`: `"note A meaning field"
-  "note type name B"`: `"note B meaning field"
-  }
-"sentence_field": {
-  "note type name A"`: `"note A english field"
-  "note type name B"`: `"note B english field"
+{
+  "note type name A": {
+    "meaning_field": "note A meaning field",
+    "word_field": "note A word field",
+    "sentence_field": "note A sentence field"
+  },
+  "note type name B": {
+    "meaning_field": "note B meaning field",
+    "word_field": "note B word field",
+    "sentence_field": "note B sentence field",
+    "translation_field": "note B translation field"
+  },
+  ...etc
 }
-...etc
 ```
 
 You must define
