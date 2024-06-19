@@ -114,11 +114,11 @@ def clean_meaning_in_note(
     return False
 
 
-def bulk_clean_notes_op(col, notes: Sequence[Note], editedNids: list):
+def bulk_clean_notes_op(col, notes: Sequence[Note], edited_nids: list):
     config = mw.addonManager.getConfig(__name__)
     message = "Cleaning meaning"
     op = clean_meaning_in_note
-    return bulk_notes_op(message, config, op, col, notes, editedNids)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids)
 
 
 def clean_selected_notes(nids: Sequence[NoteId], parent: Browser):

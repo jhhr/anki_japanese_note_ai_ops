@@ -1,14 +1,14 @@
 import json
-from collections.abc import Sequence
-
 from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
 from aqt.operations import CollectionOp
 from aqt.utils import tooltip
+from collections.abc import Sequence
 from openai import OpenAI
+from pathlib import Path
 
-DEBUG = True
+DEBUG = False
 
 api_key = mw.addonManager.getConfig(__name__)["api_key"]
 client = OpenAI(api_key=api_key)
@@ -79,8 +79,24 @@ def bulk_notes_op(message, config, op, col, notes: Sequence[Note], edited_nids: 
     col.update_notes(notes)
     return col.merge_undo_entries(pos)
 
+def on_bulk_success(
+        out,
+        done_text: str,
+        edited_nids: Sequence[NoteId],
+        nids: Sequence[NoteId],
+        parent: Browser,
+        extra_callback=None
+):
+    tooltip(
+        f"{done_text} in {len(edited_nids)}/{len(nids)} selected notes.",
+        parent=parent,
+        period=5000,
+    )
+    if extra_callback:
+        extra_callback()
 
-def selected_notes_op(done_text, bulk_op, nids: Sequence[NoteId], parent: Browser):
+
+def selected_notes_op(done_text, bulk_op, nids: Sequence[NoteId], parent: Browser, on_success=None):
     edited_nids = []
     return (
         CollectionOp(
@@ -88,15 +104,11 @@ def selected_notes_op(done_text, bulk_op, nids: Sequence[NoteId], parent: Browse
             op=lambda col: bulk_op(
                 col,
                 notes=[mw.col.get_note(nid) for nid in nids],
-                editedNids=edited_nids,
+                edited_nids=edited_nids,
             ),
         )
         .success(
-            lambda out: tooltip(
-                f"{done_text} in {len(edited_nids)}/{len(nids)} selected notes.",
-                parent=parent,
-                period=5000,
-            )
+            lambda out: on_bulk_success(out, done_text, edited_nids, nids, parent, on_success)
         )
         .run_in_background()
     )

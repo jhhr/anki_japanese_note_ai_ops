@@ -16,6 +16,12 @@ from .ops.clean_meaning import (
 from .ops.translate_field import (
     translate_selected_notes,
 )
+from .ops.make_kanji_story import (
+    make_stories_for_selected_notes,
+)
+from .ops.write_kanji_component_words import (
+    write_components_for_selected_notes,
+)
 
 
 # Function to be executed when the browser menus are initialized
@@ -23,6 +29,8 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     # Create a new action for the context menu
     meaning_action = QAction("Clean dictionary meaning", mw)
     translation_action = QAction("Translate sentence", mw)
+    kanji_story_action = QAction("Generate kanji story", mw)
+    component_words_action = QAction("Write component words", mw)
     # Connect the action to the operation
     qconnect(
         meaning_action.triggered,
@@ -32,10 +40,21 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
         translation_action.triggered,
         lambda: translate_selected_notes(browser.selectedNotes(), parent=browser),
     )
+    qconnect(
+        kanji_story_action.triggered,
+        lambda: make_stories_for_selected_notes(browser.selectedNotes(), parent=browser),
+    )
+    qconnect(
+        component_words_action.triggered,
+        lambda: write_components_for_selected_notes(browser.selectedNotes(), parent=browser),
+    )
+
     ai_menu = menu.addMenu("AI helper")
     # Add the action to the browser's card context menu
     ai_menu.addAction(meaning_action)
     ai_menu.addAction(translation_action)
+    ai_menu.addAction(kanji_story_action)
+    ai_menu.addAction(component_words_action)
 
 
 # Register to card adding hook

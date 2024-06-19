@@ -68,11 +68,11 @@ def translate_sentence_in_note(
     return False
 
 
-def bulk_translate_notes_op(col, notes: Sequence[Note], editedNids: list):
+def bulk_translate_notes_op(col, notes: Sequence[Note], edited_nids: list):
     config = mw.addonManager.getConfig(__name__)
     message = "Translating sentences"
     op = translate_sentence_in_note
-    return bulk_notes_op(message, config, op, col, notes, editedNids)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids)
 
 
 def translate_selected_notes(nids: Sequence[NoteId], parent: Browser):
