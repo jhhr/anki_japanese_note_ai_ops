@@ -1,17 +1,16 @@
-from collections.abc import Sequence
-from typing import Dict
-
 from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
+from collections.abc import Sequence
+from typing import Dict
 
 from .base_ops import (
     get_response_from_chat_gpt,
     bulk_notes_op,
     selected_notes_op,
 )
-from .utils import get_field_config
+from ..utils import get_field_config
 
 DEBUG = True
 

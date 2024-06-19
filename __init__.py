@@ -9,11 +9,11 @@ from aqt.qt import QAction, qconnect, QMenu
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-from .clean_meaning import (
+from .ops.clean_meaning import (
     clean_meaning_in_note,
     clean_selected_notes,
 )
-from .translate_field import (
+from .ops.translate_field import (
     translate_selected_notes,
 )
 
