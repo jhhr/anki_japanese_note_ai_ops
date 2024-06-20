@@ -43,15 +43,16 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         current_story_in_japanese: {current_story}\
         \
         The kanji is made up of the radicals or kanji listed above.\
-        For each of those, there is are words that can be used to refer to them in the mnemonic story for the kanji.\
+        For each of those, there are words that can be used to refer to them in the mnemonic story for the kanji.\
         Come up with a new mnemonic story in Japanese for the kanji using those words.\
-        1) The story should be very short - no more than 2 sentences - and include all the components and then a word for the kanji itself.\
-        2) The story should be written in hiragana only.\
-        3) Each word and particle should be separated by a space to make it easier to read.\
-        4) The component words should be wrapped in <i> tags and the kanji word in <b> tags.\
-        4a) Ideally the kanji word be a single word, usually a kunyomi reading. but if there is no useable kunyomi reading, use a compound word.\
-        4b) For a compound word wrap the part where the kanji is used in <b> tags.\
-        5) If there are no words for a component, invent a word that fits the component in a memorable way.\
+        1) You can inflect the component words to fit the sentence better.\
+        2) The story should be very short - no more than 2 sentences - and include all the components and then a word for the kanji itself.\
+        3) The story should be written in hiragana only.\
+        4) Each word and particle should be separated by a space to make it easier to read.\
+        5) The component words should be wrapped in <i> tags and the kanji word in <b> tags.\
+        5a) Ideally the kanji word be a single word, usually a kunyomi reading. but if there is no usable kunyomi reading, use a compound word.\
+        5b) For a compound word wrap the part where the kanji is used in <b> tags.\
+        6) If there are no words for a component, invent a word that fits the component in a memorable way.\
         \
         Examples of other kanji:\
         kanji: 明\
