@@ -24,16 +24,16 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), 'r', encoding='utf-8') as f:
             try:
                 component_words_dict = json.loads(f.read())
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                print(f'Error reading component words dict: {e}')
                 component_words_dict = {}
 
-        # Split the components into a list
-        components = components.split(',')
+        component_words = []
         # Get the words for each component
-        try:
-            component_words = {component: component_words_dict.get(component.strip(), '') for component in components}
-        except AttributeError:
-            component_words = {component: '' for component in components}
+        for component in components.split(','):
+            if component in component_words_dict:
+                component_words.append(component_words_dict[component])
+
 
         return_field = "new_story"
         prompt = f'\
