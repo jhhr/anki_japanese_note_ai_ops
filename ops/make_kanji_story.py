@@ -60,11 +60,11 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         \
     　　 kanji: 倍\
         component_radicals_or_kanji: 亻,咅\
-        story: <i>ひと&nbsp;</i>が <i>つばをはく、</i>つば から はえて、ひと が 2<b>ばい&nbsp;</b>に なる\
+        story: <i>ひと</i> が <i>つばをはく、</i>つば から はえて、ひと が 2<b>ばい</b> に なる\
         \
         kanji: 男\
         component_radicals_or_kanji: 田,力\
-        story: <i>た&nbsp;</i>を <i>ちから </i>で <b>おとこ </b>が たがやした\
+        story: <i>た</i> を <i>ちから </i>で <b>おとこ </b>が たがやした\
         \
         Return the new story in a JSON string as the value of the key "{return_field}".\
         '
