@@ -55,9 +55,9 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         6) If there are no words for a component, invent a word that fits the component in a memorable way.\
         \
         Examples of other kanji:\
-        kanji: 明\
-        component_radicals_or_kanji: 日,月\
-        story: <i>にち</i> と <i>つき</i> は いっしょに する と とても <b>あかるい</b>\
+        kanji: 袖\
+        component_radicals_or_kanji: 衤,由\
+        story: <i>ころも</i> は <i>よし</> を いらず、 <b>そで</b> も いらない\
         \
     　　 kanji: 倍\
         component_radicals_or_kanji: 亻,咅\
