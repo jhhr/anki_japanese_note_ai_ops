@@ -69,14 +69,28 @@ def extract_json_string(response_text):
 
 def bulk_notes_op(message, config, op, col, notes: Sequence[Note], edited_nids: list):
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
+    total_notes = len(notes)
+    note_cnt = 0
     for note in notes:
         note_was_edited = op(note, config)
+        note_cnt += 1
+
+        mw.taskman.run_on_main(
+            lambda: mw.progress.update(
+                label=f"{note_cnt}/{total_notes} notes processed",
+                value=note_cnt,
+                max=total_notes,
+            )
+        )
+        if mw.progress.want_cancel():
+            break
         if note_was_edited and edited_nids is not None:
+            col.update_note(note)
+            col.merge_undo_entries(pos)
             edited_nids.append(note.id)
         if DEBUG:
             print("note_was_edited", note_was_edited)
             print("editedNids", edited_nids)
-    col.update_notes(notes)
     return col.merge_undo_entries(pos)
 
 def on_bulk_success(
