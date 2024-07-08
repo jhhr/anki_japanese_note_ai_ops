@@ -16,8 +16,8 @@ from ..utils import get_field_config
 
 DEBUG = False
 
-KANJI_STORIES_LOG = 'kanji_stories.txt'
-KANJI_STORY_COMPONENT_WORDS_LOG = 'kanji_story_component_words.json'
+KANJI_STORIES_LOG = '_kanji_stories.txt'
+KANJI_STORY_COMPONENT_WORDS_LOG = '_kanji_story_component_words.json'
 
 
 def write_components_to_file(
