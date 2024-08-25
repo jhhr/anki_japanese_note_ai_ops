@@ -36,8 +36,7 @@ def translate_sentence_in_note(
             config, "translated_sentence_field", model
         )
     except Exception as e:
-        if show_warning:
-            showWarning(str(e))
+        print(e)
         return False
 
     if DEBUG:

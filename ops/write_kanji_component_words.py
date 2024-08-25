@@ -31,8 +31,6 @@ note: Note, config: Dict[str, str], show_warning: bool = True
         story_field = get_field_config(config, "story_field", model)
     except Exception as e:
         print(e)
-        if show_warning:
-            showWarning(str(e))
         return False
 
     if DEBUG:

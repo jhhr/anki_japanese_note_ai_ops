@@ -70,9 +70,8 @@ def clean_meaning_in_note(
         meaning_field = get_field_config(config, "meaning_field", model)
         word_field = get_field_config(config, "word_field", model)
         sentence_field = get_field_config(config, "sentence_field", model)
-    except Exception as e:
-        if show_warning:
-            showWarning(str(e))
+    except KeyError as e:
+        print(e)
         return False
 
     if DEBUG:

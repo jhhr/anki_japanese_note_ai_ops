@@ -72,7 +72,11 @@ def bulk_notes_op(message, config, op, col, notes: Sequence[Note], edited_nids: 
     total_notes = len(notes)
     note_cnt = 0
     for note in notes:
-        note_was_edited = op(note, config)
+        try:
+            note_was_edited = op(note, config)
+        except Exception as e:
+            print("Error processing note", note.id, e)
+            note_was_edited = False
         note_cnt += 1
 
         mw.taskman.run_on_main(

@@ -87,8 +87,6 @@ def make_story_for_note(
         story_field = get_field_config(config, "story_field", model)
     except Exception as e:
         print(e)
-        if show_warning:
-            showWarning(str(e))
         return False
 
     if DEBUG:
