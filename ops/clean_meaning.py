@@ -24,12 +24,14 @@ def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
     \
     The dictionary entry may contain multiple meanings for the word.\
     Extract the one meaning matching the usage of the word in the sentence.\
-    Omit any example sentences the matching meaning included.\
-    If the meaning is more than four sentences long, shorten it to explain the basics only.\
-    Otherwise, keep an already short meaning as-is.\
-    In case there is only meaning, return that.\
+    If there are only two meanings for this word or phrase, one literal and one figurative, pick both and shorten their respective descriptions.\
+    Omit any example sentences the matching meaning included (often include within 「」 brackets).\
+    Shorten and simplify the meaning as much possible, ideally into 1-3 sentences, with more complex meanings being allowed more sentences.\
+    Descriptions of animals and plants are often scientific. From these omit descriptions on their ecology and only describe their appearance and type of plant/animal with simple language.\
+    In case there is only a single meaning, return that.\
+    Clean off meaning numberings and other notation leaving only a plain text description.\
     \
-    Return the extracted meaning in a JSON string as the value of the key "{return_field}".\
+    Return the extracted meaning, in Japanese, in a JSON string as the value of the key "{return_field}".\
     '
     result = get_response_from_chat_gpt(prompt, return_field)
     if result is None:
@@ -45,7 +47,8 @@ def generate_meaning_from_chatGPT(vocab, sentence):
     sentence: {sentence}\
     \
     Generate a short monolingual dictionary style general definition of the word or phrase.\
-    If there exists more than one usage pattern for this word or phrase, describe the one used in the sentence.\
+    If there are two usage patterns for this word or phrase, one literal and one figurative, describe both shortly.\
+    If there are more than two usage patterns for this word or phrase, describe the one used in the sentence.\
     The word itself should not be used in the definition. If any synonyms exist, mention at most two.\
     Generally aim to for the definition to be a single sentence.\
     If it is necessary to explain more, the maximum length should be 3 sentences.\
