@@ -18,11 +18,7 @@ DEBUG = True
 def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
     return_field = "cleaned_meaning"
     prompt = f'\
-    word: {vocab}\
-    sentence: {sentence}\
-    dictionary_entry_for_word: {dict_entry}\
-    \
-    The dictionary entry may contain multiple meanings for the word.\
+    Below, the dictionary entry for the word or phrase may contain multiple meanings.\
     Extract the one meaning matching the usage of the word in the sentence.\
     If there are only two meanings for this word or phrase, one literal and one figurative, pick both and shorten their respective descriptions.\
     Omit any example sentences the matching meaning included (often include within 「」 brackets).\
@@ -32,6 +28,10 @@ def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
     Clean off meaning numberings and other notation leaving only a plain text description.\
     \
     Return the extracted meaning, in Japanese, in a JSON string as the value of the key "{return_field}".\
+    \
+    word_or_phrase: {vocab}\
+    sentence: {sentence}\
+    dictionary_entry_for_word: {dict_entry}\
     '
     result = get_response_from_chat_gpt(prompt, return_field)
     if result is None:
@@ -43,9 +43,7 @@ def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
 def generate_meaning_from_chatGPT(vocab, sentence):
     return_field = "new_meaning"
     prompt = f'\
-    word_or_phrase: {vocab}\
-    sentence: {sentence}\
-    \
+    Below is a sentence containing a word or phrase.\
     Generate a short monolingual dictionary style general definition of the word or phrase.\
     If there are two usage patterns for this word or phrase, one literal and one figurative, describe both shortly.\
     If there are more than two usage patterns for this word or phrase, describe the one used in the sentence.\
@@ -56,6 +54,10 @@ def generate_meaning_from_chatGPT(vocab, sentence):
     \
     Return the meaning in a JSON string as the value of the key "{return_field}".\
     Translate the meaning you generated into English as the value of the key "english_meaning".\
+    \
+    word_or_phrase: {vocab}\
+    sentence: {sentence}\
+    \
     '
     result = get_response_from_chat_gpt(prompt, return_field)
     if result is None:
