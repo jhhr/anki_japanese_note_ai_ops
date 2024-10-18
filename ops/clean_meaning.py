@@ -33,11 +33,14 @@ def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
     sentence: {sentence}\
     dictionary_entry_for_word: {dict_entry}\
     '
-    result = get_response_from_chat_gpt(prompt, return_field)
+    result = get_response_from_chat_gpt(prompt)
     if result is None:
         # Return original dict_entry unchanged if the cleaning failed
         return dict_entry
-    return result
+    try:
+        return result[return_field]
+    except KeyError:
+        return dict_entry
 
 
 def generate_meaning_from_chatGPT(vocab, sentence):
@@ -53,17 +56,19 @@ def generate_meaning_from_chatGPT(vocab, sentence):
     The definition should be in the same language as the sentence.\
     \
     Return the meaning in a JSON string as the value of the key "{return_field}".\
-    Translate the meaning you generated into English as the value of the key "english_meaning".\
     \
     word_or_phrase: {vocab}\
     sentence: {sentence}\
     \
     '
-    result = get_response_from_chat_gpt(prompt, return_field)
+    result = get_response_from_chat_gpt(prompt)
     if result is None:
         # Return nothing if the generating failed
         return ""
-    return result
+    try:
+        return result[return_field]
+    except KeyError:
+        return ""
 
 
 def clean_meaning_in_note(

@@ -19,24 +19,23 @@ DEBUG = False
 
 
 def get_kanji_story_from_chat_gpt(kanji, components, current_story):
-        media_path = Path(mw.pm.profileFolder(), 'collection.media')
-        # Get stored dict of words used for component in the kanji_story_component_words.log file
-        with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), 'r', encoding='utf-8') as f:
-            try:
-                component_words_dict = json.loads(f.read())
-            except json.JSONDecodeError as e:
-                print(f'Error reading component words dict: {e}')
-                component_words_dict = {}
+    media_path = Path(mw.pm.profileFolder(), 'collection.media')
+    # Get stored dict of words used for component in the kanji_story_component_words.log file
+    with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), 'r', encoding='utf-8') as f:
+        try:
+            component_words_dict = json.loads(f.read())
+        except json.JSONDecodeError as e:
+            print(f'Error reading component words dict: {e}')
+            component_words_dict = {}
 
-        component_words = []
-        # Get the words for each component
-        for component in components.split(','):
-            if component in component_words_dict:
-                component_words.append(component_words_dict[component])
+    component_words = []
+    # Get the words for each component
+    for component in components.split(','):
+        if component in component_words_dict:
+            component_words.append(component_words_dict[component])
 
-
-        return_field = "new_story"
-        prompt = f'\
+    return_field = "new_story"
+    prompt = f'\
         kanji: {kanji}\
         component_radicals_or_kanji: {components}\
         words_to_use_in_story_for_components: {component_words}\
@@ -69,17 +68,20 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         \
         Return the new story in a JSON string as the value of the key "{return_field}".\
         '
-        result = get_response_from_chat_gpt(prompt, return_field)
-        if result is None:
-            # Return original story unchanged if the cleaning failed
-            return current_story
-        return result
+    result = get_response_from_chat_gpt(prompt)
+    if result is None:
+        # Return original story unchanged if the cleaning failed
+        return current_story
+    try:
+        return result[return_field]
+    except KeyError:
+        return current_story
+
 
 def make_story_for_note(
-    note: Note, config: Dict[str, str], show_warning: bool = True
+        note: Note, config: Dict[str, str], show_warning: bool = True
 ):
     model = mw.col.models.get(note.mid)
-
 
     try:
         components_field = get_field_config(config, "components_field", model)
@@ -119,7 +121,6 @@ def make_story_for_note(
     elif DEBUG:
         print("note is missing fields")
     return False
-
 
 
 def bulk_make_stories_op(col, notes: Sequence[Note], edited_nids: list):

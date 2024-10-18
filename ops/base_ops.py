@@ -14,7 +14,7 @@ api_key = mw.addonManager.getConfig(__name__)["api_key"]
 client = OpenAI(api_key=api_key)
 
 
-def get_response_from_chat_gpt(prompt, return_field):
+def get_response_from_chat_gpt(prompt):
     if DEBUG:
         print("prompt", prompt)
 
@@ -41,12 +41,12 @@ def get_response_from_chat_gpt(prompt, return_field):
     if DEBUG:
         print("json_result", json_result)
     try:
-        result = json.loads(json_result)[return_field]
+        result = json.loads(json_result)
         if DEBUG:
             print("Parsed result from json", result)
         return result
-    except Exception:
-        print(f"Could not parse {return_field} from json_result", json_result)
+    except json.JSONDecodeError:
+        print("Failed to parse JSON response")
         return None
 
 
