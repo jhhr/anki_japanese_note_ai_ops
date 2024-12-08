@@ -9,7 +9,7 @@ Either `gpt-4-1106-preview` or `gpt-3.5-turbo-1106`. Use GPT4, if you're ok with
 Add the fields by note type like this. You can set multiple different note types. You can't set
 multiple fields per note type though.
 
-```json
+```
 {
   "note type name A": {
     "meaning_field": "note A meaning field",
@@ -35,3 +35,10 @@ You must define
 - for translating sentences
   1. `sentence_field`
   2. `translated_sentence_field`
+- for generating kanji stories:
+  1. `kanji_field`
+  2. `kanji_story_field`
+- for kanjifying sentences:
+  1. `furigana_sentence_field`
+  2. `kanjified_sentence_field`
+  3. `hiraganaified_sentence_field`

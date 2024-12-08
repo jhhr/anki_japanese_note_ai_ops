@@ -29,7 +29,7 @@ def get_response_from_chat_gpt(prompt):
         messages=[
             {
                 "role": "system",
-                "content": "You are a helpful assistant for creating flash cards in Anki for Japanese studying. You are designed to output JSON.",
+                "content": "You are a helpful assistant for processing Japanese text. You are a superlative expert in the Japanese language and its writing system. You are designed to output JSON.",
             },
             {"role": "user", "content": prompt},
         ],
