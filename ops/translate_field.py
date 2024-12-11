@@ -32,7 +32,7 @@ def get_translated_field_from_chat_gpt(sentence):
 def translate_sentence_in_note(
     note: Note, config: dict, show_warning: bool = True
 ) -> bool:
-    model = mw.col.models.get(note.mid)
+    model = note.note_type()
     try:
         sentence_field = get_field_config(config, "sentence_field", model)
         translated_sentence_field = get_field_config(

@@ -79,7 +79,7 @@ def get_kanjified_sentence_from_chat_gpt(sentence):
 def kanjify_sentence_in_note(
     note: Note, config: dict, show_warning: bool = True
 ) -> bool:
-    model = mw.col.models.get(note.mid)
+    model = note.note_type()
     try:
         furigana_sentence_field = get_field_config(config, "furigana_sentence_field", model)
         kanjified_sentence_field = get_field_config(

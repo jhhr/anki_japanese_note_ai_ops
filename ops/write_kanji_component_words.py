@@ -23,7 +23,7 @@ KANJI_STORY_COMPONENT_WORDS_LOG = '_kanji_story_component_words.json'
 def write_components_to_file(
 note: Note, config: Dict[str, str], show_warning: bool = True
 ):
-    model = mw.col.models.get(note.mid)
+    model = note.note_type()
 
     try:
         components_field = get_field_config(config, "components_field", model)

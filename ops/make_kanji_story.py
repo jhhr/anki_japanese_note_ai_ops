@@ -81,7 +81,7 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
 def make_story_for_note(
         note: Note, config: Dict[str, str], show_warning: bool = True
 ):
-    model = mw.col.models.get(note.mid)
+    model = note.note_type()
 
     try:
         components_field = get_field_config(config, "components_field", model)

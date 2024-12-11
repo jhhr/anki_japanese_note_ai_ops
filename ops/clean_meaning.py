@@ -74,7 +74,7 @@ def generate_meaning_from_chatGPT(vocab, sentence):
 def clean_meaning_in_note(
     note: Note, config: Dict[str, str], show_warning: bool = True
 ):
-    model = mw.col.models.get(note.mid)
+    model = note.note_type()
 
     try:
         meaning_field = get_field_config(config, "meaning_field", model)
