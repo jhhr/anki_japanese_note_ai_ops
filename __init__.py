@@ -81,13 +81,18 @@ def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
             return translate_sentence_in_note(note, config=config)
 
 
+def run_op_on_add_note(note: Note):
+    model = note.note_type()
+    model_name = model["name"]
+    config = mw.addonManager.getConfig(__name__)
+
+    if model_name == "Japanese vocab note":
+        clean_meaning_in_note(note, config=config, show_warning=False)
+
 
 # Register to card adding hook
-hooks.note_will_be_added.append(
-    lambda _col, note, _deck_id: clean_meaning_in_note(
-        note, config=mw.addonManager.getConfig(__name__), show_warning=False
-    )
-)
+hooks.note_will_be_added.append(lambda _col, note, _deck_id: run_op_on_add_note(note))
+
 # hooks.note_will_be_added.append(lambda _col, note, _deck_id: translate_sentence_in_note(
 # note, config=mw.addonManager.getConfig(__name__)))
 
