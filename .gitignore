@@ -1,4 +1,5 @@
 __pycache__
+.mypy_cache
 meta.json
 .idea
 # dependencies need to be installed on each device separately with
