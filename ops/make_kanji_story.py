@@ -19,55 +19,67 @@ DEBUG = False
 
 
 def get_kanji_story_from_chat_gpt(kanji, components, current_story):
-    media_path = Path(mw.pm.profileFolder(), 'collection.media')
+    media_path = Path(mw.pm.profileFolder(), "collection.media")
     # Get stored dict of words used for component in the kanji_story_component_words.log file
-    with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), 'r', encoding='utf-8') as f:
+    with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), "r", encoding="utf-8") as f:
         try:
             component_words_dict = json.loads(f.read())
         except json.JSONDecodeError as e:
-            print(f'Error reading component words dict: {e}')
+            print(f"Error reading component words dict: {e}")
             component_words_dict = {}
 
     component_words = []
     # Get the words for each component
-    for component in components.split(','):
+    for component in components.split(","):
         if component in component_words_dict:
             component_words.append(component_words_dict[component])
 
     return_field = "new_story"
-    prompt = f'\
-        kanji: {kanji}\
-        component_radicals_or_kanji: {components}\
-        words_to_use_in_story_for_components: {component_words}\
-        current_story_in_japanese: {current_story}\
-        \
-        The kanji is made up of the radicals or kanji listed above.\
-        For each of those, there are words that can be used to refer to them in the mnemonic story for the kanji.\
-        Come up with a new mnemonic story in Japanese for the kanji using those words.\
-        1) You can inflect the component words to fit the sentence better.\
-        2) The story should be very short - no more than 2 sentences - and include all the components and then a word for the kanji itself.\
-        3) The story should be written in hiragana only.\
-        4) Each word and particle should be separated by a space to make it easier to read.\
-        5) The component words should be wrapped in <i> tags and the kanji word in <b> tags.\
-        5a) Ideally the kanji word be a single word, usually a kunyomi reading. but if there is no usable kunyomi reading, use a compound word.\
-        5b) For a compound word wrap the part where the kanji is used in <b> tags.\
-        6) If there are no words for a component, invent a word that fits the component in a memorable way.\
-        \
-        Examples of other kanji:\
-        kanji: 袖\
-        component_radicals_or_kanji: 衤,由\
-        story: <i>ころも</i> は <i>よし</> を いらず、 <b>そで</b> も いらない\
-        \
-    　　 kanji: 倍\
-        component_radicals_or_kanji: 亻,咅\
-        story: <i>ひと</i> が <i>つばをはく、</i>つば から はえて、ひと が 2<b>ばい</b> に なる\
-        \
-        kanji: 財\
-        component_radicals_or_kanji: 貝,才\
-        story: ちょっと だけ の <i>おかね</i> を てんさい に あげたら、 まもなく ばくだいな <b>ざい</b>さん を つくる\
-        \
-        Return the new story in a JSON string as the value of the key "{return_field}".\
-        '
+    prompt = (
+        f"kanji: {kanji}"
+        f"\ncomponent_radicals_or_kanji: {components}"
+        f"\nwords_to_use_in_story_for_components: {component_words}"
+        f"\ncurrent_story_in_japanese: {current_story}"
+        "\n"
+        "\nThe kanji is made up of the radicals or kanji listed above."
+        "\nFor each of those, there are words that can be used to refer to them in the mnemonic"
+        " story for the kanji."
+        "\nCome up with a new mnemonic story in Japanese for the kanji using those words."
+        "\n 1) You can inflect the component words to fit the sentence better."
+        "\n 2) The story should be very short - a single sentence - and include all the"
+        " components and then a word for the kanji itself."
+        "\n 3) The story should be written in hiragana only."
+        "\n 4) Each word and particle should be separated by a space to make it easier to read."
+        "\n 5) The component words should be wrapped in <i> tags and the kanji word in <b> tags."
+        "\n 5a) Ideally the kanji word be a single word, usually a kunyomi reading. but if there"
+        " is no usable kunyomi reading, use a compound word."
+        "\n 5b) For a compound word wrap the part where the kanji is used in <b> tags."
+        "\n 6) If there are no words for a component, invent a word that fits the component in a"
+        " memorable way."
+        "\n"
+        "\nExamples of other kanji:"
+        "\n  kanji: 裾"
+        "\n  component_radicals_or_kanji: 衤,居"
+        "\n  story: <i>ころも</i>の なかに <i>いる</i>と、 ぬけた <b>すそ</b>が ひろがる。"
+        "\n"
+        "\n  kanji: 熱"
+        "\n  component_radicals_or_kanji: 埶,灬"
+        "\n  story: <i>どろだんご</i> が <i>れっか</i>したら、たかい <b>ねつ</b> が できる"
+        "\n"
+        "\n  kanji: 柳"
+        "\n  component_radicals_or_kanji: 木,卯"
+        "\n  story: <i>き</i>が <i>うさぎの みみ</i>の ように しなやか、<b>やなぎ</b>"
+        "\n"
+        "\n  kanji: 捩"
+        "\n  component_radicals_or_kanji: 扌,戻"
+        "\n  story: <i>て</i>が <i>もどせない</i>、そんなに <b>よじっている</b>。"
+        "\n"
+        "\n  kanji: 移"
+        "\n  component_radicals_or_kanji: 禾,多"
+        "\n  story: <i>のぎ</i>が <i>おおくて</i>、それを くらに <b>うつして</b>みましょう。"
+        "\n"
+        f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
+    )
     result = get_response_from_chat_gpt(prompt)
     if result is None:
         # Return original story unchanged if the cleaning failed
@@ -78,9 +90,7 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         return current_story
 
 
-def make_story_for_note(
-        note: Note, config: Dict[str, str], show_warning: bool = True
-):
+def make_story_for_note(note: Note, config: Dict[str, str], show_warning: bool = True):
     model = note.note_type()
 
     try:
@@ -106,9 +116,7 @@ def make_story_for_note(
         current_story = note[story_field]
         # Check if the value is non-empty
         if components:
-            new_story = get_kanji_story_from_chat_gpt(
-                kanji, components, current_story
-            )
+            new_story = get_kanji_story_from_chat_gpt(kanji, components, current_story)
 
             # Update the note with the new value
             note[story_field] = new_story
