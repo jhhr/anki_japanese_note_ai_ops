@@ -5,13 +5,13 @@ from aqt.browser import Browser
 from aqt.operations import CollectionOp
 from aqt.utils import tooltip
 from collections.abc import Sequence
-from openai import OpenAI
-from pathlib import Path
+import requests
 
 DEBUG = False
 
 api_key = mw.addonManager.getConfig(__name__)["api_key"]
-client = OpenAI(api_key=api_key)
+
+MAX_TOKENS = 2000
 
 
 def get_response_from_chat_gpt(prompt):
@@ -22,22 +22,60 @@ def get_response_from_chat_gpt(prompt):
 
     model = config["model"]
 
+    # Use max_completion_tokens instead of max_tokens for o3
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful assistant for processing Japanese text. You are a superlative"
+                " expert in the Japanese language and its writing system. You are designed to"
+                " output JSON."
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    data = {
+        "model": "gpt-4o",
+        "response_format": {"type": "json_object"},
+        "messages": messages,
+    }
+    if any(model.startswith(m) for m in ["o3", "o1"]):
+        data["max_completion_tokens"] = MAX_TOKENS
+    else:
+        data["max_tokens"] = MAX_TOKENS
+
     # Make the API call
-    response = client.chat.completions.create(
-        model=model,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a helpful assistant for processing Japanese text. You are a superlative expert in the Japanese language and its writing system. You are designed to output JSON.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        max_tokens=2000,  # Adjust max_tokens as needed
+    response = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers=headers,
+        json=data,
     )
 
+    if response.status_code != 200:
+        print(f"Error: {response.status_code}, {response.text}")
+        return None
+
+    try:
+        decoded_json = json.loads(response.text)
+        content_text = decoded_json["choices"][0]["message"]["content"]
+    except json.JSONDecodeError as je:
+        print(f"Error decoding JSON: {je}")
+        print("response", response.text)
+        return None
+    except KeyError as ke:
+        print(f"Error extracting content: {ke}")
+        print("response", response.text)
+        return None
+
     # Extract the cleaned meaning from the response
-    json_result = extract_json_string(response.choices[0].message.content)
+    json_result = extract_json_string(content_text)
     if DEBUG:
         print("json_result", json_result)
     try:
@@ -50,21 +88,22 @@ def get_response_from_chat_gpt(prompt):
         return None
 
 
-def extract_json_string(response_text):
+def extract_json_string(content_text):
     # Add logic to extract the cleaned meaning from the GPT response
     # You may need to parse the JSON or use other string manipulation techniques
     # based on the structure of the response.
 
-    # For simplicity, let's assume that the cleaned meaning is surrounded by curly braces in the response.
+    # For simplicity, let's assume that the stuff asked for is surrounded by curly braces in the
+    # response.
     # Find the first occurrence of "{" and the last occurrence of "}" in the response.
-    start_index = response_text.find("{")
-    end_index = response_text.rfind("}")
+    start_index = content_text.find("{")
+    end_index = content_text.rfind("}")
 
     if start_index != -1 and end_index != -1:
-        return response_text[start_index : end_index + 1]
+        return content_text[start_index : end_index + 1]
     else:
         print("Did not return JSON parseable result")
-        return response_text
+        return content_text
 
 
 def bulk_notes_op(message, config, op, col, notes: Sequence[Note], edited_nids: list):
@@ -97,13 +136,14 @@ def bulk_notes_op(message, config, op, col, notes: Sequence[Note], edited_nids: 
             print("editedNids", edited_nids)
     return col.merge_undo_entries(pos)
 
+
 def on_bulk_success(
-        out,
-        done_text: str,
-        edited_nids: Sequence[NoteId],
-        nids: Sequence[NoteId],
-        parent: Browser,
-        extra_callback=None
+    out,
+    done_text: str,
+    edited_nids: Sequence[NoteId],
+    nids: Sequence[NoteId],
+    parent: Browser,
+    extra_callback=None,
 ):
     tooltip(
         f"{done_text} in {len(edited_nids)}/{len(nids)} selected notes.",
@@ -125,8 +165,6 @@ def selected_notes_op(done_text, bulk_op, nids: Sequence[NoteId], parent: Browse
                 edited_nids=edited_nids,
             ),
         )
-        .success(
-            lambda out: on_bulk_success(out, done_text, edited_nids, nids, parent, on_success)
-        )
+        .success(lambda out: on_bulk_success(out, done_text, edited_nids, nids, parent, on_success))
         .run_in_background()
     )
