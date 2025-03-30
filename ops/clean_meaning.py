@@ -47,10 +47,10 @@ def generate_meaning_from_chatGPT(vocab, sentence):
     return_field = "new_meaning"
     prompt = f'\
     Below is a sentence containing a word or phrase.\
-    Generate a short monolingual dictionary style general definition of the word or phrase.\
-    If there are two usage patterns for this word or phrase, one literal and one figurative, describe both shortly.\
+    Generate a short monolingual dictionary style definition of the general meaning used in the sentence by the word or phrase.\
+    If there are two usage patterns for this word or phrase - for example, one literal and one figurative - describe both shortly.\
     If there are more than two usage patterns for this word or phrase, describe the one used in the sentence.\
-    The word itself should not be used in the definition. If any synonyms exist, mention at most two.\
+    The word itself should not be used in the definition..\
     Generally aim to for the definition to be a single sentence.\
     If it is necessary to explain more, the maximum length should be 3 sentences.\
     The definition should be in the same language as the sentence.\
