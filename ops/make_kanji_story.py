@@ -91,6 +91,10 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         "\n  story: <i>したぎ かんむり</i>の したに <i>せぼね</i>の ような はしらが きゅうでんの"
         " いりぐちに たった"
         "\n"
+        "\n  kanji: 蹴"
+        "\n  component_radicals_or_kanji: 足,就"
+        "\n  story: <i>あし</i>の <i>しゅうしょく</i>は ものを <b>ける</b> こと。"
+        "\n"
         f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
     )
     result = get_response_from_chat_gpt(prompt)
