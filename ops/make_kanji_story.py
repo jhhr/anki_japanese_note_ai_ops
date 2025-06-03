@@ -35,16 +35,26 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
             component_words.append(component_words_dict[component])
 
     return_field = "new_story"
+
     prompt = (
         f"kanji: {kanji}"
         f"\ncomponent_radicals_or_kanji: {components}"
         f"\nwords_to_use_in_story_for_components: {component_words}"
-        f"\ncurrent_story_in_japanese: {current_story}"
+    )
+    if current_story:
+        prompt += f"\ncurrent_story_in_japanese: {current_story}"
+    prompt += (
         "\n"
         "\nThe kanji is made up of the radicals or kanji listed above."
         "\nFor each of those, there are words that can be used to refer to them in the mnemonic"
         " story for the kanji."
-        "\nCome up with a new mnemonic story in Japanese for the kanji using those words."
+    )
+    prompt += (
+        "\nComplete the current mnemonic story in Japanese for the kanji using those words."
+        if current_story
+        else "\nCome up with a new mnemonic story in Japanese for the kanji using those words."
+    )
+    prompt += (
         "\n 1) You can inflect the component words to fit the sentence better."
         "\n 2) The story should be very short - a single sentence - and include all the"
         " components and then a word for the kanji itself."
@@ -57,9 +67,10 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         "\n 6) If there are no words for a component, invent a word that fits the component in a"
         " memorable way."
         "\n"
-        "\nIMPORTANT: The story should be grammatically correct but should not try to make sense"
+        "\nIMPORTANT: The story should be grammatically correct but does not need to be"
+        "grammatically complex, sophisticated or even make sense."
         "instead, it should focus on being memorable by connecting the component words with the"
-        "example word in surprising, strange or funny ways."
+        "example word in a simple way that is easy to remember and visualize."
         "\n"
         "\nExamples of stories for other kanji:"
         "\n  kanji: 裾"
