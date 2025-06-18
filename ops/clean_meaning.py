@@ -75,6 +75,10 @@ def clean_meaning_in_note(
     note: Note, config: Dict[str, str], show_warning: bool = True
 ):
     model = note.note_type()
+    if not model:
+        if DEBUG:
+            print("Missing note type for note", note.id)
+        return False
 
     try:
         meaning_field = get_field_config(config, "meaning_field", model)
