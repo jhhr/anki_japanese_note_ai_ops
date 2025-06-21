@@ -5,7 +5,7 @@ from aqt.utils import showWarning
 from collections.abc import Sequence
 
 from .base_ops import (
-    get_response_from_chat_gpt,
+    get_response,
     bulk_notes_op,
     selected_notes_op,
 )
@@ -14,9 +14,8 @@ from ..utils import get_field_config
 DEBUG = True
 
 
-def get_kanjified_sentence_from_chat_gpt(sentence):
+def get_kanjified_sentence_from_model(sentence):
     kanjified_sentence_return_field = "kanjified_sentence"
-    hiraganaified_sentence_return_field = "hiraganaified_furikanji_sentence"
 
     prompt = f"""Below is a sentence in Japanese that includes furigana in brackets after kanji words. Your task is to convert the sentence into a fully kanjified version, where all hiragana and katakana words are replaced with their kanji equivalents"
     
@@ -52,7 +51,8 @@ def get_kanjified_sentence_from_chat_gpt(sentence):
      
     The sentence to process: {sentence} 
     """
-    result = get_response_from_chat_gpt(prompt)
+    model = mw.addonManager.getConfig(__name__).get("kanjify_sentence_model", "")
+    result = get_response(model, prompt)
     if result is None:
         if DEBUG:
             print("Failed to get a response from the API.")
@@ -97,11 +97,11 @@ def kanjify_sentence_in_note(
         # Check if the value is non-empty
         if sentence:
             # Clean any <b> tags from the sentence
-            sentence = sentence.replace("<b>", "").replace("</b>", "")
+            # sentence = sentence.replace("<b>", "").replace("</b>", "")
             if DEBUG:
                 print("cleaned sentence", sentence)
             # Call API to get translation
-            result = get_kanjified_sentence_from_chat_gpt(sentence)
+            result = get_kanjified_sentence_from_model(sentence)
             if DEBUG:
                 print("result from API", result)
 

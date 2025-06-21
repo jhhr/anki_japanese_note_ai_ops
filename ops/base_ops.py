@@ -9,18 +9,123 @@ import requests
 
 DEBUG = False
 
-api_key = mw.addonManager.getConfig(__name__)["api_key"]
 
 MAX_TOKENS = 2000
 
+def get_response(model, prompt):
+    """Get a response from the appropriate model based on the configuration.
 
-def get_response_from_chat_gpt(prompt):
+    Args:
+        model: The model to use for the request.
+
+    Returns:
+        A dict containing the parsed JSON response, or None if there was an error.
+    """
+    if model.startswith("gemini"):
+        return get_response_from_gemini(model, prompt)
+    elif model.startswith("gpt") or model.startswith("o3") or model.startswith("o1"):
+        return get_response_from_openai(model, prompt)
+    else:
+        print(f"Unsupported model: {model}")
+        return None
+
+
+
+def get_response_from_gemini(model, prompt):
+    """Get a response from Google's Gemini API.
+
+    Args:
+        prompt: The prompt to send to the API.
+
+    Returns:
+        A dict containing the parsed JSON response, or None if there was an error.
+    """
     if DEBUG:
         print("prompt", prompt)
 
-    config = mw.addonManager.getConfig(__name__)
 
-    model = config["model"]
+    # Create the request body
+    data = {
+        "contents": [
+            {
+                # "role": "user",
+                "parts": [
+                    {"text": prompt},
+                ],
+            },
+        ],
+        "system_instruction": {
+            "parts": [
+                {
+                    "text": (
+                        "You are a helpful assistant for processing Japanese text. You are a superlative"
+                        " expert in the Japanese language and its writing system. You are designed to"
+                        " output JSON."
+                    )
+                }
+            ]
+        },
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            # "responseSchema": {
+            #     "type": "OBJECT",
+            #     "properties": {
+            #         "some_prop": {
+            #             "type": "STRING",
+            #         },
+            #     },
+            #     "required": ["some_prop"],
+            # },
+        },
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        # "x-goog-api-key": google_api_key,
+    }
+
+    google_api_key = mw.addonManager.getConfig(__name__).get("google_api_key", "")
+    # Make the API call
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={google_api_key}",
+        headers=headers,
+        json=data,
+    )
+
+    if response.status_code != 200:
+        print(f"Error: {response.status_code}, {response.text}")
+        return None
+
+    try:
+        decoded_json = json.loads(response.text)
+        # Extract content from Gemini response structure
+        content_text = decoded_json["candidates"][0]["content"]["parts"][0]["text"]
+    except json.JSONDecodeError as je:
+        print(f"Error decoding JSON: {je}")
+        print("response", response.text)
+        return None
+    except KeyError as ke:
+        print(f"Error extracting content: {ke}")
+        print("response", response.text)
+        return None
+
+    # Extract the JSON from the response
+    json_result = extract_json_string(content_text)
+    if DEBUG:
+        print("json_result", json_result)
+    try:
+        result = json.loads(json_result)
+        if DEBUG:
+            print("Parsed result from json", result)
+        return result
+    except json.JSONDecodeError:
+        print("Failed to parse JSON response")
+        return None
+
+
+def get_response_from_openai(model, prompt):
+    if DEBUG:
+        print("prompt", prompt)
 
     # Use max_completion_tokens instead of max_tokens for o3
 
@@ -35,10 +140,10 @@ def get_response_from_chat_gpt(prompt):
         },
         {"role": "user", "content": prompt},
     ]
-
+    openai_api_key = mw.addonManager.getConfig(__name__).get("openai_api_key", "")
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {openai_api_key}",
     }
 
     data = {

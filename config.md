@@ -1,10 +1,31 @@
 # Config
 
-## model
+## models
 
-Either `gpt-4-1106-preview` or `gpt-3.5-turbo-1106`. Use GPT4, if you're ok with using the better but more expensive one.
+Needs to be one of the models that supports structured output
+
+### OpenAI
+
+- `gpt-4o` and `gpt-4o-*` models
+- `gpt-4` and `gpt-4-*` models
+- `gpt-3.5-turbo`
+
+### Google
+
+- `gemini-2.5-pro`
+- `gemini-2.5-flash`
+- `gemini-2.0-flash` (default, free)
 
 ## sentence_field / meaning_field / word_field
+
+### model
+
+Define which model to use for each task
+
+- `word_meaning_model`
+- `kanji_story_model`
+- `translate_sentence_model`
+- `kanjify_sentence_model`
 
 Add the fields by note type like this. You can set multiple different note types. You can't set
 multiple fields per note type though.
@@ -28,7 +49,7 @@ multiple fields per note type though.
 
 You must define
 
-- for cleaning/generating meanings:
+- for cleaning/generating word meanings:
   1. `meaning_field`
   2. `word_field`
   3. `sentence_field`
@@ -41,4 +62,3 @@ You must define
 - for kanjifying sentences:
   1. `furigana_sentence_field`
   2. `kanjified_sentence_field`
-  3. `hiraganaified_sentence_field`

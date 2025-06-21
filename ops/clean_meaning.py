@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Dict
 
 from .base_ops import (
-    get_response_from_chat_gpt,
+    get_response,
     bulk_notes_op,
     selected_notes_op,
 )
@@ -15,7 +15,7 @@ from ..utils import get_field_config
 DEBUG = True
 
 
-def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
+def get_single_meaning_from_model(vocab, sentence, dict_entry):
     return_field = "cleaned_meaning"
     prompt = f'\
     Below, the dictionary entry for the word or phrase may contain multiple meanings.\
@@ -33,7 +33,8 @@ def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
     sentence: {sentence}\
     dictionary_entry_for_word: {dict_entry}\
     '
-    result = get_response_from_chat_gpt(prompt)
+    model = mw.addonManager.getConfig(__name__).get("word_meaning_model", "")
+    result = get_response(prompt, model)
     if result is None:
         # Return original dict_entry unchanged if the cleaning failed
         return dict_entry
@@ -43,7 +44,7 @@ def get_single_meaning_from_chat_gpt(vocab, sentence, dict_entry):
         return dict_entry
 
 
-def generate_meaning_from_chatGPT(vocab, sentence):
+def get_new_meaning_from_model(vocab, sentence):
     return_field = "new_meaning"
     prompt = f'\
     Below is a sentence containing a word or phrase.\
@@ -61,7 +62,8 @@ def generate_meaning_from_chatGPT(vocab, sentence):
     sentence: {sentence}\
     \
     '
-    result = get_response_from_chat_gpt(prompt)
+    model = mw.addonManager.getConfig(__name__).get("word_meaning_model", "")
+    result = get_response(model, prompt)
     if result is None:
         # Return nothing if the generating failed
         return ""
@@ -104,7 +106,7 @@ def clean_meaning_in_note(
         # Check if the value is non-empty
         if dict_entry:
             # Call API to get single meaning from the raw dictionary entry
-            modified_meaning_jp = get_single_meaning_from_chat_gpt(
+            modified_meaning_jp = get_single_meaning_from_model(
                 word, sentence, dict_entry
             )
 
@@ -116,7 +118,7 @@ def clean_meaning_in_note(
             return False
         else:
             # If there's no dict_entry, we'll use chatGPT to generate one from scratch
-            new_meaning = generate_meaning_from_chatGPT(word, sentence)
+            new_meaning = get_new_meaning_from_model(word, sentence)
             note[meaning_field] = new_meaning
             if new_meaning != "":
                 return True

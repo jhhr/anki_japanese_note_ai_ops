@@ -5,7 +5,7 @@ from aqt.utils import showWarning
 from collections.abc import Sequence
 
 from .base_ops import (
-    get_response_from_chat_gpt,
+    get_response,
     bulk_notes_op,
     selected_notes_op,
 )
@@ -14,12 +14,13 @@ from ..utils import get_field_config
 DEBUG = True
 
 
-def get_translated_field_from_chat_gpt(sentence):
+def get_translated_field_from_model(sentence):
     return_field = "english_sentence"
     # HTML-keeping prompt
     # keep_html_prompt = f"sentence_to_translate_into_english: {sentence}\n\nTranslate the sentence into English. Copy the HTML structure into the English translation. Return the translation in a JSON string as the value of the key \"{return_field}\". Convert \" characters into ' withing the value to keep the JSON valid."
     no_html_prompt = f'sentence_to_translate_into_english: {sentence}\n\nIgnore any HTML in the sentence.\nReturn an HTML-free English translation of the sentence in a JSON string as the value of the key "{return_field}".'
-    result = get_response_from_chat_gpt(no_html_prompt)
+    model = mw.addonManager.getConfig(__name__).get("translate_sentence_model", "")
+    result = get_response(no_html_prompt)
     if result is None:
         # If translation failed, return nothing
         return None
@@ -56,7 +57,7 @@ def translate_sentence_in_note(
         # Check if the value is non-empty
         if sentence:
             # Call API to get translation
-            translated_sentence = get_translated_field_from_chat_gpt(sentence)
+            translated_sentence = get_translated_field_from_model(sentence)
             if DEBUG:
                 print("translated_sentence", translated_sentence)
             if translated_sentence is not None:

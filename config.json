@@ -1,4 +1,8 @@
 {
-  "api_key": "your_openAI_api_key",
-  "model": "gpt-3.5-turbo-1106"
+  "google_api_key": "your_google_api_key",
+  "openai_api_key": "your_openAI_api_key",
+  "word_meaning_model": "gemini-2.0-flash",
+  "kanji_story_model": "gemini-2.0-flash",
+  "translate_sentence_model": "gemini-2.0-flash",
+  "kanjify_sentence_model": "gemini-2.0-flash"
 }

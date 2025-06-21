@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict
 
 from .base_ops import (
-    get_response_from_chat_gpt,
+    get_response_from_openai,
     bulk_notes_op,
     selected_notes_op,
 )
@@ -83,7 +83,7 @@ def get_component_words_dict_from_chat_gpt():
       }}
     {kanji_list}'''
 
-    result = get_response_from_chat_gpt(prompt, "component_list")
+    result = get_response_from_openai(prompt, "component_list")
     if result is not None:
         # First read existing dict from kanji_story_component_words.log file in the media folder
         with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), 'r', encoding='utf-8') as f:

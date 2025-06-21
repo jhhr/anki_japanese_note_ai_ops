@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict
 
 from .base_ops import (
-    get_response_from_chat_gpt,
+    get_response,
     bulk_notes_op,
     selected_notes_op,
 )
@@ -18,7 +18,7 @@ from ..utils import get_field_config
 DEBUG = False
 
 
-def get_kanji_story_from_chat_gpt(kanji, components, current_story):
+def get_kanji_story_from_model(kanji, components, current_story):
     media_path = Path(mw.pm.profileFolder(), "collection.media")
     # Get stored dict of words used for component in the kanji_story_component_words.log file
     with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), "r", encoding="utf-8") as f:
@@ -108,7 +108,8 @@ def get_kanji_story_from_chat_gpt(kanji, components, current_story):
         "\n"
         f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
     )
-    result = get_response_from_chat_gpt(prompt)
+    model = mw.addonManager.getConfig(__name__).get("kanji_story_model", "")
+    result = get_response(model, prompt)
     if result is None:
         # Return original story unchanged if the cleaning failed
         return current_story
@@ -148,7 +149,7 @@ def make_story_for_note(note: Note, config: Dict[str, str], show_warning: bool =
         current_story = note[story_field]
         # Check if the value is non-empty
         if components:
-            new_story = get_kanji_story_from_chat_gpt(kanji, components, current_story)
+            new_story = get_kanji_story_from_model(kanji, components, current_story)
 
             # Update the note with the new value
             note[story_field] = new_story

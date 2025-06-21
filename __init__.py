@@ -35,7 +35,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     meaning_action = QAction("Clean dictionary meaning", mw)
     translation_action = QAction("Translate sentence", mw)
     kanji_story_action = QAction("Generate kanji story", mw)
-    component_words_action = QAction("Kanjify+hiraganaify sentence", mw)
+    component_words_action = QAction("Kanjify sentence", mw)
     # Connect the action to the operation
     qconnect(
         meaning_action.triggered,
