@@ -18,39 +18,57 @@ def get_kanjified_sentence_from_model(sentence):
     kanjified_sentence_return_field = "kanjified_sentence"
 
     prompt = f"""Below is a sentence in Japanese that includes furigana in brackets after kanji words. Your task is to convert the sentence into a fully kanjified version, where all hiragana and katakana words are replaced with their kanji equivalents"
-    
-    Carefully examine each and every word written in hiragana or katakana and determine whether it can be written in kanji.
-    Every word that can be kanjified must be kanjified!
-    Add one space character before the new kanjified word. That is, "これ" into " 此[こ]れ" etc. 
-    Keep any HTML tags in the sentence as they are. 
-    
-    # Examples to illustrate the conversions:
-    Example sentence 1: 「これでもちゃんと 皆[みな]さんのことを 考[かんが]えてるつもりなんですよ！」<br>「なんかいよいよお 前[まえ]も 完全[かんぜん]に 内政[ないせい] 官[かん]だな。」
-    Kanjified example 1: 「  此[こ]れでもちゃんと 皆[みな]さんの 事[こと]を 考[かんが]えてる 積[つも]りなんですよ！」<br>「なんか 愈々[いよいよ] 御前[おまえ]も 完全[かんぜん]に 内政[ないせい] 官[かん]だな。」
-    
-    Example sentence 2: ナツキ 殿[どの]ですよね？ 兄[あに]から 聞[き]いています。その 数々[かずかず]のうわさもかねがね。
-    Kanjified example 2: ナツキ 殿[どの]です よね？ 兄[あに]から 聞[き]いています。 其[そ]の 数々[かずかず]の 噂[うわさ]も 兼々[かねがね]。
-    
-    Example sentence 3: ズボンのすそをまくって 作業[さぎょう]をした。
-    Kanjified example 3: 洋袴[ズボン]の 裾[すそ]を 捲[まく]って 作業[さぎょう]をした。
-    
-    Example sentence 4: おかげで　この 守銭奴[しゅせんど]の 性[しょう] 悪天使[あくてんし]に ぼったくられたぜ。
-    Kanjified example 4: 御蔭[おかげ]で 此[この] 守銭奴[しゅせんど]の 性[しょう] 悪天使[あくてんし]にぼっ 手繰[たく]られたぜ。
-    
-    Example sentence 5: 毎日[まいにち]一キロ 以上[いじょう] 水泳[すいえい]をしてきただけのことはあって、 彼[かれ]は九十 歳[さい]の 今[いま]もかくしゃくとしている。
-    Kanjified example 5: 毎日[まいにち] 一[いち]キロ 以上[いじょう] 水泳[すいえい]をして 来[き]ただけの 事[こと]は 有[あ]って、 彼[かれ]は 九十[きゅうじゅう] 歳[さい]の 今[いま]も 矍鑠[かくしゃく]としている。
-    
-    Example sentence 6: 俺はちっぽけでどうしようもないろくでなしですよ。
-    Kanjified example 6: 俺[おれ]は 小[ち]っぽけで 如何[どう] 仕様[しよう]も 無[な]い 碌[ろく]で 無[な]し ですよ。
-    
-    Example sentence 7: しのごの 言[い]わずさっさと 手[て]を 貸[か]せ。
-    Kanjified example 7: 四[し]の 五[ご]の 言[い]わずさっさち 手[て]を 貸[か]せ。
-    
-    Return a JSON string with the following key-value pairs: 
-     "{kanjified_sentence_return_field}": The fully kanjified sentence.
-     
-    The sentence to process: {sentence} 
-    """
+
+Carefully examine each and every word written in hiragana or katakana and determine whether it can be written in kanji.
+Common words that always written in hiragana should be kanjified. Examples of common words in kanjified form (not to be considered an exhaustive list of what to kanjify!): 此[こ]れ, 無[な]い,出来[でき]る, 御前[おまえ], 愈々[いよいよ]
+The result should be text where only foreign words or names in katakana, particles and words for which no kanjified form exists or should be used (see edge cases below), are left in hiragana or katakana.
+
+Content modification rules:
+- Wrap each kanjified word in <k> tags with a space before the kanji: "これ" becomes "<k> 此[こ]れ</k>". Include the okurigana of verbs and adjectives withing the <k> tags, for example "まわってた" becomes "<k> 回[まわ]ってた</k>".
+- <k> tags should wrap a contiguous sequence of kanji conversions, stopping on a word that was already in kanji. For example "とうもろこし" becomes "<k> 玉蜀黍[とうもろこし]</k>" and "タンパク 質[しつ]" becomes "<k> 蛋白[たんぱく]</k> 質[しつ]".
+- Keep any existing HTML tags in the sentence as they are. Added <k> tags should be placed inside existing tags, leaving them outermost so that multiple <k> tags can, if necessary, be withing the existing tag. For example "<b>これ見よがしに</b>" becomes "<b><k> 此[こ]れ</k> 見[み]よがしに</b>".
+
+Policy on edge cases (not be considered an exhaustive list, but can be used as a guideline for cases not listed here):
+
+Do not kanjify:
+- あげる when meant as "to give". あげる is written in hiragana specifically to indicate that it is different from 揚げる, 上げる or 挙げる
+- ない auxiliary in negated verbs. ない is not considered 無い written in hiragana, but rather a grammatical auxiliary.
+- なんか when it is acting more as a particle or filler and could removed without (significant) loss of meaning, for example 今日なんか暑いですね
+Do kanjify:
+- ない when used as a standalone word. 無い is even currently used in modern text, but is simply often written in hiragana.
+- する, even in suru-verbs. Historically, suru-verbs were written with 為る so this is a valid kanjification.
+― semantically equivalance but no actual historical usage of the reading: kanjify but wrap with additional <gikun> tags within the <k> tags.
+  - Examples ケチ in ケチがつく means "flaw/blemish" and matches 疵 in meaning but 疵 has never been read as けち; "ケチがつく" --> converts "<k><gikun> 疵[けち]</gikun></k>が<k> 付[つ]く</k>"
+  - すっかり means ことごとく but 悉 has no historical usage of the reading すっかり; "すっかり" --> converts "<k><gikun> 悉[すっかり]</gikun></k>"
+- なんか when it is clearly a contraction of なにか its removal would change the questioning meaning of a phrase, for example なんか食べたい
+
+# Examples to illustrate the conversions:
+Example sentence 1: 「これでもちゃんと 皆[みな]さんのことを 考[かんが]えてるつもりなんですよ！」<br>「なんかいよいよお 前[まえ]も 完全[かんぜん]に 内政[ないせい] 官[かん]だな。」
+Kanjified example 1: 「 <k> 此[こ]れ</k>でもちゃんと 皆[みな]さんの<k> 事[こと]</k>を 考[かんが]えてる<k> 積[つも]り</k>なんですよ！」<br>「なんか<k> 愈々[いよいよ]</k><k> 御[お]</k> 前[まえ]も 完全[かんぜん]に 内政[ないせい] 官[かん]だな。」
+
+Example sentence 2: ナツキ 殿[どの]ですよね？ 兄[あに]から 聞[き]いています。その 数々[かずかず]のうわさも<b>かねがね</b>。
+Kanjified example 2: ナツキ 殿[どの]ですよね？ 兄[あに]から 聞[き]いています。<k> 其[そ]</k>の 数々[かずかず]の<k> 噂[うわさ]</k>も<b><k> 兼々[かねがね]</k></b>。
+
+Example sentence 3: ズボンのすそを<b>まくって</b> 作業[さぎょう]をした。
+Kanjified example 3: <k> 洋袴[ズボン]</k>の<k> 裾[すそ]</k>を<b><k> 捲[まく]って</k></b> 作業[さぎょう]を<k> 為[し]た</k>。
+
+Example sentence 4: おかげで　この 守銭奴[しゅせんど]の 性[しょう] 悪天使[あくてんし]に ぼったくられたぜ。
+Kanjified example 4: <k> 御蔭[おかげ]</k>で<k> 此[この]</k> 守銭奴[しゅせんど]の 性[しょう] 悪天使[あくてんし]にぼっ<k> 手繰[たく]られた</k>ぜ。
+
+Example sentence 5: 毎日[まいにち]一キロ 以上[いじょう] 水泳[すいえい]をしてきただけのことはあって、 彼[かれ]は九十 歳[さい]の 今[いま]もかくしゃくとしている。
+Kanjified example 5: 毎日[まいにち] 一[いち]キロ 以上[いじょう] 水泳[すいえい]を<k> 為[し]て</k><k> 来[き]た</k>だけの<k> 事[こと]</k>は<k> 有[あ]って</k>、 彼[かれ]は 九十[きゅうじゅう] 歳[さい]の 今[いま]も<k> 矍鑠[かくしゃく]</k>と<k> 為[し]ている</k>。
+
+Example sentence 6: 俺はちっぽけでどうしようもないろくでなしですよ。
+Kanjified example 6: 俺[おれ]は<k> 小[ち]</k>っぽけで<k> 如何[どう]</k><k> 仕様[しよう]</k>も<k> 無[な]い</k><k> 碌[ろく]</k>で<k> 無[な]し</k> ですよ。
+
+Example sentence 7: <b>しのごの</b> 言[い]わずさっさと 手[て]を 貸[か]せ。
+Kanjified example 7: <b><k> 四[し]</k>の<k> 五[ご]</k>の</b> 言[い]わずさっさと 手[て]を 貸[か]せ。
+
+Return a JSON string with the following key-value pairs: 
+ "{kanjified_sentence_return_field}": The fully kanjified sentence.
+ 
+The sentence to process: {sentence} 
+"""
     model = mw.addonManager.getConfig(__name__).get("kanjify_sentence_model", "")
     result = get_response(model, prompt)
     if result is None:
