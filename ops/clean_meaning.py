@@ -34,7 +34,7 @@ def get_single_meaning_from_model(vocab, sentence, dict_entry):
     dictionary_entry_for_word: {dict_entry}\
     '
     model = mw.addonManager.getConfig(__name__).get("word_meaning_model", "")
-    result = get_response(prompt, model)
+    result = get_response(model, prompt)
     if result is None:
         # Return original dict_entry unchanged if the cleaning failed
         return dict_entry

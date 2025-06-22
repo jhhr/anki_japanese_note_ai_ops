@@ -20,7 +20,7 @@ def get_translated_field_from_model(sentence):
     # keep_html_prompt = f"sentence_to_translate_into_english: {sentence}\n\nTranslate the sentence into English. Copy the HTML structure into the English translation. Return the translation in a JSON string as the value of the key \"{return_field}\". Convert \" characters into ' withing the value to keep the JSON valid."
     no_html_prompt = f'sentence_to_translate_into_english: {sentence}\n\nIgnore any HTML in the sentence.\nReturn an HTML-free English translation of the sentence in a JSON string as the value of the key "{return_field}".'
     model = mw.addonManager.getConfig(__name__).get("translate_sentence_model", "")
-    result = get_response(no_html_prompt)
+    result = get_response(model, no_html_prompt)
     if result is None:
         # If translation failed, return nothing
         return None
