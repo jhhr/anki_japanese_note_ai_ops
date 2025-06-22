@@ -24,9 +24,9 @@ Common words that always written in hiragana should be kanjified. Examples of co
 The result should be text where only foreign words or names in katakana, particles and words for which no kanjified form exists or should be used (see edge cases below), are left in hiragana or katakana.
 
 Content modification rules:
-- To signify the changes made to the text, wrap each kanjified word in <k> tags with a space before the kanji: "これ" becomes "<k> 此[こ]れ</k>". Include the okurigana of verbs and adjectives withing the <k> tags, for example "まわってた" becomes "<k> 回[まわ]ってた</k>".
+- To signify the changes made to the text, wrap each kanjified word in <k> tags with a space before the kanji: "これ" becomes "<k> 此[こ]れ</k>". Include the okurigana of verbs and adjectives within the <k> tags, for example "まわってた" becomes "<k> 回[まわ]ってた</k>".
 - <k> tags should wrap a contiguous sequence of kanji conversions, stopping on a word that was already in kanji. For example "とうもろこし" becomes "<k> 玉蜀黍[とうもろこし]</k>" and "タンパク 質[しつ]" becomes "<k> 蛋白[たんぱく]</k> 質[しつ]".
-- Keep any existing HTML tags in the sentence as they are. Added <k> tags should be placed inside existing tags, leaving them outermost so that multiple <k> tags can, if necessary, be withing the existing tag. For example "<b>これ見よがしに</b>" becomes "<b><k> 此[こ]れ</k> 見[み]よがしに</b>".
+- Keep any existing HTML tags in the sentence as they are. Added <k> tags should be placed inside existing tags, leaving them outermost so that multiple <k> tags can, if necessary, be within the existing tag. For example "<b>これ見よがしに</b>" becomes "<b><k> 此[こ]れ</k> 見[み]よがしに</b>".
 
 Policy on edge cases (not be considered an exhaustive list, but can be used as a guideline for cases not listed here):
 
@@ -37,6 +37,7 @@ Do not kanjify:
 - なんか when it is acting more as a particle or filler and could removed without (significant) loss of meaning, for example 今日なんか暑いですね
 - もう used purely as exclamatory particle, for example もう！ or もう、やめてよ！
 - もっと as it is not truly component in もっとも which does have a kanjified form as 最も or 尤も
+- そんな, こんな, あんな, どんな
 Do kanjify:
 - ない when used as a standalone word, including conjugated forms like なかった, なくて. 無い is even currently used in modern text, but is simply often written in hiragana.
 - いる and いく when is used as a standalone verb, for example 彼は家にいる, あっちにいく
