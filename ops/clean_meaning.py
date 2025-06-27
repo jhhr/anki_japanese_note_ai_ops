@@ -15,7 +15,12 @@ from ..utils import get_field_config
 DEBUG = True
 
 
-def get_single_meaning_from_model(vocab, sentence, dict_entry):
+def get_single_meaning_from_model(
+        vocab: str,
+        sentence: str,
+        dict_entry: str,
+        config: Dict[str, str]
+    ):
     return_field = "cleaned_meaning"
     prompt = f'\
     Below, the dictionary entry for the word or phrase may contain multiple meanings.\
@@ -33,7 +38,7 @@ def get_single_meaning_from_model(vocab, sentence, dict_entry):
     sentence: {sentence}\
     dictionary_entry_for_word: {dict_entry}\
     '
-    model = mw.addonManager.getConfig(__name__).get("word_meaning_model", "")
+    model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
         # Return original dict_entry unchanged if the cleaning failed
@@ -44,7 +49,11 @@ def get_single_meaning_from_model(vocab, sentence, dict_entry):
         return dict_entry
 
 
-def get_new_meaning_from_model(vocab, sentence):
+def get_new_meaning_from_model(
+        vocab: str,
+        sentence: str,
+        config: Dict[str, str]
+    ) -> str:
     return_field = "new_meaning"
     prompt = f'\
     Below is a sentence containing a word or phrase.\
@@ -62,7 +71,7 @@ def get_new_meaning_from_model(vocab, sentence):
     sentence: {sentence}\
     \
     '
-    model = mw.addonManager.getConfig(__name__).get("word_meaning_model", "")
+    model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
         # Return nothing if the generating failed
@@ -76,16 +85,15 @@ def get_new_meaning_from_model(vocab, sentence):
 def clean_meaning_in_note(
     note: Note, config: Dict[str, str], show_warning: bool = True
 ):
-    model = note.note_type()
-    if not model:
-        if DEBUG:
-            print("Missing note type for note", note.id)
+    note_type = note.note_type()
+    if not note_type:
+        print("Error: note_type() call failed for note", note.id)
         return False
 
     try:
-        meaning_field = get_field_config(config, "meaning_field", model)
-        word_field = get_field_config(config, "word_field", model)
-        sentence_field = get_field_config(config, "sentence_field", model)
+        meaning_field = get_field_config(config, "meaning_field", note_type)
+        word_field = get_field_config(config, "word_field", note_type)
+        sentence_field = get_field_config(config, "sentence_field", note_type)
     except KeyError as e:
         print(e)
         return False
@@ -107,7 +115,7 @@ def clean_meaning_in_note(
         if dict_entry:
             # Call API to get single meaning from the raw dictionary entry
             modified_meaning_jp = get_single_meaning_from_model(
-                word, sentence, dict_entry
+                word, sentence, dict_entry, config
             )
 
             # Update the note with the new value
@@ -118,7 +126,7 @@ def clean_meaning_in_note(
             return False
         else:
             # If there's no dict_entry, we'll use chatGPT to generate one from scratch
-            new_meaning = get_new_meaning_from_model(word, sentence)
+            new_meaning = get_new_meaning_from_model(word, sentence, config)
             note[meaning_field] = new_meaning
             if new_meaning != "":
                 return True
@@ -131,9 +139,13 @@ def clean_meaning_in_note(
 
 def bulk_clean_notes_op(col, notes: Sequence[Note], edited_nids: list):
     config = mw.addonManager.getConfig(__name__)
+    if not config:
+        showWarning("Missing addon configuration")
+        return
+    model = config.get("word_meaning_model", "")
     message = "Cleaning meaning"
     op = clean_meaning_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
 
 
 def clean_selected_notes(nids: Sequence[NoteId], parent: Browser):

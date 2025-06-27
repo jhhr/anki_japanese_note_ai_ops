@@ -4,5 +4,17 @@
   "word_meaning_model": "gemini-2.0-flash",
   "kanji_story_model": "gemini-2.0-flash",
   "translate_sentence_model": "gemini-2.0-flash",
-  "kanjify_sentence_model": "gemini-2.0-flash"
+  "kanjify_sentence_model": "gemini-2.0-flash",
+  "rate_limits": {
+    "gemini-2.0-flash": 10,
+    "gemini-2.5-flash": 10,
+    "gpt-3.5-turbo": 10,
+    "gpt-4o": 10,
+    "gpt-4o-mini": 10,
+    "gpt-4": 10,
+    "o3": 10,
+    "o1": 10,
+    "o3-mini": 10,
+    "o1-mini": 10
+  }
 }

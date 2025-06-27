@@ -18,7 +18,12 @@ from ..utils import get_field_config
 DEBUG = False
 
 
-def get_kanji_story_from_model(kanji, components, current_story):
+def get_kanji_story_from_model(
+        kanji: str,
+        components: str,
+        current_story: str,
+        config: Dict[str, str]
+    ) -> str:
     media_path = Path(mw.pm.profileFolder(), "collection.media")
     # Get stored dict of words used for component in the kanji_story_component_words.log file
     with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), "r", encoding="utf-8") as f:
@@ -108,7 +113,7 @@ def get_kanji_story_from_model(kanji, components, current_story):
         "\n"
         f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
     )
-    model = mw.addonManager.getConfig(__name__).get("kanji_story_model", "")
+    model = config.get("kanji_story_model", "")
     result = get_response(model, prompt)
     if result is None:
         # Return original story unchanged if the cleaning failed
@@ -149,7 +154,7 @@ def make_story_for_note(note: Note, config: Dict[str, str], show_warning: bool =
         current_story = note[story_field]
         # Check if the value is non-empty
         if components:
-            new_story = get_kanji_story_from_model(kanji, components, current_story)
+            new_story = get_kanji_story_from_model(kanji, components, current_story, config)
 
             # Update the note with the new value
             note[story_field] = new_story
@@ -166,9 +171,13 @@ def make_story_for_note(note: Note, config: Dict[str, str], show_warning: bool =
 
 def bulk_make_stories_op(col, notes: Sequence[Note], edited_nids: list):
     config = mw.addonManager.getConfig(__name__)
+    if not config:
+        showWarning("Missing addon configuration")
+        return
+    model = config.get("kanji_story_model", "")
     message = "Updated stories"
     op = make_story_for_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
 
 
 def make_stories_for_selected_notes(nids: Sequence[NoteId], parent: Browser):

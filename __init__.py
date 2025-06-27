@@ -55,6 +55,9 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     )
 
     ai_menu = menu.addMenu("AI helper")
+    if ai_menu is None:
+        print("Error: AI helper menu could not be created.")
+        return
     # Add the action to the browser's card context menu
     ai_menu.addAction(meaning_action)
     ai_menu.addAction(translation_action)
@@ -63,30 +66,40 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
 
 
 def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
-    model = note.note_type()
-    model_name = model["name"]
+    note_type = note.note_type()
+    if not note_type:
+        return
+    model_name = note_type["name"]
     config = mw.addonManager.getConfig(__name__)
+    if not config:
+        print("Error: Missing addon configuration")
+        return
 
-    field_name = model["flds"][field_idx]["name"]
+    field_name = note_type["flds"][field_idx]["name"]
     cur_field_value = note[field_name]
 
     if model_name == "Kanji draw":
-        story_field = get_field_config(config, "story_field", model)
+        story_field = get_field_config(config, "story_field", note_type)
         if field_name == story_field and cur_field_value == "":
             return make_story_for_note(note, config=config)
 
     if model_name == "Japanese vocab note":
-        translated_sentence_field = get_field_config(config, "translated_sentence_field", model)
+        translated_sentence_field = get_field_config(config, "translated_sentence_field", note_type)
         if field_name == translated_sentence_field and cur_field_value == "":
             return translate_sentence_in_note(note, config=config)
 
 
 def run_op_on_add_note(note: Note):
-    model = note.note_type()
-    model_name = model["name"]
+    note_type = note.note_type()
+    if not note_type:
+        return
+    note_type_name = note_type["name"]
     config = mw.addonManager.getConfig(__name__)
+    if not config:
+        print("Error: Missing addon configuration")
+        return
 
-    if model_name == "Japanese vocab note":
+    if note_type_name == "Japanese vocab note":
         clean_meaning_in_note(note, config=config, show_warning=False)
 
 

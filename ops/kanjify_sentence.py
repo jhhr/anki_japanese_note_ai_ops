@@ -1,3 +1,4 @@
+from typing import Union
 from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
@@ -14,7 +15,10 @@ from ..utils import get_field_config
 DEBUG = True
 
 
-def get_kanjified_sentence_from_model(sentence):
+def get_kanjified_sentence_from_model(
+        sentence: str,
+        config: dict[str, str]
+    ) -> Union[list[str], None]:
     kanjified_sentence_return_field = "kanjified_sentence"
 
     prompt = f"""Below is a sentence in Japanese that includes furigana in brackets after kanji words. Your task is to convert the sentence into a fully kanjified version, where all hiragana and katakana words are replaced with their kanji equivalents"
@@ -84,7 +88,7 @@ Return a JSON string with the following key-value pairs:
  
 The sentence to process: {sentence} 
 """
-    model = mw.addonManager.getConfig(__name__).get("kanjify_sentence_model", "")
+    model = config.get("kanjify_sentence_model", "")
     result = get_response(model, prompt)
     if result is None:
         if DEBUG:
@@ -134,7 +138,7 @@ def kanjify_sentence_in_note(
             if DEBUG:
                 print("cleaned sentence", sentence)
             # Call API to get translation
-            result = get_kanjified_sentence_from_model(sentence)
+            result = get_kanjified_sentence_from_model(sentence, config)
             if DEBUG:
                 print("result from API", result)
 
@@ -155,9 +159,13 @@ def kanjify_sentence_in_note(
 
 def bulk_kanjify_notes_op(col, notes: Sequence[Note], edited_nids: list):
     config = mw.addonManager.getConfig(__name__)
+    if not config:
+        showWarning("Missing addon configuration")
+        return
+    model = config.get("kanjify_sentence_model", "")
     message = "Kanjifying sentences"
     op = kanjify_sentence_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
 
 
 def kanjify_selected_notes(nids: Sequence[NoteId], parent: Browser):

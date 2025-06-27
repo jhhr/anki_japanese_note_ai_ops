@@ -1,3 +1,4 @@
+from typing import Union, Dict
 from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
@@ -14,12 +15,12 @@ from ..utils import get_field_config
 DEBUG = True
 
 
-def get_translated_field_from_model(sentence):
+def get_translated_field_from_model(sentence: str, config: dict[str, str]) -> Union[str, None]:
     return_field = "english_sentence"
     # HTML-keeping prompt
     # keep_html_prompt = f"sentence_to_translate_into_english: {sentence}\n\nTranslate the sentence into English. Copy the HTML structure into the English translation. Return the translation in a JSON string as the value of the key \"{return_field}\". Convert \" characters into ' withing the value to keep the JSON valid."
     no_html_prompt = f'sentence_to_translate_into_english: {sentence}\n\nIgnore any HTML in the sentence.\nReturn an HTML-free English translation of the sentence in a JSON string as the value of the key "{return_field}".'
-    model = mw.addonManager.getConfig(__name__).get("translate_sentence_model", "")
+    model = config.get("translate_sentence_model", "")
     result = get_response(model, no_html_prompt)
     if result is None:
         # If translation failed, return nothing
@@ -33,11 +34,14 @@ def get_translated_field_from_model(sentence):
 def translate_sentence_in_note(
     note: Note, config: dict, show_warning: bool = True
 ) -> bool:
-    model = note.note_type()
+    note_type = note.note_type()
+    if not note_type:
+        print("Error: note_type() call failed for note", note.id)
+        return False
     try:
-        sentence_field = get_field_config(config, "sentence_field", model)
+        sentence_field = get_field_config(config, "sentence_field", note_type)
         translated_sentence_field = get_field_config(
-            config, "translated_sentence_field", model
+            config, "translated_sentence_field", note_type
         )
     except Exception as e:
         print(e)
@@ -57,7 +61,7 @@ def translate_sentence_in_note(
         # Check if the value is non-empty
         if sentence:
             # Call API to get translation
-            translated_sentence = get_translated_field_from_model(sentence)
+            translated_sentence = get_translated_field_from_model(sentence, config)
             if DEBUG:
                 print("translated_sentence", translated_sentence)
             if translated_sentence is not None:
@@ -73,9 +77,13 @@ def translate_sentence_in_note(
 
 def bulk_translate_notes_op(col, notes: Sequence[Note], edited_nids: list):
     config = mw.addonManager.getConfig(__name__)
+    if not config:
+        showWarning("Missing addon configuration")
+        return
+    model = config.get("translate_sentence_model", "")
     message = "Translating sentences"
     op = translate_sentence_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
 
 
 def translate_selected_notes(nids: Sequence[NoteId], parent: Browser):
