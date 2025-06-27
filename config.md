@@ -26,6 +26,12 @@ Define which model to use for each task
 - `kanji_story_model`
 - `translate_sentence_model`
 - `kanjify_sentence_model`
+- `extract_words_model`
+
+### model rate limits
+
+Must be defined for each model. Default are set very low. Check the respective API docs
+for what rate limits you may be able to / want to use for each model.
 
 Add the fields by note type like this. You can set multiple different note types. You can't set
 multiple fields per note type though.
@@ -62,3 +68,6 @@ You must define
 - for kanjifying sentences:
   1. `furigana_sentence_field`
   2. `kanjified_sentence_field`
+- for extracting words:
+  1. `furigana_sentence_field`
+  2. `word_list_field`

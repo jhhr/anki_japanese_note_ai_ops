@@ -27,6 +27,10 @@ from .ops.make_kanji_story import (
 from .ops.kanjify_sentence import (
     kanjify_selected_notes,
 )
+from .ops.extract_words import (
+    extract_words_from_selected_notes,
+    extract_words_in_note,
+)
 
 
 # Function to be executed when the browser menus are initialized
@@ -36,6 +40,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     translation_action = QAction("Translate sentence", mw)
     kanji_story_action = QAction("Generate kanji story", mw)
     component_words_action = QAction("Kanjify sentence", mw)
+    extract_words_action = QAction("Extract words", mw)
     # Connect the action to the operation
     qconnect(
         meaning_action.triggered,
@@ -53,6 +58,10 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
         component_words_action.triggered,
         lambda: kanjify_selected_notes(browser.selectedNotes(), parent=browser),
     )
+    qconnect(
+        extract_words_action.triggered,
+        lambda: extract_words_from_selected_notes(browser.selectedNotes(), parent=browser),
+    )
 
     ai_menu = menu.addMenu("AI helper")
     if ai_menu is None:
@@ -63,13 +72,14 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     ai_menu.addAction(translation_action)
     ai_menu.addAction(kanji_story_action)
     ai_menu.addAction(component_words_action)
+    ai_menu.addAction(extract_words_action)
 
 
 def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
     note_type = note.note_type()
     if not note_type:
         return
-    model_name = note_type["name"]
+    note_type_name = note_type["name"]
     config = mw.addonManager.getConfig(__name__)
     if not config:
         print("Error: Missing addon configuration")
@@ -78,12 +88,12 @@ def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
     field_name = note_type["flds"][field_idx]["name"]
     cur_field_value = note[field_name]
 
-    if model_name == "Kanji draw":
+    if note_type_name == "Kanji draw":
         story_field = get_field_config(config, "story_field", note_type)
         if field_name == story_field and cur_field_value == "":
             return make_story_for_note(note, config=config)
 
-    if model_name == "Japanese vocab note":
+    if note_type_name == "Japanese vocab note":
         translated_sentence_field = get_field_config(config, "translated_sentence_field", note_type)
         if field_name == translated_sentence_field and cur_field_value == "":
             return translate_sentence_in_note(note, config=config)
@@ -101,6 +111,7 @@ def run_op_on_add_note(note: Note):
 
     if note_type_name == "Japanese vocab note":
         clean_meaning_in_note(note, config=config, show_warning=False)
+        extract_words_in_note(note, config=config, show_warning=False)
 
 
 # Register to card adding hook

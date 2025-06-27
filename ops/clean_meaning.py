@@ -12,7 +12,7 @@ from .base_ops import (
 )
 from ..utils import get_field_config
 
-DEBUG = True
+DEBUG = False
 
 
 def get_single_meaning_from_model(

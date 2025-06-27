@@ -12,7 +12,7 @@ from .base_ops import (
 )
 from ..utils import get_field_config
 
-DEBUG = True
+DEBUG = False
 
 
 def get_translated_field_from_model(sentence: str, config: dict[str, str]) -> Union[str, None]:
