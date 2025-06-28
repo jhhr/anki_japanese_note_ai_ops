@@ -1,5 +1,6 @@
 from typing import Union, Dict
 from anki.notes import Note, NoteId
+from anki.collection import Collection
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
@@ -15,7 +16,7 @@ from ..utils import get_field_config
 DEBUG = False
 
 
-def get_translated_field_from_model(sentence: str, config: dict[str, str]) -> Union[str, None]:
+def get_translated_field_from_model(config: dict[str, str], sentence: str) -> Union[str, None]:
     return_field = "english_sentence"
     # HTML-keeping prompt
     # keep_html_prompt = f"sentence_to_translate_into_english: {sentence}\n\nTranslate the sentence into English. Copy the HTML structure into the English translation. Return the translation in a JSON string as the value of the key \"{return_field}\". Convert \" characters into ' withing the value to keep the JSON valid."
@@ -32,7 +33,9 @@ def get_translated_field_from_model(sentence: str, config: dict[str, str]) -> Un
 
 
 def translate_sentence_in_note(
-    note: Note, config: dict, show_warning: bool = True
+     config: dict,
+     note: Note,
+     notes_to_add_dict: Dict[str, list[Note]],
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
@@ -61,7 +64,7 @@ def translate_sentence_in_note(
         # Check if the value is non-empty
         if sentence:
             # Call API to get translation
-            translated_sentence = get_translated_field_from_model(sentence, config)
+            translated_sentence = get_translated_field_from_model(config ,sentence)
             if DEBUG:
                 print("translated_sentence", translated_sentence)
             if translated_sentence is not None:
@@ -75,7 +78,12 @@ def translate_sentence_in_note(
     return False
 
 
-def bulk_translate_notes_op(col, notes: Sequence[Note], edited_nids: list):
+def bulk_translate_notes_op(
+    col: Collection,
+    notes: Sequence[Note],
+    edited_nids: list[NoteId],
+    notes_to_add_dict: Dict[str, list[Note]],
+    ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -83,7 +91,7 @@ def bulk_translate_notes_op(col, notes: Sequence[Note], edited_nids: list):
     model = config.get("translate_sentence_model", "")
     message = "Translating sentences"
     op = translate_sentence_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
 
 
 def translate_selected_notes(nids: Sequence[NoteId], parent: Browser):

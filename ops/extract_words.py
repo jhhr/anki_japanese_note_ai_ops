@@ -1,6 +1,7 @@
 import json
 from typing import Union
 from anki.notes import Note, NoteId
+from anki.collection import Collection
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
@@ -20,10 +21,10 @@ def get_extracted_words_from_model(
         sentence: str,
         config: dict[str, str]
     ) -> Union[str, None]:
-    prompt = f"""Below is a Japanese sentence that contains furigana in brackets after kanji words. Your task is to examine each word and phrase in the sentence, categorize each into either nouns, proper nouns, verbs, compound verbs, adjectives, adverbs, adjectivals, particles (including copula), pronouns, suffixes, idiomatic phrases and 4-kanji idioms. You will convert convert inflected words into their dictionary forms.
+    prompt = f"""Below is a Japanese sentence that contains furigana in brackets after kanji words. Your task is to examine each word and phrase in the sentence, categorize each into either nouns, proper nouns, numbers, counters, verbs, compound verbs, adjectives, adverbs, adjectivals, particles (and copula), conjunctions, pronouns, suffixes, prefixes, idiomatic expressions or common phrases and 4-kanji idioms (yojijukugo). You will convert convert inflected words into their dictionary forms.
 
 More details on the categorization
-- Compound words, phrases or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ", "XY" and "Z" in the result.
+- Compound words, expressions or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ", "XY" and "Z" in the result.
 - This applies to compound verbs as well - include both the compound verb and its component verbs when they exist as separate valid words. For example: 飲[の]み 込[こ]まれた --> 飲み込む, 飲む and 込む
 - Don't list verbs いる or される when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
@@ -38,86 +39,167 @@ Example results 1:
 {{
   "nouns": [],
   "proper_nouns": [],
-  "verbs": [ ["連れる","つれる"], ["行く","いく"]],
-  "compound_verbs": [ ["連れて行く","つれていく"]],
+  "numbers": [],
+  "counters: [],
+  "verbs": [["連れる","つれる"],["行く","いく"]],
+  "compound_verbs": [["連れて行く","つれていく"]],
   "adjectives": [],
   "adverbs": [],
   "adjectivals": [],
-  "particles": [ ["も","も"]],
-  "pronouns", [ ["私","わたし"]],
+  "particles": [["も","も"]],
+  "conjuctions": [],
+  "pronouns",[["私","わたし"]],
   "suffixes": [],
-  "phrases": [ ["下さい","ください"]],
-  "four_kanji_idioms": []
+  "prefixes": [],
+  "expressions": [["下さい","ください"]],
+  "yojijukugo": []
 }}
 
 
 Example sentence 2: <k> 彼[あ]の</k> 飛行機[ひこうき]は<b> 間[ま]も<k> 無[な]く</k></b> 着陸[ちゃくりく]<k> 為[し]ます</k>ね。
 Example results 2:
 {{
-  "nouns": [ ["飛行機","ひこうき"], ["各陸","ちゃくりく"], ["間","ま"] ],
+  "nouns": [["飛行機","ひこうき"],["各陸","ちゃくりく"],["間","ま"]],
   "proper_nouns": [],
+  "numbers": [],
+  "counters: [],
   "verbs": [],
   "compound_verbs": [],
-  "adjectives": [ ["無い","ない"]],
+  "adjectives": [["無い","ない"]],
   "adverbs": [],
-  "adjectivals": [ ["彼の","あの"]],
-  "particles": [ ["は","は"], ["ね","ね"]],
-  "pronouns", [],
+  "adjectivals": [["彼の","あの"]],
+  "particles": [["は","は"],["ね","ね"]],
+  "conjuctions": [],
+  "pronouns",[],
   "suffixes": [],
-  "phrases": [ ["間も無く","まもなく"] ],
-  "four_kanji_idioms": []
+  "prefixes": [],
+  "expressions": [["間も無く","まもなく"]],
+  "yojijukugo": []
 }}
 Example sentence 3:  <k> 此[こ]れ</k>は 正[まさ]に 天高[てんたか]く 馬肥[うまこ]ゆる 秋[あき]と 言[い]った<k> 物[も]ん</k>だな。
 Example result 3:
 {{ 
-  "nouns": [ ["天","てん"], ["馬","うま"], ["秋","あき"], ["物","もの"] ],
+  "nouns": [["天","てん"],["馬","うま"],["秋","あき"],["物","もの"]],
   "proper_nouns": [],
-  "verbs": [ "肥える","こえる", ["言う","いう"] ],
+  "numbers": [],
+  "counters: [],
+  "verbs": [ "肥える","こえる",["言う","いう"]],
   "compound_verbs": [],
-  "adjectives": [ ["高い","たかい"] ],
+  "adjectives": [["高い","たかい"]],
   "adjectivals": [],
-  "adverbs": [ ["正に","まさに"] ],
-  "particles": [ ["に","に"], ["と","と"], ["だ","だ"] ],
-  "pronouns": [ ["此れ","これ"] ],
+  "adverbs": [["正に","まさに"]],
+  "particles": [["に","に"],["と","と"],["だ","だ"]],
+  "conjuctions": [],
+  "pronouns": [["此れ","これ"]],
   "suffixes": [],
-  "phrases": [ ["天高く馬肥ゆる秋", "てんたかくうまこゆるあき"] ],
-  "four_kanji_idioms": [],
+  "prefixes": [],
+  "expressions": [["天高く馬肥ゆる秋", "てんたかくうまこゆるあき"]],
+  "yojijukugo": [],
 }}
 
 Example sentence 4: 昭和[しょうわ]10 年[ねん](1935 年[ねん]) 頃[ごろ]から、<b>八紘一宇[はっこういちう]</b><k> 等[など]</k>のスローガンが 掲[かか]げられる<k> 様[よう]に</k><k> 成[な]った</k>。
 Example result 4:
 {{
-  "nouns": [ ["昭和","しょうわ"], ["年","ねん"], ["スローガン","すろーがん"], ["様","よう"]],
+  "nouns": [["昭和","しょうわ"],["年","ねん"],["スローガン","すろーがん"],["様","よう"]],
   "proper_nouns": [],
-  "verbs": [ ["掲げる","かかげる"], ["成る","なる"]],
+  "numbers": [],
+  "counters: [],
+  "verbs": [["掲げる","かかげる"],["成る","なる"]],
   "compound_verbs": [],
   "adjectives": [],
   "adjectivals": [],
-  "adverbs": [ ["頃","ごろ"]],
-  "particles": [ ["から","から"], ["等", "など"], ["の","の"], ["が","が"], ["に","に"]],
-  "pronouns", [],
+  "adverbs": [["頃","ごろ"]],
+  "particles": [["から","から"],["等", "など"],["の","の"],["が","が"],["に","に"]],
+  "conjuctions": [],
+  "pronouns",[],
   "suffixes": [],
-  "phrases": [],
-  "four_kanji_idioms": [ ["八紘一宇","はっこういちう"]]
+  "prefixes": [],
+  "expressions": [],
+  "yojijukugo": [["八紘一宇","はっこういちう"]]
 }}
 
 Example sentence 5: <b> 不甲斐[ふがい]ない</b> 里樹[りしゅ]<k> 様[さま]</k>の 侍女[じじょ]<k> 達[たち]</k>を 阿多[ああでぅお]<k> 様[さま]</k>の 侍女[じじょ]<k> 達[たち]</k>が<k> 諫[いさ]めていた</k>。
 Example result 5:
 {{
-  "nouns": [ ["侍女","じじょ"] ],
-  "proper_nouns": [ ["里樹","りしゅ"], ["阿多","ああでぅお"]],
-  "verbs": [ ["諫める","いさめる"]],
+  "nouns": [["侍女","じじょ"]],
+  "proper_nouns": [["里樹","りしゅ"],["阿多","ああでぅお"]],
+  "numbers": [],
+  "counters: [],
+  "verbs": [["諫める","いさめる"]],
   "compound_verbs": [],
   "adjectives": [ "不甲斐ない","ふがいない"],
   "adverbs": [],
   "adjectivals": [],
-  "particles": [ ["の","の"], ["を","を"],["が","が"] ],
-  "pronouns", [],
-  "suffixes": [ ["様","さま"], ["達","たち"]],
-  "phrases": [],
-  "four_kanji_idioms": []
+  "particles": [["の","の"],["を","を"],["が","が"]],
+  "conjuctions": [],
+  "pronouns",[],
+  "suffixes": [["様","さま"],["達","たち"]],
+  "prefixes": [],
+  "expressions": [],
+  "yojijukugo": []
 }}
 
+Example sentence 6: <k> 危[あや]うく</k><b>某[ぼう]</b> 業者[ぎょうしゃ]の 甘言[かんげん]に 騙[だま]され、 大損[おおそん]<k> 為[す]る</k><k> 所[ところ]</k>でした。
+Example result 6:
+{{
+  "nouns": [["業者","ぎょうしゃ"],["甘言","かんげん"],["大損","おおそん"],["所","ところ"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters: [],
+  "verbs": [["騙す","だます"],["する","する"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["の","の"],["に","に"]],
+  "conjuctions": [],
+  "pronouns": [],
+  "suffixes": [],
+  "prefixes": [["某","ぼう"]]
+  "expressions": [],
+  "yojijukugo": []
+}}
+
+Example sentence 7: <k> 一[ひと]つ</k>の 仕事[しごと]に<b> 於[お]いて</b> 困難[こんなん] 性[せい]の 尺度[しゃくど]で、 仕事[しごと]の 遂行[すいこう] 能力[のうりょく]が、<k> 其[そ]の</k> 頂上[ちょうじょう]を 越[こ]えない 場合[ばあい]は、 何時[いつ]まで 待[ま]っても 解決[かいけつ]<k> 為[し]ない</k>。
+Example results 7:
+{{
+  "nouns": [["仕事","しごと"],["困難","こんなん"],["性","せい"],["尺度","しゃくど"],["遂行","すいこう"],["能力","のうりょく"],["頂上","ちょうじょう"],["場合","ばあい"],["解決","かいけつ"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters: [],
+  "verbs": [["越える","こえる"],["待つ","まつ"],["為る","する"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [["何時","いつ"]],
+  "adjectivals": [],
+  "particles": [["に","に"],["で","で"],["が","が"],["を","を"],["は","は"],["まで","まで"]],
+  "conjuctions": [["於いて","おいて"]],
+  "pronouns": [],
+  "suffixes": [["一つ","ひとつ"],["せい","せい"]],
+  "prefixes": [],
+  "expressions": [],
+  "yojijukugo": []
+}}
+
+Example sentence 8: 二<b>隻[せき]</b>の 船[ふね]が 同時[どうじ]に 沈[しず]んだ。
+Example result 8:
+{{
+  "nouns": [["船","ふね"],["同時","どうじ"]],
+  "proper_nouns": [],
+  "numbers": [["二","に"]],
+  "counters: [["隻","せき"]],
+  "verbs": [["沈む","しずむ"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["の","の"],["が","が"],["に","に"]],
+  "pronouns": [],
+  "suffixes": [],
+  "prefixes": [],
+  "expressions": [["二隻","にせき"],["同時に","どうじに"]],
+  "yojijukugo": []
+}}
 
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings.
  
@@ -134,8 +216,10 @@ The sentence to process: {sentence}
 
 
 def extract_words_in_note(
-    note: Note, config: dict, show_warning: bool = True
-) -> bool:
+    config: dict,
+    note: Note,
+    notes_to_add_dict: dict[str, list[Note]] = {},
+    ) -> bool:
     model = note.note_type()
     if not model:
         if DEBUG:
@@ -184,7 +268,12 @@ def extract_words_in_note(
     return False
 
 
-def bulk_extract_from_notes_op(col, notes: Sequence[Note], edited_nids: list):
+def bulk_extract_from_notes_op(
+        col: Collection,
+        notes: Sequence[Note], 
+        edited_nids: list[NoteId],
+        notes_to_add_dict: dict[str, list[Note]]
+    ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -192,7 +281,7 @@ def bulk_extract_from_notes_op(col, notes: Sequence[Note], edited_nids: list):
     model = config.get("extract_words_model", "")
     message = "Extracting words"
     op = extract_words_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
 
 
 def extract_words_from_selected_notes(nids: Sequence[NoteId], parent: Browser):

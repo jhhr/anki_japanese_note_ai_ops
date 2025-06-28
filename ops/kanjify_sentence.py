@@ -1,5 +1,6 @@
 from typing import Union
 from anki.notes import Note, NoteId
+from anki.collection import Collection
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
@@ -16,8 +17,8 @@ DEBUG = False
 
 
 def get_kanjified_sentence_from_model(
+        config: dict[str, str],
         sentence: str,
-        config: dict[str, str]
     ) -> Union[list[str], None]:
     kanjified_sentence_return_field = "kanjified_sentence"
 
@@ -104,8 +105,10 @@ The sentence to process: {sentence}
 
 
 def kanjify_sentence_in_note(
-    note: Note, config: dict, show_warning: bool = True
-) -> bool:
+    config: dict[str, str],
+    note: Note,
+    notes_to_add_dict: dict[str, list[Note]] = {},
+    ) -> bool:
     model = note.note_type()
     if not model:
         if DEBUG:
@@ -138,7 +141,7 @@ def kanjify_sentence_in_note(
             if DEBUG:
                 print("cleaned sentence", sentence)
             # Call API to get translation
-            result = get_kanjified_sentence_from_model(sentence, config)
+            result = get_kanjified_sentence_from_model(config, sentence)
             if DEBUG:
                 print("result from API", result)
 
@@ -157,7 +160,12 @@ def kanjify_sentence_in_note(
     return False
 
 
-def bulk_kanjify_notes_op(col, notes: Sequence[Note], edited_nids: list):
+def bulk_kanjify_notes_op(
+        col: Collection,
+        notes: Sequence[Note],
+        edited_nids: list[NoteId],
+        notes_to_add_dict: dict[str, list[Note]] = {},
+    ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -165,7 +173,7 @@ def bulk_kanjify_notes_op(col, notes: Sequence[Note], edited_nids: list):
     model = config.get("kanjify_sentence_model", "")
     message = "Kanjifying sentences"
     op = kanjify_sentence_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
 
 
 def kanjify_selected_notes(nids: Sequence[NoteId], parent: Browser):

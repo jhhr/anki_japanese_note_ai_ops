@@ -1,5 +1,6 @@
 import json
 from anki.notes import Note, NoteId
+from anki.collection import Collection
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
@@ -19,10 +20,10 @@ DEBUG = False
 
 
 def get_kanji_story_from_model(
+        config: Dict[str, str],
         kanji: str,
         components: str,
         current_story: str,
-        config: Dict[str, str]
     ) -> str:
     media_path = Path(mw.pm.profileFolder(), "collection.media")
     # Get stored dict of words used for component in the kanji_story_component_words.log file
@@ -124,7 +125,11 @@ def get_kanji_story_from_model(
         return current_story
 
 
-def make_story_for_note(note: Note, config: Dict[str, str], show_warning: bool = True):
+def make_story_for_note(
+        config: Dict[str, str],
+        note: Note, 
+        notes_to_add_dict: Dict[str, list[Note]] = {},
+    ) -> bool:
     model = note.note_type()
     if not model:
         if DEBUG:
@@ -154,7 +159,7 @@ def make_story_for_note(note: Note, config: Dict[str, str], show_warning: bool =
         current_story = note[story_field]
         # Check if the value is non-empty
         if components:
-            new_story = get_kanji_story_from_model(kanji, components, current_story, config)
+            new_story = get_kanji_story_from_model(config, kanji, components, current_story)
 
             # Update the note with the new value
             note[story_field] = new_story
@@ -169,7 +174,12 @@ def make_story_for_note(note: Note, config: Dict[str, str], show_warning: bool =
     return False
 
 
-def bulk_make_stories_op(col, notes: Sequence[Note], edited_nids: list):
+def bulk_make_stories_op(
+        col: Collection,
+        notes: Sequence[Note],
+        edited_nids: list[NoteId],
+        notes_to_add_dict: Dict[str, list[Note]] = {},
+    ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -177,7 +187,7 @@ def bulk_make_stories_op(col, notes: Sequence[Note], edited_nids: list):
     model = config.get("kanji_story_model", "")
     message = "Updated stories"
     op = make_story_for_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
 
 
 def make_stories_for_selected_notes(nids: Sequence[NoteId], parent: Browser):

@@ -1,4 +1,5 @@
 from anki.notes import Note, NoteId
+from anki.collection import Collection
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
@@ -16,10 +17,10 @@ DEBUG = False
 
 
 def get_single_meaning_from_model(
+        config: Dict[str, str],
         vocab: str,
         sentence: str,
         dict_entry: str,
-        config: Dict[str, str]
     ):
     return_field = "cleaned_meaning"
     prompt = f'\
@@ -50,9 +51,9 @@ def get_single_meaning_from_model(
 
 
 def get_new_meaning_from_model(
+        config: Dict[str, str],
         vocab: str,
         sentence: str,
-        config: Dict[str, str]
     ) -> str:
     return_field = "new_meaning"
     prompt = f'\
@@ -83,8 +84,10 @@ def get_new_meaning_from_model(
 
 
 def clean_meaning_in_note(
-    note: Note, config: Dict[str, str], show_warning: bool = True
-):
+    config: Dict[str, str],
+    note: Note,
+    notes_to_add_dict: Dict[str, list[Note]],
+    ) -> bool:
     note_type = note.note_type()
     if not note_type:
         print("Error: note_type() call failed for note", note.id)
@@ -115,7 +118,7 @@ def clean_meaning_in_note(
         if dict_entry:
             # Call API to get single meaning from the raw dictionary entry
             modified_meaning_jp = get_single_meaning_from_model(
-                word, sentence, dict_entry, config
+                config, word, sentence, dict_entry
             )
 
             # Update the note with the new value
@@ -126,7 +129,7 @@ def clean_meaning_in_note(
             return False
         else:
             # If there's no dict_entry, we'll use chatGPT to generate one from scratch
-            new_meaning = get_new_meaning_from_model(word, sentence, config)
+            new_meaning = get_new_meaning_from_model(config, word, sentence)
             note[meaning_field] = new_meaning
             if new_meaning != "":
                 return True
@@ -137,7 +140,12 @@ def clean_meaning_in_note(
     return False
 
 
-def bulk_clean_notes_op(col, notes: Sequence[Note], edited_nids: list):
+def bulk_clean_notes_op(
+    col: Collection,
+    notes: Sequence[Note],
+    edited_nids: list,
+    notes_to_add_dict: Dict[str, list[Note]] = {},
+    ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -145,7 +153,7 @@ def bulk_clean_notes_op(col, notes: Sequence[Note], edited_nids: list):
     model = config.get("word_meaning_model", "")
     message = "Cleaning meaning"
     op = clean_meaning_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, model)
+    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
 
 
 def clean_selected_notes(nids: Sequence[NoteId], parent: Browser):

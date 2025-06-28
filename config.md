@@ -27,33 +27,38 @@ Define which model to use for each task
 - `translate_sentence_model`
 - `kanjify_sentence_model`
 - `extract_words_model`
+- `match_words_model`
 
 ### model rate limits
 
 Must be defined for each model. Default are set very low. Check the respective API docs
 for what rate limits you may be able to / want to use for each model.
 
+## config fields per note type name
+
 Add the fields by note type like this. You can set multiple different note types. You can't set
 multiple fields per note type though.
 
-```
+```json
 {
   "note type name A": {
     "meaning_field": "note A meaning field",
     "word_field": "note A word field",
-    "sentence_field": "note A sentence field"
+    "sentence_field": "note A sentence field",
+    "insert_deck": "My deck::sub deck 1"
   },
   "note type name B": {
     "meaning_field": "note B meaning field",
     "word_field": "note B word field",
     "sentence_field": "note B sentence field",
-    "translation_field": "note B translation field"
+    "translation_field": "note B translation field",
+    "insert_deck": "My deck::sub deck""
   },
   ...etc
 }
 ```
 
-You must define
+You need to define
 
 - for cleaning/generating word meanings:
   1. `meaning_field`
@@ -69,5 +74,35 @@ You must define
   1. `furigana_sentence_field`
   2. `kanjified_sentence_field`
 - for extracting words:
-  1. `furigana_sentence_field`
+  1. `word_extraction_sentence_field`
   2. `word_list_field`
+- for matching extracted words:
+  1. `word_list_field`
+  2. `word_kanjified_field`
+  3. `word_normal_field`
+  4. `word_reading_field`
+  5. `word_sort_field`
+  6. `meaning_field`
+  7. `english_meaning_field`
+  8. `part_of_speech_field`
+  9. `new_note_id_field`
+  10. `insert_deck` (optional) Used when generating TSVs for inserting new notes. If omitted, the
+      file will simply not specify the deck
+
+## optionally, you can also specify, all for the `match_words_model` operation
+
+-`word_lists_to_process` to select what parts of speech you collect:
+    - `nouns`: default = yes
+    - `proper_nouns`: default = no
+    - `verbs`: default = yes
+    - `compound_verbs`: default = yes
+    - `adjectives`: default = yes
+    - `adverbs`: default = yes
+    - `adjectivals`: default = yes
+    - `particles`: default = no
+    - `pronouns`: default = yes
+    - `suffixes`: default = yes
+    - `expressions`: default = yes
+    - `yojijukugo`: default = yes
+
+- `replace_existing_matched_words`: overwrite previously processed matched words?
