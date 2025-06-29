@@ -5,7 +5,7 @@ from pathlib import Path
 from aqt.qt import QFileDialog
 from aqt.import_export.importing import import_file
 
-DEBUG = True
+DEBUG = False
 
 def prompt_os_to_save_file(
     filename: str,

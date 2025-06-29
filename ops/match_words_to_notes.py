@@ -15,6 +15,7 @@ from .base_ops import (
     make_inner_bulk_op,
     bulk_nested_notes_op,
     selected_notes_op,
+    CancelState,
 )
 from .clean_meaning import clean_meaning_in_note
 from ..utils import copy_into_new_note, get_field_config
@@ -26,7 +27,7 @@ raw_word_type = tuple[str, str]
 # (word, reading, note_sort_field_value, note_id +int or fake note Id -int)
 matched_word_type = tuple[str, str, str, Union[NoteId,int]] 
 
-DEBUG = True
+DEBUG = False
     
 WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
   "nouns": "Noun",
@@ -80,6 +81,7 @@ def match_words_to_notes(
     increment_done_tasks: Callable[..., None],
     increment_in_progress_tasks: Callable[..., None],
     get_progress: Callable[..., tuple[str, int]],
+    cancel_state: CancelState,
     update_word_list_in_dict: Callable[[list[Union[raw_word_type, matched_word_type]]], None],
     note_type: NotetypeDict,
     replace_existing: bool = False
@@ -305,7 +307,7 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
 """
         # if DEBUG:
             # print(f"Prompt for matching meanings: {prompt}")
-        result = get_response(model, prompt)
+        result = get_response(model, prompt, cancel_state=cancel_state)
         if result is None:
             if DEBUG:
                 print("Failed to get a response from the API.")
@@ -515,10 +517,10 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
                 return True
             elif not is_matched_meaning and meaning_number is not None:
                 # Action 3. update the meaning in the note with the new meaning
-                if DEBUG:
-                    print(f"Matched meaning {matched_meaning} and new meaning JP:'{jp_meaning}'/EN:{en_meaning} for word {word} with reading {reading}")
                 matched_note = None
                 matched_meaning, _, matched_note_id, _, _ = meanings[meaning_number - 1]
+                if DEBUG:
+                    print(f"Matched meaning {matched_meaning} and new meaning JP:'{jp_meaning}'/EN:{en_meaning} for word {word} with reading {reading}")
                 for note in matching_notes:
                     if note.id == matched_note_id and matched_meaning == note[meaning_field]:
                         # Ensure the matched meaning is the same as in the note to account for id=0
@@ -661,6 +663,7 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
             get_progress=get_progress,
             handle_op_error=handle_op_error,
             handle_op_result=handle_op_result,
+            cancel_state=cancel_state,
         )
         if mw.progress.want_cancel():
             break
@@ -700,6 +703,7 @@ def match_words_to_notes_for_note(
     increment_in_progress_tasks: Callable[..., None],
     increment_done_notes: Callable[..., None],
     get_progress: Callable[..., tuple[str, int]],
+    cancel_state: CancelState,
 ) -> None:
     """
     Match words to notes for a single note.
@@ -821,6 +825,7 @@ def match_words_to_notes_for_note(
                 increment_done_tasks=increment_done_tasks,
                 increment_in_progress_tasks=increment_in_progress_tasks,
                 get_progress=get_progress,
+                cancel_state=cancel_state,
                 update_word_list_in_dict=update_word_list_in_dict,
                 note_type=note_type,
                 replace_existing=replace_existing,

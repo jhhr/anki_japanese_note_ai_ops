@@ -34,6 +34,12 @@ Define which model to use for each task
 Must be defined for each model. Default are set very low. Check the respective API docs
 for what rate limits you may be able to / want to use for each model.
 
+RPM=request per minure, TPM=tokenn per minute
+
+- Free tier gemini 2.5-flash 10RPM
+- Paid tier 1 gemini 2.5-flash 1000RPM
+- gpt4o 450000TPM / 5000RPM
+
 ## config fields per note type name
 
 Add the fields by note type like this. You can set multiple different note types. You can't set
