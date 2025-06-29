@@ -32,6 +32,7 @@ class CancelState:
     def is_cancelled(self):
         return self._cancelled
 
+
 def get_response(model, prompt, cancel_state: Optional[CancelState] = None):
     """Get a response from the appropriate model based on the configuration.
 
@@ -50,6 +51,38 @@ def get_response(model, prompt, cancel_state: Optional[CancelState] = None):
         return None
 
 
+class CancellableRequest:
+    def __init__(self):
+        self.session = requests.Session()
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.future = None
+        
+    def post(self, url, **kwargs):
+        def _request():
+            return self.session.post(url, **kwargs)
+            
+        self.future = self.executor.submit(_request)
+        try:
+            return self.future.result()  # Blocks like normal requests
+        finally:
+            # Clean up the executor if done
+            if self.future.done():
+                self.executor.shutdown(wait=False)
+                
+    def cancel(self):
+        if self.future and not self.future.done():
+            # Cancel the future - this will interrupt the thread if it's not already sending data
+            cancelled = self.future.cancel()
+            if DEBUG:
+                print(f"Request future cancelled: {cancelled}")
+            
+        # Close the underlying session anyway
+        self.session.close()
+        self.executor.shutdown(wait=False)  # Don't wait for tasks to complete
+        
+
+# Global variable to track active requests
+active_requests: list[CancellableRequest] = []
 
 def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] = None):
     """Get a response from Google's Gemini API.
@@ -112,9 +145,12 @@ def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] 
         return None
     google_api_key = config.get("google_api_key", "")
     request_timeout = config.get("request_timeout", 30)
+
     # Make the API call
+    req = CancellableRequest()
+    active_requests.append(req)
     try:
-        response = requests.post(
+        response = req.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={google_api_key}",
             headers=headers,
             json=data,
@@ -126,6 +162,10 @@ def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] 
     except Exception as e:
         print(f"Error making request: {e}")
         return None
+    finally:
+        # Response completed, remove from active requests
+        if req in active_requests:
+            active_requests.remove(req)
 
     if response.status_code != 200:
         print(f"Error: {response.status_code}, {response.text}")
@@ -198,10 +238,13 @@ def get_response_from_openai(model, prompt, cancel_state: Optional[CancelState] 
         data["max_completion_tokens"] = MAX_TOKENS_VALUE
     else:
         data["max_tokens"] = MAX_TOKENS_VALUE
-
+    
+    
     # Make the API call
+    req = CancellableRequest()
+    active_requests.append(req)
     try:
-        response = requests.post(
+        response = req.post(
             "https://api.openai.com/v1/chat/completions",
             headers=headers,
             json=data,
@@ -229,6 +272,10 @@ def get_response_from_openai(model, prompt, cancel_state: Optional[CancelState] 
         print(f"Error extracting content: {ke}")
         print("response", response.text)
         return None
+    finally:
+        # Request completed, remove from active requests
+        if req in active_requests:
+            active_requests.remove(req)
 
     # Extract the cleaned meaning from the response
     json_result = extract_json_string(content_text)
@@ -278,6 +325,12 @@ class CancelManager:
         self.cancel_requested = True
         if DEBUG:
             print("Cancellation requested, updating UI")
+            
+        # Immediately end all in-flight requests
+        for req in list(active_requests):
+            if DEBUG:
+                print("Cancelling active request", req) 
+            req.cancel()
         
         # Set the shared cancel state
         self.cancel_state.cancel()
@@ -855,12 +908,8 @@ def selected_notes_op(
                 notes_to_add_dict=notes_to_add_dict,
             )
             updated_notes, pos, res_notes_to_add_dict = result
-            if DEBUG:
-                print("selected_notes_op done", notes_to_add_dict, res_notes_to_add_dict)
             notes_to_add_dict.update(res_notes_to_add_dict)
             
-            if DEBUG:
-                print("selected_notes_op done", [ u['sentence-vocab-list'] for u in  updated_notes])
             mw.col.update_notes(updated_notes)
             return mw.col.merge_undo_entries(pos)
             
