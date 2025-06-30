@@ -13,8 +13,8 @@ from .base_ops import (
     bulk_notes_op,
     selected_notes_op,
 )
-from .match_words_to_notes import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 from ..utils import get_field_config
+from ..types import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 
 DEBUG = False 
 
@@ -131,7 +131,7 @@ def word_lists_str_format(
     """
     if not word_lists:
         return None
-    return "{\n" + ",\n".join([f'  "{k}": {json.dumps(v)}' for k,v in word_lists.items()]) + "\n}" 
+    return "{\n" + ",\n".join([f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k,v in word_lists.items()]) + "\n}" 
 
 def get_extracted_words_from_model(
         sentence: str,
