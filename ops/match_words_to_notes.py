@@ -615,11 +615,13 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
                     print(f"Setting processed word tuple at index {word_index}, with tuple {new_word_tuple}")
                 processed_word_tuples[word_index] = new_word_tuple
                 # Now we need to update the meaning in the note
-                if jp_meaning:
+                if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
                     matched_note[meaning_field] = jp_meaning.strip()
-                if en_meaning:
+                    matched_note.add_tag("updated_jp_meaning")
+                    updated_notes_dict[matched_note.id] = matched_note
+                if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
                     matched_note[english_meaning_field] = en_meaning.strip()
-                updated_notes_dict[matched_note.id] = matched_note
+                    updated_notes_dict[matched_note.id] = matched_note
                 if DEBUG:
                     print(f"Updated note {matched_note.id} with new meaning '{jp_meaning}' and english meaning '{en_meaning}'")
                 return True
@@ -650,11 +652,13 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
                     print(f"Setting processed word tuple at index {word_index}, with tuple {new_word_tuple}")
                 processed_word_tuples[word_index] = new_word_tuple
                 # Now we need to update the meaning in the note
-                if jp_meaning:
-                    matched_note[meaning_field] = jp_meaning.strip() 
-                if en_meaning:
-                    matched_note[english_meaning_field] = en_meaning.strip()
-                updated_notes_dict[matched_note.id] = matched_note
+                if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
+                    matched_note[meaning_field] = jp_meaning
+                    matched_note.add_tag("updated_jp_meaning")
+                    updated_notes_dict[matched_note.id] = matched_note
+                if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
+                    matched_note[english_meaning_field] = en_meaning
+                    updated_notes_dict[matched_note.id] = matched_note
                 return True
             else:
               if DEBUG:
