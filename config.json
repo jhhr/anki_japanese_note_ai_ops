@@ -39,5 +39,5 @@
     "o3-mini": 10,
     "o1-mini": 10
   },
-  "request_timetout": 60
+  "request_timetout": 120
 }

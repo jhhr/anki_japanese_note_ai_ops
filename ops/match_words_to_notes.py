@@ -16,27 +16,15 @@ from .base_ops import (
     bulk_nested_notes_op,
     selected_notes_op,
     CancelState,
+    AsyncTaskProgressUpdater,
 )
-from ..kana_conv import to_hiragana
 from .clean_meaning import clean_meaning_in_note
+from .extract_words import word_lists_str_format
+from ..kana_conv import to_hiragana
 from ..utils import copy_into_new_note, get_field_config
+from ..types import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 
-# Raw word, tuple of 1) word, 2) reading
-raw_one_meaning_word_type = tuple[str, str]
-
-# Raw word, tuple of 1) word, 2) reading and 3) meaning number
-# meaning number is used to indicate the same word and reading occurring with different meanings
-raw_multi_meaning_word_type = tuple[str, str, int]
-
-# Matched word, same but with note sort field value and note ID
-# 1) word, 2) reading, 3) note_sort_field_value, 4) note_id +int or fake note Id -int)
-# note_sort_field_value is different for each meaning a word with the same reading can have
-# so it is used to distinguish between them
-# The note_id references the exact note that the word is matched to, it can be a real note ID
-# or a placeholder ID used to identify new note that is to be created but hasn't yet
-matched_word_type = tuple[str, str, str, Union[NoteId,int]] 
-
-DEBUG = False
+DEBUG = True
     
 WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
   "nouns": "Noun",
@@ -82,13 +70,9 @@ def match_words_to_notes(
     sentence: str,
     tasks: list[asyncio.Task],
     note_tasks: list[asyncio.Task],
-    edited_nids: list[NoteId],
     notes_to_add_dict: dict[str, list[Note]],
     updated_notes_dict: dict[NoteId, Note],
-    increment_done_tasks: Callable[..., None],
-    increment_in_progress_tasks: Callable[..., None],
-    increment_done_notes: Callable[..., None],
-    get_progress: Callable[..., tuple[str, int]],
+    progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
     update_word_list_in_dict: Callable[[list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]]], None],
     note_type: NotetypeDict,
@@ -110,11 +94,7 @@ def match_words_to_notes(
         updated_notes_dict (dict): Dict to append notes to be updated with new meanings and also
             to get an already updated note for additional changes if needed. Will be mutated by this
             function.
-        increment_done_tasks (Callable): Function to call when a task is done.
-        increment_in_progress_tasks (Callable): Function to call when a task is in progress.
-        increment_done_notes (Callable): Function to call when all tasks for one note are done.
-        get_progress (Callable): Function to get the progress message and current done task count
-            for the current operation.
+        progress_updater (AsyncTaskProgressUpdater): An updater to report progress of the operation.
         update_word_list_in_dict (Callable): Function to update the word list in a note. Should
             be called async when the task actually finishes.
         replace_existing (bool): If True, replace existing matched words with new matches.
@@ -671,8 +651,6 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
     
     new_tasks_count = 0
     
-    def on_done_task():
-        increment_done_tasks()
     def handle_return_word_tuples():
         nonlocal processed_word_tuples
         if DEBUG:
@@ -779,10 +757,7 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
             config=config,
             op=match_op,
             rate_limit=rate_limit,
-            get_total_tasks=lambda: len(tasks),
-            increment_done_tasks=on_done_task,
-            increment_in_progress_tasks=increment_in_progress_tasks,
-            get_progress=get_progress,
+            progress_updater=progress_updater,
             handle_op_error=handle_op_error,
             handle_op_result=handle_op_result,
             cancel_state=cancel_state,
@@ -799,6 +774,12 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
             reading=reading,
             word_index=i,
           ))
+        progress_updater.increment_counts(
+            total_tasks=1,
+        )
+        # Show progress as tasks are being gathered, this too can take a bit
+        if len(tasks) % 5 == 0:
+            progress_updater.update_progress()
         tasks.append(task)
         note_tasks.append(task)
         word_list_task_count += 1
@@ -824,11 +805,14 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
             print("No word tasks were created, but we need to update the note with processed_word_tuples")
         # If we ended up skipping all word tuples, we still may need to update the note
         # Create a dummy task that'll trigger calling handle_return_word_tuples
-        async def dummy_task():
+        async def run_dummy_task():
             await asyncio.sleep(0)
-            increment_done_notes()
+            progress_updater.increment_counts(
+                notes_done=1,
+            )
             handle_return_word_tuples()
-        note_tasks.append(asyncio.create_task(dummy_task()))
+        
+        note_tasks.append(asyncio.create_task(run_dummy_task()))
         
 
 
@@ -839,10 +823,7 @@ def match_words_to_notes_for_note(
     edited_nids: list[NoteId],
     notes_to_add_dict: dict[str, list[Note]],
     updated_notes_dict: dict[NoteId, Note],
-    increment_done_tasks: Callable[..., None],
-    increment_in_progress_tasks: Callable[..., None],
-    increment_done_notes: Callable[..., None],
-    get_progress: Callable[..., tuple[str, int]],
+    progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
 ) -> None:
     """
@@ -929,13 +910,18 @@ def match_words_to_notes_for_note(
                 if DEBUG:
                     print(f"Updating note {note.id} with new word list")
                 current_note = updated_notes_dict[current_note.id]
+                edited_nids.append(current_note.id)
             if DEBUG:
                 print(f"Updating note {note.id} with word list field '{word_list_field}'"
                       f"with dict: {updated_word_list_dict}")
             current_note = updated_notes_dict.get(current_note.id, current_note)
-            current_note[word_list_field] = json.dumps(updated_word_list_dict, ensure_ascii=False, indent=2)
-            updated_notes_dict[current_note.id] = current_note
-            increment_done_notes()
+            new_word_list = word_lists_str_format(updated_word_list_dict)
+            if new_word_list is not None:
+                current_note[word_list_field] = new_word_list 
+                updated_notes_dict[current_note.id] = current_note
+            progress_updater.increment_counts(
+                notes_done=1,
+            )
         
         def make_word_list_updater(current_key):
             def update_function(updated_tuples):
@@ -959,13 +945,9 @@ def match_words_to_notes_for_note(
                 sentence=sentence,
                 tasks=tasks,
                 note_tasks=note_tasks,
-                edited_nids=edited_nids,
                 notes_to_add_dict=notes_to_add_dict,
                 updated_notes_dict=updated_notes_dict,
-                increment_done_tasks=increment_done_tasks,
-                increment_in_progress_tasks=increment_in_progress_tasks,
-                increment_done_notes=increment_done_notes,
-                get_progress=get_progress,
+                progress_updater=progress_updater,
                 cancel_state=cancel_state,
                 update_word_list_in_dict=update_word_list_in_dict,
                 note_type=note_type,

@@ -413,14 +413,75 @@ class CancelManager:
                 print("Cancellation monitor task cancelled")
             # Just exit the task when cancelled
 
+class AsyncTaskProgressUpdater():
+    """A class to update the progress dialog in async ops."""
+    def __init__(self, total_notes: Optional[int] = None, total_tasks: int = 0, title: Optional[str] = None):
+        self.total_tasks = total_tasks
+        self.tasks_done = 0
+        self.tasks_in_progress = 0
+        self.notes_done = 0
+        self.total_notes = total_notes
+        # Sum of each task's execution time, for estimating average time per task
+        self.cumulative_task_time = 0.0
+        self.max_task_time = 0.0
+        self.start_time = time.time()
+        if title is None:
+            title = "Processing asynchronous tasks..."
+        self.set_title(title)
+    
+    
+    def set_title(self, title: str):
+        mw.taskman.run_on_main(lambda: mw.progress.set_title(title))
+
+    def increment_counts(
+        self,
+        total_tasks = 0,
+        tasks_done: int = 0,
+        tasks_in_progress: int = 0,
+        notes_done: int = 0,
+        cumulative_task_time: float = 0.0
+    ):
+        """Increment the counts of tasks and notes."""
+        self.total_tasks += total_tasks
+        self.tasks_done += tasks_done
+        self.tasks_in_progress += tasks_in_progress
+        self.notes_done += notes_done
+        self.cumulative_task_time += cumulative_task_time
+        if cumulative_task_time > self.max_task_time:
+            self.max_task_time = cumulative_task_time
+        
+    def update_progress(self):
+        task_progress_msg = f"""<strong>Processing:</strong>
+            <br><strong><code>{self.tasks_done}/{self.total_tasks}</code></strong> tasks <small style="opacity: 0.85"> | Waiting response: {self.tasks_in_progress}</small>
+            """
+        if self.total_notes is not None:
+            tasks_per_note = round(self.tasks_done / self.notes_done, 1) if self.notes_done > 0 else 0
+            task_progress_msg += f'<br><strong><code>{self.notes_done}/{self.total_notes}</code></strong> notes <small style="opacity: 0.85"> | Avg tasks per note: {tasks_per_note}</small>'
+        
+        elapsed_s = time.time() - self.start_time
+        elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_s))
+        # estimate time remaining from tasks_done and elapsed_time
+        time_msg = f"<br><code>Time: {elapsed_time}</code>"
+        if self.tasks_done > 3: 
+            eta_s = (self.total_tasks - self.tasks_done) * (elapsed_s / self.tasks_done)
+            eta_time = time.strftime("%H:%M:%S", time.gmtime(eta_s))
+            avg_per_op_s = self.cumulative_task_time / self.tasks_done
+            time_msg += f""" | <small> Avg time per task: {avg_per_op_s:.2f}s | Max: {self.max_task_time:.2f}s</small>
+            <br><code>ETA: {eta_time}</code>"""
+        mw.taskman.run_on_main(
+            lambda: mw.progress.update(
+                label=f"{task_progress_msg}{time_msg}",
+                value=self.tasks_done,
+                max=self.total_tasks,
+            )
+        )
+        
+
 def make_inner_bulk_op(
     config: dict,
     op: Callable[..., bool],
     rate_limit: int,
-    get_total_tasks: Callable[[], int],
-    increment_done_tasks: Callable[..., None],
-    increment_in_progress_tasks: Callable[..., None],
-    get_progress: Callable[..., tuple[str,int]],
+    progress_updater: AsyncTaskProgressUpdater,
     handle_op_error: Callable[[Exception], None],
     handle_op_result: Callable[[bool], None],
     cancel_state: Optional[CancelState] = None,
@@ -447,7 +508,6 @@ def make_inner_bulk_op(
     """
     # Async approach with rate limiting
     semaphore = asyncio.Semaphore(rate_limit)
-    start_time = time.time()
     start_time = time.time()
     
     cancel_state = cancel_state or CancelState()
@@ -486,7 +546,11 @@ def make_inner_bulk_op(
                 # Use ThreadPoolExecutor for CPU-bound operations
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     def execute_op():
-                        increment_in_progress_tasks()
+                        progress_updater.increment_counts(
+                            tasks_in_progress=1,
+                        )
+                        task_start_time = time.time()
+                        progress_updater.update_progress()
                         try:
                             if mw.progress.want_cancel() or cancel_state.is_cancelled():
                                 if DEBUG:
@@ -501,7 +565,13 @@ def make_inner_bulk_op(
                             handle_op_error(e)
                             return False
                         finally:
-                            increment_done_tasks()
+                            task_time = time.time() - task_start_time
+                            progress_updater.increment_counts(
+                                tasks_done=1,
+                                tasks_in_progress=-1,
+                                cumulative_task_time=task_time,
+                            )
+                            progress_updater.update_progress()
                             
                     # Check for cancellation again before running
                     if mw.progress.want_cancel():
@@ -516,24 +586,6 @@ def make_inner_bulk_op(
                         # If the operation was cancelled, return False
                         return False
                 
-                elapsed_s = time.time() - start_time
-                elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_s))
-                # estimate time remaining from tasks_done and elapsed_time
-                time_msg = f"<br><code>Time: {elapsed_time}</code>"
-                progress_msg, tasks_done = get_progress()
-                if tasks_done > 3: 
-                    eta_s = (get_total_tasks() - tasks_done) * (elapsed_s / tasks_done)
-                    eta_time = time.strftime("%H:%M:%S", time.gmtime(eta_s))
-                    avg_per_op_s = elapsed_s / tasks_done
-                    time_msg += f"""| <small> Avg time per task: {avg_per_op_s:.2f}s</small>
-                    <br><code>ETA: {eta_time}</code>"""
-                mw.taskman.run_on_main(
-                    lambda: mw.progress.update(
-                        label=f"{progress_msg}{time_msg}",
-                        value=tasks_done,
-                        max=get_total_tasks(),
-                    )
-                )
         
             # Handle results
             handle_op_result(op_result)
@@ -577,37 +629,17 @@ async def bulk_nested_notes_op(
     rate_limit = config["rate_limits"].get(model, None)
     updated_notes_dict: dict[NoteId, Note] = {}
     
+    progress_updater = AsyncTaskProgressUpdater(
+        total_notes=len(notes),
+        total_tasks=0,  # Will be updated dynamically
+        title=f"Async AI op {message}",
+    )
     
     if not rate_limit:
         print("No rate limit set for model, can't run nested async op")
         return col.merge_undo_entries(pos)
     else:
         tasks: list[asyncio.Task] = []
-        tasks_in_progress: int = 0
-        tasks_done: int = 0
-        notes_done: int = 0
-        
-        
-        def increment_done_tasks():
-            nonlocal tasks_done, tasks_in_progress
-            tasks_done += 1
-            tasks_in_progress -= 1
-        def increment_in_progress_tasks():
-            nonlocal tasks_in_progress
-            tasks_in_progress += 1
-        def increment_done_notes():
-            nonlocal notes_done
-            if DEBUG:
-                print(f"increment_done_notes called, tasks_done: {tasks_done}, notes_done: {notes_done}")
-            notes_done += 1
-        def get_progress() -> tuple[str, int]:
-            """Get the current progress message and the number of tasks done."""
-            nonlocal tasks_done, tasks_in_progress, notes_done
-            tasks_per_note = round(tasks_done / notes_done, 1) if notes_done > 0 else 0
-            return f"""<strong>Processing:</strong>
-                <br><strong><code>{tasks_done}/{len(tasks)}</code></strong> tasks <small style="opacity: 0.85"> | Waiting response: {tasks_in_progress}</small>
-                <br><strong><code>{notes_done}/{len(notes)}</code></strong> notes <small style="opacity: 0.85"> | Avg tasks per note: {tasks_per_note}</small>
-                """, tasks_done
         
         cancel_state = CancelState()
         
@@ -622,10 +654,7 @@ async def bulk_nested_notes_op(
                 edited_nids=edited_nids,
                 notes_to_add_dict=notes_to_add_dict,
                 updated_notes_dict=updated_notes_dict,
-                increment_done_tasks=increment_done_tasks,
-                increment_in_progress_tasks=increment_in_progress_tasks,
-                increment_done_notes=increment_done_notes,
-                get_progress=get_progress,
+                progress_updater=progress_updater,
                 cancel_state=cancel_state,
             )
         cancel_manager = CancelManager(tasks, cancel_state=cancel_state)
@@ -761,19 +790,9 @@ async def bulk_notes_op(
     
     updated_notes: list[Note] = []
     tasks: list[asyncio.Task] = []
-    tasks_in_progress: int = 0
-    tasks_done: int = 0
     
-    def increment_done_tasks():
-        nonlocal tasks_done, tasks_in_progress
-        tasks_done += 1
-        tasks_in_progress -= 1
-    def increment_in_progress_tasks():
-        nonlocal tasks_in_progress
-        tasks_in_progress += 1
-    def get_progress():
-        nonlocal tasks_done, tasks_in_progress
-        return f"""<strong>Processed:<code> {tasks_done}/{len(tasks)}</code></strong> notes <smallstyle="opacity: 0.85"> | Waiting response: {tasks_in_progress}</small>""", tasks_done
+    progress_updater = AsyncTaskProgressUpdater(title=f"Async AI op: {message}", total_notes=len(notes), total_tasks=len(notes))
+    
     def handle_op_success(
             note: Note,
             was_success: bool,
@@ -783,7 +802,7 @@ async def bulk_notes_op(
             updated_notes.append(note)
             edited_nids.append(note.id)
         if DEBUG:
-            print(f"Bulk notes op success for note {note.id}, was_success: {was_success}, tasks_done: {tasks_done}, tasks_in_progress: {tasks_in_progress}, actual tasks done: {len([t for t in tasks if t.done()])}")
+            print(f"Bulk notes op success for note {note.id}, was_success: {was_success}")
     
     cancel_state = CancelState()
     # Start all tasks
@@ -804,10 +823,7 @@ async def bulk_notes_op(
             config=config,
             op=op,
             rate_limit=rate_limit,
-            get_total_tasks=lambda: len(tasks),
-            increment_done_tasks=increment_done_tasks,
-            increment_in_progress_tasks=increment_in_progress_tasks,
-            get_progress=get_progress,
+            progress_updater=progress_updater,
             handle_op_error=handle_op_error,
             handle_op_result=handle_op_result,
             cancel_state=cancel_state,
@@ -823,6 +839,9 @@ async def bulk_notes_op(
             # note is passed to the op function, along with config in make_inner_bulk_op
             note=note
         ))
+        if len(tasks) % 5 == 0:
+            # Update the progress dialog every 5 tasks gathered
+            progress_updater.update_progress()
         tasks.append(task)
     if DEBUG:
         print(f"Async bulk notes op started with {len(tasks)} tasks, rate limit: {rate_limit}")
@@ -876,17 +895,13 @@ def on_bulk_success(
     out,
     done_text: str,
     edited_nids: Sequence[NoteId],
+    edited_other_nids: Sequence[NoteId],
     nids: Sequence[NoteId],
     parent: Browser,
     notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
     extra_callback=None,
 ):
     mw.taskman.run_on_main(lambda: mw.progress.finish())
-    tooltip(
-        f"{done_text} in {len(edited_nids)}/{len(nids)} selected notes.",
-        parent=parent,
-        period=5000,
-    )
     if DEBUG:
         print("on_bulk_success", out, notes_to_add_dict)
     if extra_callback:
@@ -906,6 +921,16 @@ def on_bulk_success(
                     "new_notes.tsv",
                     new_notes_tsv_str,
             )
+    # Show a tooltip after the import call as otherwise the import dialog would close the tooltip
+    # immediately after it had appeared
+    message = f"{done_text} in {len(edited_nids)}/{len(nids)} selected notes."
+    if edited_other_nids:
+        message += f"<br>Edited {len(edited_other_nids)} other notes not among the selection."
+    tooltip(
+        message,
+        parent=parent,
+        period=5000,
+    )
 
 
 def selected_notes_op(
@@ -916,11 +941,13 @@ def selected_notes_op(
     on_success: Optional[Callable] = None,
     ):
     edited_nids: list[NoteId] = []
+    edited_other_nids: list[NoteId] = []
     notes_to_add_dict: dict[str, list[Note]] = {}
     
     # Create a wrapper function that handles the async operation
     def run_bulk_op(col: Collection):
         async def async_wrapper():
+            nonlocal edited_nids, edited_other_nids
             result = await bulk_op(
                 col,
                 notes=[mw.col.get_note(nid) for nid in nids],
@@ -929,6 +956,9 @@ def selected_notes_op(
             )
             updated_notes, pos, res_notes_to_add_dict = result
             notes_to_add_dict.update(res_notes_to_add_dict)
+            edited_nids_set = set(edited_nids)
+            edited_other_nids = [n.id for n in updated_notes if n.id not in edited_nids_set]
+            edited_nids = list(edited_nids)
             
             mw.col.update_notes(updated_notes)
             return mw.col.merge_undo_entries(pos)
@@ -951,6 +981,7 @@ def selected_notes_op(
             out,
             done_text,
             edited_nids,
+            edited_other_nids,
             nids,
             parent,
             notes_to_add_dict,
