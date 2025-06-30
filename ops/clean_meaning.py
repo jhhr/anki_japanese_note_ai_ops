@@ -54,33 +54,45 @@ def get_new_meaning_from_model(
         config: Dict[str, str],
         vocab: str,
         sentence: str,
-    ) -> str:
-    return_field = "new_meaning"
+    ) -> tuple[str, str]:
+    meaning_return_field = "new_meaning"
+    en_meaning_return_field = "english_translation"
     prompt = f'\
     Below is a sentence containing a word or phrase.\
-    Generate a short monolingual dictionary style definition of the general meaning used in the sentence by the word or phrase.\
+    Your task is to generate a short monolingual dictionary style definition of the general meaning used in the sentence by the word or phrase.\
     If there are two usage patterns for this word or phrase - for example, one literal and one figurative - describe both shortly.\
     If there are more than two usage patterns for this word or phrase, describe the one used in the sentence.\
-    The word itself should not be used in the definition..\
+    The word itself should not be used in the definition.\
     Generally aim to for the definition to be a single sentence.\
     If it is necessary to explain more, the maximum length should be 3 sentences.\
     The definition should be in the same language as the sentence.\
     \
-    Return the meaning in a JSON string as the value of the key "{return_field}".\
+    Also, generate a very short English translation of the meaning, ideally a list of equivalent words or phrases but explaining further, if necessary.\
     \
     word_or_phrase: {vocab}\
     sentence: {sentence}\
     \
+    Return the meaning in a JSON string as the value of the key "{meaning_return_field}".\
+    Return the English translation in a JSON string as the value of the key "{en_meaning_return_field}".\
     '
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
         # Return nothing if the generating failed
-        return ""
+        return "", ""
+    
+    new_meaning = ""
+    en_meaning = ""
     try:
-        return result[return_field]
+        new_meaning = result[meaning_return_field]
     except KeyError:
-        return ""
+        print(f"Error: '{meaning_return_field}' not found in the result")
+
+    try:
+        en_meaning = result[en_meaning_return_field]
+    except KeyError:
+        print(f"Error: '{en_meaning_return_field}' not found in the result")
+    return new_meaning, en_meaning
 
 
 def clean_meaning_in_note(
@@ -95,6 +107,7 @@ def clean_meaning_in_note(
 
     try:
         meaning_field = get_field_config(config, "meaning_field", note_type)
+        en_meaning_field = get_field_config(config, "en_meaning_field", note_type)
         word_field = get_field_config(config, "word_field", note_type)
         sentence_field = get_field_config(config, "sentence_field", note_type)
     except KeyError as e:
@@ -104,10 +117,11 @@ def clean_meaning_in_note(
     if DEBUG:
         print("cleaning meaning in note", note.id)
         print("meaning_field in note", meaning_field in note)
+        print("en_meaning_field in note", en_meaning_field in note)
         print("word_field in note", word_field in note)
         print("sentence_field in note", sentence_field in note)
     # Check if the note has the required fields
-    if meaning_field in note and word_field in note and sentence_field in note:
+    if meaning_field in note and en_meaning_field in note and word_field in note and sentence_field in note:
         if DEBUG:
             print("note has fields")
         # Get the values from fields
@@ -129,8 +143,11 @@ def clean_meaning_in_note(
             return False
         else:
             # If there's no dict_entry, we'll use chatGPT to generate one from scratch
-            new_meaning = get_new_meaning_from_model(config, word, sentence)
+            new_meaning, en_meaning = get_new_meaning_from_model(config, word, sentence)
             note[meaning_field] = new_meaning
+            # Optionally fill in the English meaning field, if it is empty
+            if not note[en_meaning_field]:
+                note[en_meaning_field] = en_meaning
             if new_meaning != "":
                 return True
             return False
