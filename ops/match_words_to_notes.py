@@ -17,6 +17,7 @@ from .base_ops import (
     selected_notes_op,
     CancelState,
 )
+from ..kana_conv import to_hiragana
 from .clean_meaning import clean_meaning_in_note
 from ..utils import copy_into_new_note, get_field_config
 
@@ -199,7 +200,7 @@ def match_words_to_notes(
             print(f"Processing word tuple at index {word_index}: {word}, reading: {reading}")
         nonlocal processed_word_tuples, updated_notes_dict
         word_query = f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}")'
-        reading_query = f'"{word_reading_field}:{reading}"'
+        reading_query = f'"{word_reading_field}:{to_hiragana(reading)}"'
         no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
         query = f'{word_query} {reading_query} {no_x_in_sort_field}'
         if DEBUG:
