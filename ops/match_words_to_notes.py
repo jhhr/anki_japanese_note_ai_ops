@@ -199,10 +199,13 @@ def match_words_to_notes(
             print((f"match_op, notes_to_add_dict before: {notes_to_add_dict}"))
             print(f"Processing word tuple at index {word_index}: {word}, reading: {reading}")
         nonlocal processed_word_tuples, updated_notes_dict
-        word_query = f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}")'
+        # Check for existing suru verbs words including する in either field
         reading_query = f'"{word_reading_field}:{to_hiragana(reading)}"'
+        reading_query_suru = f'"{word_reading_field}:{to_hiragana(reading)}する"'
+        word_query = f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}"'
+        word_query_suru = f'"{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
         no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
-        query = f'{word_query} {reading_query} {no_x_in_sort_field}'
+        query = f'(({word_query} {reading_query}) OR ({word_query_suru} {reading_query_suru})) {no_x_in_sort_field}'
         if DEBUG:
             print(f"Searching for notes with query: {query}")
         note_ids: Sequence[NoteId] = mw.col.find_notes(query)
