@@ -87,6 +87,7 @@ def match_words_to_notes(
     updated_notes_dict: dict[NoteId, Note],
     increment_done_tasks: Callable[..., None],
     increment_in_progress_tasks: Callable[..., None],
+    increment_done_notes: Callable[..., None],
     get_progress: Callable[..., tuple[str, int]],
     cancel_state: CancelState,
     update_word_list_in_dict: Callable[[list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]]], None],
@@ -383,8 +384,8 @@ For action 1. "meaning_number" and "is_matched_meaning" are required, the other 
 For action 2. the reverse of 1. "meaning_number" and "is_matched_meaning" must be null, and the others are required
 For action 3. "meaning_number" is required, "is_matched_meaning" must be null, at least one of "jp_meaning" and "en_meaning" is required
 """
-        # if DEBUG:
-            # print(f"Prompt for matching meanings: {prompt}")
+        if DEBUG:
+            print(f"meanings_str: {meanings_str}")
         raw_result = get_response(model, prompt, cancel_state=cancel_state)
         result = None
         if raw_result is None:
@@ -399,14 +400,16 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
                 print(f"Warning: Expected a list, got a dict instead. Result: {raw_result}")
             result = [raw_result]  # Wrap it in a list to handle it uniformly, if it's garbage, we'll
             # catch it in the processing below
-        if not isinstance(raw_result, list):
+        elif not isinstance(raw_result, list):
             if DEBUG:
                 print(f"Error: Expected a list, got {type(raw_result)} instead. Result: {raw_result}")
             return False
-        if not raw_result:
+        elif not raw_result:
             if DEBUG:
                 print("Error: Result is an empty list, should have at least one object.")
             return False
+        else:
+            result = raw_result
         valid_meaning_objects = []
         valid_matched_meaning_found = False
         for i, res in enumerate(result):
@@ -657,6 +660,17 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
         update_word_list_in_dict(processed_word_tuples)
     need_update_note = False
     
+    def create_result_handler(word_index, word):
+        def handle_result(_: bool):
+            if DEBUG:
+                print(f"Task completed for word {word} (index {word_index})")
+            # At this point, processed_word_tuples[word_index] should have the final result for this word
+            # Only update the word list after all tasks complete
+            # Don't call update_word_list_in_dict here
+        return handle_result
+    
+    word_list_task_count = 0
+    
     for i, word_tuple in enumerate(word_tuples):
         if mw.progress.want_cancel():
             break
@@ -739,8 +753,7 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
         def handle_op_error(e: Exception):
             print(f"Error processing word tuple {word_tuple} at index {i}: {e}")
             raise e
-        def handle_op_result(_: bool):
-            return handle_return_word_tuples()
+        handle_op_result = create_result_handler(i, word)
         
         process_word_tuple: Callable[..., Coroutine[Any,Any,bool]] = make_inner_bulk_op(
             config=config,
@@ -768,14 +781,32 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
           ))
         tasks.append(task)
         note_tasks.append(task)
+        word_list_task_count += 1
+
+    # After all tasks are created, add one final task
+    if word_list_task_count > 0 or need_update_note:
+        if DEBUG:
+            print(f"Adding final update task after processing {len(note_tasks)} word tasks")
+        async def final_update_task():
+            # Wait for all word-specific tasks to complete
+            await asyncio.gather(*note_tasks)
+            if DEBUG:
+                print(f"All word tasks completed, updating word list with final processed_word_tuples: {processed_word_tuples}")
+            update_word_list_in_dict(processed_word_tuples)
+        
+        # Add this task, but don't add it to note_tasks to avoid circular waiting
+        tasks.append(asyncio.create_task(final_update_task()))
 
     if DEBUG:
         print(f"Final processed word tuples: {processed_word_tuples}")
     if not note_tasks and need_update_note:
+        if DEBUG:
+            print("No word tasks were created, but we need to update the note with processed_word_tuples")
         # If we ended up skipping all word tuples, we still may need to update the note
         # Create a dummy task that'll trigger calling handle_return_word_tuples
         async def dummy_task():
             await asyncio.sleep(0)
+            increment_done_notes()
             handle_return_word_tuples()
         note_tasks.append(asyncio.create_task(dummy_task()))
         
@@ -913,6 +944,7 @@ def match_words_to_notes_for_note(
                 updated_notes_dict=updated_notes_dict,
                 increment_done_tasks=increment_done_tasks,
                 increment_in_progress_tasks=increment_in_progress_tasks,
+                increment_done_notes=increment_done_notes,
                 get_progress=get_progress,
                 cancel_state=cancel_state,
                 update_word_list_in_dict=update_word_list_in_dict,
