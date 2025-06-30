@@ -16,7 +16,7 @@ from collections.abc import Sequence
 
 from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 
-DEBUG = True
+DEBUG = False
 
 
 MAX_TOKENS_VALUE = 2000
@@ -33,7 +33,7 @@ class CancelState:
         return self._cancelled
 
 
-def get_response(model, prompt, cancel_state: Optional[CancelState] = None):
+def get_response(model, prompt, cancel_state: Optional[CancelState] = None) -> Union[dict, None]:
     """Get a response from the appropriate model based on the configuration.
 
     Args:
@@ -84,7 +84,7 @@ class CancellableRequest:
 # Global variable to track active requests
 active_requests: list[CancellableRequest] = []
 
-def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] = None):
+def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] = None) -> Union[dict, None]:
     """Get a response from Google's Gemini API.
 
     Args:
@@ -198,7 +198,7 @@ def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] 
         return None
 
 
-def get_response_from_openai(model, prompt, cancel_state: Optional[CancelState] = None):
+def get_response_from_openai(model, prompt, cancel_state: Optional[CancelState] = None) -> Union[dict, None]:
     if DEBUG:
         print("OpenAI call, model", model)
         

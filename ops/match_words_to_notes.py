@@ -2,8 +2,7 @@ import json
 import re
 import asyncio
 import base64
-from functools import partial
-from typing import Union, Sequence, Callable, Any, Coroutine
+from typing import Union, Sequence, Callable, Any, Coroutine, Optional
 from aqt import mw
 
 from anki.notes import Note, NoteId
@@ -20,11 +19,19 @@ from .base_ops import (
 from .clean_meaning import clean_meaning_in_note
 from ..utils import copy_into_new_note, get_field_config
 
-# Raw word, tuple of word and reading
-raw_word_type = tuple[str, str]
+# Raw word, tuple of 1) word, 2) reading
+raw_one_meaning_word_type = tuple[str, str]
+
+# Raw word, tuple of 1) word, 2) reading and 3) meaning number
+# meaning number is used to indicate the same word and reading occurring with different meanings
+raw_multi_meaning_word_type = tuple[str, str, int]
 
 # Matched word, same but with note sort field value and note ID
-# (word, reading, note_sort_field_value, note_id +int or fake note Id -int)
+# 1) word, 2) reading, 3) note_sort_field_value, 4) note_id +int or fake note Id -int)
+# note_sort_field_value is different for each meaning a word with the same reading can have
+# so it is used to distinguish between them
+# The note_id references the exact note that the word is matched to, it can be a real note ID
+# or a placeholder ID used to identify new note that is to be created but hasn't yet
 matched_word_type = tuple[str, str, str, Union[NoteId,int]] 
 
 DEBUG = False
@@ -70,7 +77,7 @@ def make_new_note_id(note: Note) -> int:
 def match_words_to_notes(
     config: dict,
     current_note: Note,
-    word_tuples: list[Union[raw_word_type, matched_word_type]],
+    word_tuples: list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]],
     word_list_key: str,
     sentence: str,
     tasks: list[asyncio.Task],
@@ -82,7 +89,7 @@ def match_words_to_notes(
     increment_in_progress_tasks: Callable[..., None],
     get_progress: Callable[..., tuple[str, int]],
     cancel_state: CancelState,
-    update_word_list_in_dict: Callable[[list[Union[raw_word_type, matched_word_type]]], None],
+    update_word_list_in_dict: Callable[[list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]]], None],
     note_type: NotetypeDict,
     replace_existing: bool = False
 ):
@@ -163,7 +170,7 @@ def match_words_to_notes(
         print(f"Error: Missing fields in config: {', '.join(missing_fields)}")
         return word_tuples
     
-    processed_word_tuples: list[Union[raw_word_type, matched_word_type]] = word_tuples.copy()
+    processed_word_tuples: list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]] = word_tuples.copy()
     
     if DEBUG:
         print(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
@@ -270,8 +277,8 @@ def match_words_to_notes(
             return False
         # Sort meanings by the meaning number
         meanings.sort(key=lambda x: x[1])
-
         meanings_str = "\n".join(f"\n -{i+1}. *jp_meaning*: {meaning[0]}\n -{i+1}. *example_sentence* {sentence}\n -{i+1}. *en_meaning*: {meaning[4]}" for i, meaning in enumerate(meanings))       
+        
         prompt = f"""Below are listed some dictionary entry-like _meanings_ for a word along with _examples sentences_ for each meaning, and a _current sentence_ being used for determining which meaning to assign to _the word_. Your task is to determine whether any of the meanings match the usage in the sentence and choose one or more actions perform:
  1. Either, select one of the meanings as matching the how the word is used in the current sentence. You may or may not modify the meaning.
  2. Or, determine that none of the meanings below match how the word is used in the current sentence and a new high quality dictionary-like definition should be created.
@@ -307,24 +314,25 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
 """
         # if DEBUG:
             # print(f"Prompt for matching meanings: {prompt}")
-        result = get_response(model, prompt, cancel_state=cancel_state)
-        if result is None:
+        raw_result = get_response(model, prompt, cancel_state=cancel_state)
+        result = None
+        if raw_result is None:
             if DEBUG:
                 print("Failed to get a response from the API.")
             # If the prompt failed, return nothing
             return False
-        if isinstance(result, dict):
+        if isinstance(raw_result, dict):
             # this may be a case where the AI decided to return a single object instead of a list
             # we'll try to handle it like that then
             if DEBUG:
-                print(f"Warning: Expected a list, got a dict instead. Result: {result}")
-            result = [result]  # Wrap it in a list to handle it uniformly, if it's garbage, we'll
+                print(f"Warning: Expected a list, got a dict instead. Result: {raw_result}")
+            result = [raw_result]  # Wrap it in a list to handle it uniformly, if it's garbage, we'll
             # catch it in the processing below
-        if not isinstance(result, list):
+        if not isinstance(raw_result, list):
             if DEBUG:
-                print(f"Error: Expected a list, got {type(result)} instead. Result: {result}")
+                print(f"Error: Expected a list, got {type(raw_result)} instead. Result: {raw_result}")
             return False
-        if not result:
+        if not raw_result:
             if DEBUG:
                 print("Error: Result is an empty list, should have at least one object.")
             return False
@@ -782,7 +790,7 @@ def match_words_to_notes_for_note(
         async def wait_for_tasks(
               all_note_tasks: list[asyncio.Task],
               current_note: Note,
-              updated_word_list_dict: dict[str, list[Union[raw_word_type, matched_word_type]]],
+              updated_word_list_dict: dict[str, list[Union[raw_one_meaning_word_type, matched_word_type]]],
             ):
             await asyncio.gather(*all_note_tasks)
             if current_note.id in updated_notes_dict:

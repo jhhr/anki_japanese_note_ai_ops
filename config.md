@@ -95,7 +95,13 @@ You need to define
   10. `insert_deck` (optional) Used when generating TSVs for inserting new notes. If omitted, the
       file will simply not specify the deck
 
-## optionally, you can also specify, all for the `match_words_model` operation
+## optipnal specification
+
+### `extract_words` operatation
+
+- `ignore_current_word_lists`: (default: false) don't pass the current field to the prompt, making the model recreate the result from scratch
+
+### `match_words_model` operation
 
 -`word_lists_to_process` to select what parts of speech you collect:
     - `nouns`: default = yes
@@ -111,4 +117,4 @@ You need to define
     - `expressions`: default = yes
     - `yojijukugo`: default = yes
 
-- `replace_existing_matched_words`: overwrite previously processed matched words?
+- `replace_existing_matched_words`: (default: false) overwrite previously processed matched words?
