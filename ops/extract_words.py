@@ -163,6 +163,7 @@ More details on the categorization
 - This applies to compound verbs as well - include both the compound verb and its component verbs when they exist as separate valid words. For example: 飲[の]み 込[こ]まれた --> 飲み込む, 飲む and 込む
 - Don't list verbs いる or される when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
+- Nouns that almost always come with a particle should be listed in that form only. For example, with the particle に, the adverb 共に is overhelmingly more common over the plain noun form 共.
 - Only list proper nouns a single time, ignoring their component nouns.
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
 - Take note of words withing <gikun> tags. The kanji used for words wrapped in <gikun> tags are to be ignored and the word listed in hiragana. For example: k><gikun> 不埒[だら]し</gikun></k><k> 無[な]い</k> should be processed as if it was だらし 無[な]い
