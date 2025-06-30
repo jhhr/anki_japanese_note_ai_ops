@@ -213,6 +213,77 @@ def match_words_to_notes(
             new_note[word_normal_field] = word
             new_note[word_reading_field] = reading
             new_note[word_sort_field] = word
+            new_note.add_tag("new_matched_jp_word")
+            # Query for a note with a (kun)/(on) or (rX) marker in the sort field, we'll want to
+            # set the marker in this note appropriately based on that:
+            # - if there is (kun) --> this should be (on), or other way around
+            # - if there is (rX) --> this should be (rY) where Y is the next number in the sequence
+            # - if there is (kun)(rX) --> this should be (kun)(rY) where Y is the next number in 
+            #   the sequence, same for (on)(rX)
+            # - if there is no marker, this should have none
+            marker_regex = f'^{word} ((?:\((?:kun|on)\))?(?:\(r\d+\))?)$'
+            marker_note_ids = mw.col.find_notes(f'"{word_sort_field}:re:{marker_regex}"')
+            marker_notes = [mw.col.get_note(nid) for nid in marker_note_ids]
+            # Additionally, search the notes_to_add_dict to see if any of them have a marker like
+            # this, as we'll need to increment the rX number higher than the largest one found
+            if word in notes_to_add_dict:
+                for added_note in notes_to_add_dict[word]:
+                    if word_sort_field in added_note:
+                        marker_sort_field = added_note[word_sort_field]
+                        if re.match(rf"{marker_regex}", marker_sort_field):
+                            # If the marker matches, we can add this note ID to the list of marker notes
+                            marker_notes.append(added_note)
+
+            if len(marker_notes) == 1:
+                marker_note = marker_notes[0]
+                if marker_note and word_sort_field in marker_note:
+                    marker_sort_field = marker_note[word_sort_field]
+                    # Check if the sort field has a (kun) or (on) marker
+                    if "(kun)" in marker_sort_field:
+                        new_note[word_sort_field] = f"{word} (on)"
+                    elif "(on)" in marker_sort_field:
+                        new_note[word_sort_field] = f"{word} (kun)"
+                    else:
+                        # If no (kun)/(on) marker, just use the word
+                        new_note[word_sort_field] = word
+                    # Check for (rX) markers
+                    r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
+                    if r_match:
+                        r_number = int(r_match.group(1)) + 1
+                        new_note[word_sort_field] += f"(r{r_number})"
+            elif len(marker_notes) > 1:
+                # This ought to be case where there's multiple rX markers for the same word,
+                # so get the largest rX number and otherwise use the same (kun)/(on) logic as
+                # above
+                largest_r_number = 0
+                # Hopefully there are only either (kun)(rX) or (on)(rX) markers, and not both
+                # as we can't know which kind of reading this word is using without doing some
+                # reading lookups for the word...
+                found_kun = False
+                found_on = False
+                for marker_note in marker_notes:
+                    if marker_note and word_sort_field in marker_note:
+                        marker_sort_field = marker_note[word_sort_field]
+                        if "(kun)" in marker_sort_field:
+                            found_kun = True
+                        elif "(on)" in marker_sort_field:
+                            found_on = True
+                        r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
+                        if r_match:
+                            r_number = int(r_match.group(1))
+                            if r_number > largest_r_number:
+                                largest_r_number = r_number
+                if found_kun and not found_on:
+                    new_note[word_sort_field] = f"{word} (kun)(r{largest_r_number + 1})"
+                elif found_on and not found_kun:
+                    new_note[word_sort_field] = f"{word} (on)(r{largest_r_number + 1})"
+                else:
+                    # If we found both (kun) and (on) markers, we can't decide which one to use,
+                    # so just use the word without any markers and add a tag to the note for this
+                    # to be manually checked
+                    new_note[word_sort_field] = word
+                    new_note.add_tag("check_reading_marker")
+                
             new_note[furigana_sentence_field] = sentence
             new_note[meaning_field] = ""
             new_note[part_of_speech_field] = WORD_LIST_TO_PART_OF_SPEECH.get(word_list_key, "")
@@ -451,6 +522,16 @@ For action 3. "meaning_number" is required, "is_matched_meaning" must be null, a
                     # Either replace the (mX) in the sort field, or if there was none, add it
                     prev_sort_field = new_note[word_sort_field]
                     mxRec = re.compile(r"\(m(\d+)\)")
+                    # Additionally, check notes_to_add_dict for any notes we've added for this word
+                    # during this run, as we'll need to use the largest meaning index out of them
+                    if word in notes_to_add_dict:
+                        for added_note in notes_to_add_dict[word]:
+                            if word_sort_field in added_note:
+                                added_sort_field = added_note[word_sort_field]
+                                mx_match = mxRec.search(added_sort_field)
+                                if mx_match:
+                                    # If we found a (mX) in the sort field, update the largest meaning index
+                                    largest_meaning_index = max(largest_meaning_index, int(mx_match.group(1)) + 1)
                     if prev_sort_field and mxRec.search(prev_sort_field):
                         # Replace the existing (mX) with the new meaning number
                         new_note[word_sort_field] = mxRec.sub(f"(m{largest_meaning_index})", prev_sort_field)
