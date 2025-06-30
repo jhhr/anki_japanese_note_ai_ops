@@ -370,7 +370,7 @@ _Current sentence_: {sentence}
 
 JSON RETURN FORMAT
 
-Return a JSON array of objects, at most one more than there are meanings and at least one. Each object has the following four fields:
+Return a JSON string of an array of objects, at most one more than there are meanings and at least one. Each object has the following four fields:
 {{
   "meaning_number": <integer|null> - The ordinal number of the meaning listed above to signify it is being selected and/or modified. Must be a number for actions 1. and 3. Must be null for action 2.
   "is_matched_meaning": <boolean> - true, to indicate action 1. Otherwise false for actions 2 or 3. Either zero or only one object has this set to true.
@@ -384,9 +384,22 @@ For action 1. "meaning_number" and "is_matched_meaning" are required, the other 
 For action 2. the reverse of 1. "meaning_number" and "is_matched_meaning" must be null, and the others are required
 For action 3. "meaning_number" is required, "is_matched_meaning" must be null, at least one of "jp_meaning" and "en_meaning" is required
 """
+        response_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "meaning_number": {"type": "integer"},
+                    "is_matched_meaning": {"type": "boolean"},
+                    "jp_meaning": {"type": "string"},
+                    "en_meaning": {"type": "string"},
+                },
+                "required": [ "is_matched_meaning",],
+            },
+        }
         if DEBUG:
-            print(f"meanings_str: {meanings_str}")
-        raw_result = get_response(model, prompt, cancel_state=cancel_state)
+            print(f"\n\nmeanings_str: {meanings_str}")
+        raw_result = get_response(model, prompt, cancel_state=cancel_state, response_schema=response_schema)
         result = None
         if raw_result is None:
             if DEBUG:

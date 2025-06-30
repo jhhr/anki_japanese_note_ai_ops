@@ -33,7 +33,12 @@ class CancelState:
         return self._cancelled
 
 
-def get_response(model, prompt, cancel_state: Optional[CancelState] = None) -> Union[dict, None]:
+def get_response(
+    model: str,
+    prompt: str,
+    cancel_state: Optional[CancelState] = None,
+    response_schema: Optional[dict] = None
+    ) -> Union[dict, None]:
     """Get a response from the appropriate model based on the configuration.
 
     Args:
@@ -43,9 +48,9 @@ def get_response(model, prompt, cancel_state: Optional[CancelState] = None) -> U
         A dict containing the parsed JSON response, or None if there was an error.
     """
     if model.startswith("gemini"):
-        return get_response_from_gemini(model, prompt, cancel_state=cancel_state)
+        return get_response_from_gemini(model, prompt, cancel_state=cancel_state, response_schema=response_schema)
     elif model.startswith("gpt") or model.startswith("o3") or model.startswith("o1"):
-        return get_response_from_openai(model, prompt, cancel_state=cancel_state)
+        return get_response_from_openai(model, prompt, cancel_state=cancel_state, response_schema=response_schema)
     else:
         print(f"Unsupported model: {model}")
         return None
@@ -84,7 +89,12 @@ class CancellableRequest:
 # Global variable to track active requests
 active_requests: list[CancellableRequest] = []
 
-def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] = None) -> Union[dict, None]:
+def get_response_from_gemini(
+    model: str,
+    prompt: str,
+    cancel_state: Optional[CancelState] = None,
+    response_schema: Optional[dict] = None,
+    ) -> Union[dict, None]:
     """Get a response from Google's Gemini API.
 
     Args:
@@ -122,17 +132,15 @@ def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] 
         },
         "generationConfig": {
             "responseMimeType": "application/json",
-            # "responseSchema": {
-            #     "type": "OBJECT",
-            #     "properties": {
-            #         "some_prop": {
-            #             "type": "STRING",
-            #         },
-            #     },
-            #     "required": ["some_prop"],
-            # },
         },
     }
+    if response_schema:
+        data["generationConfig"] = {
+            "responseMimeType": "application/json",
+            "responseSchema": response_schema,
+        }
+        if DEBUG:
+            print("Using response schema", response_schema)
 
     headers = {
         "Content-Type": "application/json",
@@ -194,11 +202,16 @@ def get_response_from_gemini(model, prompt, cancel_state: Optional[CancelState] 
             print("Parsed result from json", result)
         return result
     except json.JSONDecodeError:
-        print("Failed to parse JSON response")
+        print(f"Failed to parse JSON response, json_result: {json_result}")
         return None
 
 
-def get_response_from_openai(model, prompt, cancel_state: Optional[CancelState] = None) -> Union[dict, None]:
+def get_response_from_openai(
+    model: str,
+    prompt: str,
+    cancel_state: Optional[CancelState] = None,
+    response_schema: Optional[dict] = None,
+    ) -> Union[dict, None]:
     if DEBUG:
         print("OpenAI call, model", model)
         
@@ -238,6 +251,13 @@ def get_response_from_openai(model, prompt, cancel_state: Optional[CancelState] 
         data["max_completion_tokens"] = MAX_TOKENS_VALUE
     else:
         data["max_tokens"] = MAX_TOKENS_VALUE
+    if response_schema:
+        data["response_format"] = {
+            "type": "json_schema",
+            "schema": response_schema,
+        }
+        if DEBUG:
+            print("Using response schema", response_schema)
     
     
     # Make the API call
