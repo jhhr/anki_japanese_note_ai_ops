@@ -1,7 +1,8 @@
+import random
 import json
 import re
 import asyncio
-import base64
+import time
 from typing import Union, Sequence, Callable, Any, Coroutine, Optional
 from aqt import mw
 
@@ -69,10 +70,8 @@ def make_new_note_id(note: Note) -> int:
     """
     if not note:
         return 0
-    # Use a hash of the note's fields to generate a unique ID
-    fields_str = "_".join(note.fields)
-    b64_bytes = base64.b64encode(fields_str.encode("utf-8"))[:8]
-    return -int.from_bytes(b64_bytes, "big")
+    # Use the current epoch time in nanoseconds as a temporary unique ID
+    return -time.time_ns() + random.randint(0, 100)
 
 def match_words_to_notes(
     config: dict,
