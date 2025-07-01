@@ -37,7 +37,7 @@ WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
   "adverbs": "Adverb",
   "adjectivals": "Adjectival",
   "particles": "Particle",
-  "conjuctions": "Conjunction",
+  "conjunctions": "Conjunction",
   "pronouns": "Pronoun",
   "suffixes": "Suffix",
   "prefixes": "Prefix",

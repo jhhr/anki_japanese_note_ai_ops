@@ -18,7 +18,7 @@
     "adverbs": true,
     "adjectivals": true,
     "particles": false,
-    "conjuctions": true,
+    "conjunctions": true,
     "pronouns": true,
     "suffixes": true,
     "prefixes": true,
