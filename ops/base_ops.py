@@ -243,7 +243,7 @@ def get_response_from_openai(
     }
 
     data = {
-        "model": "gpt-4o",
+        "model": model,
         "response_format": {"type": "json_object"},
         "messages": messages,
     }
