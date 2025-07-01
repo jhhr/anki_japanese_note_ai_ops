@@ -22,7 +22,7 @@ from .clean_meaning import clean_meaning_in_note
 from .extract_words import word_lists_str_format
 from ..kana_conv import to_hiragana
 from ..utils import copy_into_new_note, get_field_config
-from ..types import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
+from ..configuration import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 
 DEBUG = False
     

@@ -14,7 +14,7 @@ from .base_ops import (
     selected_notes_op,
 )
 from ..utils import get_field_config
-from ..types import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
+from ..configuration import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 
 DEBUG = False 
 
