@@ -24,7 +24,7 @@ from ..kana_conv import to_hiragana
 from ..utils import copy_into_new_note, get_field_config
 from ..types import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 
-DEBUG = True
+DEBUG = False
     
 WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
   "nouns": "Noun",
