@@ -24,7 +24,7 @@ from ..kana_conv import to_hiragana
 from ..utils import copy_into_new_note, get_field_config
 from ..configuration import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 
-DEBUG = False
+DEBUG = True
     
 WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
   "nouns": "Noun",
@@ -345,70 +345,99 @@ More details on choosing a meaning:
 - The inclication of these definitions should then be toward explaining closely related nuances in a single definition and splitting to different definitions when a clear topic border is found.
 - Thus, avoid increasing the specificity of existing meanings, except when their current state is low-quality ambiguousness.
 
+How you will indicate your choice in the `meanings`:
+- `meaning_number´: The ordinal number of the meaning listed above to signify it is being selected and/or modified. Provide this for actions 1. and 3. and omit for action 2.
+- `is_matched_meaning`: true to indicate action 1. otherwise false
+- `jp_meaning`: Provide to modify japanese meaning in action 1. or 3. or to create a new meaning in action 2. where it is required
+- `en_meaning`: Same as above but the english meaning. 
+
+You must provide at least one object (action 1. or 2.) and at most one more than the number of meanings listed above (action 2. + action 3. on all meanings)
+
+Some fields are required depending on the action you choose:
+At most, one object can have `is_matched_meaning` set to true (action 1.), all others must have it set to false.
+For action 1. `meaning_number` is required
+For action 2. `meaning_number` must be omitted or null
+For action 3. `meaning_number` is required and either or both of `jp_meaning` and `en_meaning` must be provided.
+
 THE MEANINGS AND EXAMPLE SENTENCES
 {meanings_str}
 
 _The word_: {word}
 _Current sentence_: {sentence}
 
-JSON RETURN FORMAT
-
-Return a JSON string of an array of objects, at most one more than there are meanings and at least one. Each object has the following four fields:
-{{
-  "meaning_number": <integer|null> - The ordinal number of the meaning listed above to signify it is being selected and/or modified. Must be a number for actions 1. and 3. Must be null for action 2.
-  "is_matched_meaning": <boolean> - true, to indicate action 1. Otherwise false for actions 2 or 3. Either zero or only one object has this set to true.
-  "jp_meaning": <string|null> - If non-null, will be used to replace or create the current meaning in action 1. 2. or 3. Is only null in action 1. when no modification is chose to be done. Must be non-null for action 2.
-  "en_meaning": <string|null> - If non-null, will be used to replace or create the current english meaning in action 1. 2. or 3. Must non-null for action 2. In actions 1. and 3 "jp_meaning" and "en_meaning" do not have to simultaenously non-null; only one or other may be modified.
-}}
-
-Maximum number of objects is reached when performing action 2. to create a new meaning and action 3. for all other meanings. The minimum number of objects is one: to perform either action 1. or 2. only
-
-For action 1. "meaning_number" and "is_matched_meaning" are required, the other are optional
-For action 2. the reverse of 1. "meaning_number" and "is_matched_meaning" must be null, and the others are required
-For action 3. "meaning_number" is required, "is_matched_meaning" must be null, at least one of "jp_meaning" and "en_meaning" is required
 """
         response_schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "meaning_number": {"type": "integer"},
-                    "is_matched_meaning": {"type": "boolean"},
-                    "jp_meaning": {"type": "string"},
-                    "en_meaning": {"type": "string"},
-                },
-                "required": [ "is_matched_meaning",],
+            "type": "object",
+            "properties": {
+                "meanings": {
+                "type": "array",
+                "description": "Array of meaning objects for this word",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                    "is_matched_meaning": {
+                        "type": "boolean",
+                        "description": "Whether this meaning matches an existing note"
+                    },
+                    "meaning_number": {
+                        "type": "integer",
+                        "description": "The number of the listed meaning if it matches, or null if it doesn't match"
+                    },
+                    "en_meaning": {
+                        "type": "string",
+                        "description": "New English meaning definition for the word"
+                    },
+                    "jp_meaning": {
+                        "type": "string",
+                        "description": "New Japanese meaning definition for the word"
+                    }
+                    },
+                    "required": ["is_matched_meaning"]
+                }
+                }
             },
-        }
+            "required": ["meanings"]
+            }
         if DEBUG:
             print(f"\n\nmeanings_str: {meanings_str}")
         raw_result = get_response(model, prompt, cancel_state=cancel_state, response_schema=response_schema)
-        result = None
         if raw_result is None:
             if DEBUG:
                 print("Failed to get a response from the API.")
             # If the prompt failed, return nothing
             return False
+        meaning_list = None
+        # First get the list of meanings from the raw result
         if isinstance(raw_result, dict):
+            meaning_list = raw_result.get("meanings", None)
+        elif isinstance(raw_result, list):
+            # If the result is a list, assume it's the meanings directly
+            meaning_list = raw_result
+        else:
+            if DEBUG:
+                print(f"Error: Expected a list or dict, got {type(raw_result)} instead. Result: {raw_result}")
+            return False
+        # Check the list of meanings is the right type
+        if isinstance(meaning_list, dict):
             # this may be a case where the AI decided to return a single object instead of a list
             # we'll try to handle it like that then
             if DEBUG:
                 print(f"Warning: Expected a list, got a dict instead. Result: {raw_result}")
-            result = [raw_result]  # Wrap it in a list to handle it uniformly, if it's garbage, we'll
+            meaning_list = [meaning_list]  # Wrap it in a list to handle it uniformly, if it's garbage, we'll
             # catch it in the processing below
-        elif not isinstance(raw_result, list):
+        elif not isinstance(meaning_list, list):
             if DEBUG:
                 print(f"Error: Expected a list, got {type(raw_result)} instead. Result: {raw_result}")
             return False
-        elif not raw_result:
+        elif not meaning_list:
             if DEBUG:
                 print("Error: Result is an empty list, should have at least one object.")
             return False
-        else:
-            result = raw_result
+        # All validity checks passed, meaning_list should be a list now, now to check what it
+        # contains though...
         valid_meaning_objects = []
         valid_matched_meaning_found = False
-        for i, res in enumerate(result):
+        for i, res in enumerate(meaning_list):
             if not isinstance(res, dict):
                 if DEBUG:
                     print(f"Error: Expected a dict, got {type(res)} instead at index {i}. Result: {res}")
