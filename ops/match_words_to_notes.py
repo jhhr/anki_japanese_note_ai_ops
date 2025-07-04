@@ -199,6 +199,11 @@ def match_words_to_notes(
         if DEBUG:
             print(f"Searching for notes with query: {query}")
         note_ids: Sequence[NoteId] = mw.col.find_notes(query)
+        reading_matches_only = False
+        if not note_ids:
+            reading_matches_only = True
+            # If no good matches were found, check only by matching the reading
+            note_ids = mw.col.find_notes(f'({reading_query} OR {reading_query_suru}) {no_x_in_sort_field}')
         matching_new_notes = notes_to_add_dict.get(word, [])
             
         if not note_ids and not matching_new_notes:
@@ -303,7 +308,7 @@ def match_words_to_notes(
             matching_notes.extend(matching_new_notes)
         
         # Get all the meanings from the notes to check against the sentence
-        meanings: list[tuple[str, int, NoteId, str, str]] = []
+        meanings: list[tuple[str, int, NoteId, str, str, str]] = []
         # meaning is a tuple of (jp_meaning, meaning_number, note_id, example_sentence, en_meaning)
         largest_meaning_index = 0
         note_to_copy = None
@@ -314,6 +319,7 @@ def match_words_to_notes(
                 meaning = note[meaning_field]
                 other_sentence = note[furigana_sentence_field] if furigana_sentence_field in note else ""
                 english_meaning = note[english_meaning_field] if english_meaning_field in note else ""
+                match_word = note[word_kanjified_field] if word_kanjified_field in note else ""
                 if meaning:
                     sort_field = note[word_sort_field]
                     # Get the meaning number, if any from sort field, in the form (m1), (m2), etc.
@@ -327,7 +333,7 @@ def match_words_to_notes(
                         if meaning_number > largest_meaning_index:
                             largest_meaning_index = meaning_number
                             note_to_copy = note
-                    meanings.append((meaning, meaning_number, note.id, other_sentence, english_meaning))
+                    meanings.append((meaning, meaning_number, note.id, other_sentence, english_meaning, match_word))
                 else:
                     if DEBUG:
                         print(f"Note {note.id} has empty meaning field")
@@ -342,9 +348,20 @@ def match_words_to_notes(
             return False
         # Sort meanings by the meaning number
         meanings.sort(key=lambda x: x[1])
-        meanings_str = "\n".join(f"\n -{i+1}. *jp_meaning*: {meaning[0]}\n -{i+1}. *example_sentence* {sentence}\n -{i+1}. *en_meaning*: {meaning[4]}" for i, meaning in enumerate(meanings))       
+        meanings_str = ""
+        for i, (jp_meaning, meaning_number, _, example_sentence, en_meaning, match_word) in enumerate(meanings):
+            word_header = f"Meaning {i+1}:" if not reading_matches_only else f"Matching reading {i+1}:"
+            word_for_reading = f"\n- *word*: {match_word}" if reading_matches_only else ""
+            
+            meanings_str += f"""{word_header}{word_for_reading}
+- *jp_meaning*: {jp_meaning}
+- *example_sentence* {example_sentence}
+- *en_meaning*: {en_meaning}
+"""
         
-        prompt = f"""Below are listed some dictionary entry-like _meanings_ for a word along with _examples sentences_ for each meaning, and a _current sentence_ being used for determining which meaning to assign to _the word_. Your task is to determine whether any of the meanings match the usage in the sentence and choose one or more actions perform:
+        good_matches_intro = "Below are listed some dictionary entry-like _meanings_ for a targeted word along with _examples sentences_ for each meaning, and a _current sentence_ being used for determining which meaning to assign to _the word_. Your task is to determine whether any of the meanings match the usage in the sentence and choose one or more actions perform:"
+        reading_matches_only_intro = "Below are listed some dictionary entry-like _meanings_ for words that match the reading for the targeted word along with _examples sentences_ for each meaning, and a _current sentence_ being used for determining which meaning to assign to _the word_. Your task is to determine whether any of the meanings match the usage in the sentence and choose one or more actions perform:"
+        prompt = f"""{good_matches_intro if not reading_matches_only else reading_matches_only_intro}
  1. Either, select one of the meanings as matching the how the word is used in the current sentence. You may or may not modify the meaning.
  2. Or, determine that none of the meanings below match how the word is used in the current sentence and a new high quality dictionary-like definition should be created.
  3. And in addition to performing actions 1 or 2, one or more of the meanings should be improved so that its new formulation will better fit both its example sentence and the current sentence.
@@ -372,7 +389,7 @@ For action 3. `meaning_number` is required and either or both of `jp_meaning` an
 THE MEANINGS AND EXAMPLE SENTENCES
 {meanings_str}
 
-_The word_: {word}
+_Targeted word_: {word}
 _Current sentence_: {sentence}
 
 """
@@ -612,7 +629,7 @@ _Current sentence_: {sentence}
                     print(f"Matched meaning JP:'{jp_meaning}'/EN:'{en_meaning}' for word {word} with reading {reading}")
                 # We have a match, so we can update the note with the matched meaning
                 matched_note = None
-                matched_meaning, _, matched_note_id, _, _ = meanings[meaning_number - 1]
+                matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number - 1]
                 for note in matching_notes:
                     if note.id == matched_note_id and matched_meaning == note[meaning_field]:
                         # Ensure the matched meaning is the same as in the note to account for id=0
@@ -647,7 +664,7 @@ _Current sentence_: {sentence}
             elif not is_matched_meaning and meaning_number is not None:
                 # Action 3. update the meaning in the note with the new meaning
                 matched_note = None
-                matched_meaning, _, matched_note_id, _, _ = meanings[meaning_number - 1]
+                matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number - 1]
                 if DEBUG:
                     print(f"Matched meaning {matched_meaning} and new meaning JP:'{jp_meaning}'/EN:{en_meaning} for word {word} with reading {reading}")
                 for note in matching_notes:
