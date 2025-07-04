@@ -186,7 +186,10 @@ def match_words_to_notes(
         # If the word contains only non-japanese characters, skip it
         if not re.search(r'[ぁ-んァ-ン一-龯]', word):
             processed_word_tuples[word_index] = None
-        # Check for existing suru verbs words including する in either field
+        # Check for existing suru verbs words including する in either field, remove する in the word
+        if word.endswith("する") and reading.endswith("する"):
+            word = word[:-2]
+            reading = reading[:-2]
         reading_query = f'"{word_reading_field}:{to_hiragana(reading)}"'
         reading_query_suru = f'"{word_reading_field}:{to_hiragana(reading)}する"'
         word_query = f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}"'
