@@ -3,7 +3,7 @@ import json
 import re
 import asyncio
 import time
-from typing import Union, Sequence, Callable, Any, Coroutine, Optional
+from typing import Union, Sequence, Callable, Any, Coroutine, Optional, cast
 from aqt import mw
 
 from anki.notes import Note, NoteId
@@ -61,6 +61,9 @@ def make_new_note_id(note: Note) -> int:
         return 0
     # Use the current epoch time in nanoseconds as a temporary unique ID
     return -time.time_ns() + random.randint(0, 100)
+
+ProcessedWordTuple = Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type, None]
+FinalWordTuple = Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]
 
 def match_words_to_notes(
     config: dict,
@@ -151,7 +154,8 @@ def match_words_to_notes(
         print(f"Error: Missing fields in config: {', '.join(missing_fields)}")
         return word_tuples
     
-    processed_word_tuples: list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]] = word_tuples.copy()
+    processed_word_tuples = cast(list[ProcessedWordTuple],word_tuples.copy())
+    final_word_tuples: list[FinalWordTuple] = []
     
     if DEBUG:
         print(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
@@ -179,6 +183,9 @@ def match_words_to_notes(
             print((f"match_op, notes_to_add_dict before: {notes_to_add_dict}"))
             print(f"Processing word tuple at index {word_index}: {word}, reading: {reading}")
         nonlocal processed_word_tuples, updated_notes_dict
+        # If the word contains only non-japanese characters, skip it
+        if not re.search(r'[ぁ-んァ-ン一-龯]', word):
+            processed_word_tuples[word_index] = None
         # Check for existing suru verbs words including する in either field
         reading_query = f'"{word_reading_field}:{to_hiragana(reading)}"'
         reading_query_suru = f'"{word_reading_field}:{to_hiragana(reading)}する"'
@@ -681,10 +688,12 @@ _Current sentence_: {sentence}
     new_tasks_count = 0
     
     def handle_return_word_tuples():
-        nonlocal processed_word_tuples
+        nonlocal processed_word_tuples, final_word_tuples
         if DEBUG:
             print(f"Returning processed word tuples: {processed_word_tuples}")
-        update_word_list_in_dict(processed_word_tuples)
+        # filter out any None values from processed_word_tuples
+        final_word_tuples = [wt for wt in processed_word_tuples if wt is not None]
+        update_word_list_in_dict(final_word_tuples)
     need_update_note = False
     
     def create_result_handler(word_index, word):
@@ -821,17 +830,17 @@ _Current sentence_: {sentence}
             # Wait for all word-specific tasks to complete
             await asyncio.gather(*note_tasks)
             if DEBUG:
-                print(f"All word tasks completed, updating word list with final processed_word_tuples: {processed_word_tuples}")
-            update_word_list_in_dict(processed_word_tuples)
+                print(f"All word tasks completed, updating word list with final processed_word_tuples: {final_word_tuples}")
+            update_word_list_in_dict(final_word_tuples)
         
         # Add this task, but don't add it to note_tasks to avoid circular waiting
         tasks.append(asyncio.create_task(final_update_task()))
 
     if DEBUG:
-        print(f"Final processed word tuples: {processed_word_tuples}")
+        print(f"Final processed word tuples: {final_word_tuples}")
     if not note_tasks and need_update_note:
         if DEBUG:
-            print("No word tasks were created, but we need to update the note with processed_word_tuples")
+            print("No word tasks were created, but we need to update the note with final_word_tuples")
         # If we ended up skipping all word tuples, we still may need to update the note
         # Create a dummy task that'll trigger calling handle_return_word_tuples
         async def run_dummy_task():
