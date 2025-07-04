@@ -164,6 +164,8 @@ More details on the categorization
 - Don't list verbs いる or される when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
 - Avoid listing words ending in particles or copula, as this would create many variants of the same word. The exceptions would be when the copula/particle-added form is overwhelmingly more common than the word being used without the particle/copula. For example, with the particle に, the adverb 共に is overhelmingly more common over the plain noun form 共, so whenever 共に occurs, 共に and not 共 should be listed. Only, if 共 were to occur alone (not as part of a compound word), it should be listed.
+- Don't list verbs in たい or たくない forms, except when these forms are overwhelmingly more common compared to the verb occurring in base form.
+- Don't list adjectives in さ form, list them in their い-form. Avoid listing adjectives in く-form as well, excpect when they have a meaning that isn't merely adverbial; for example, 大きく has the meaning "on a grand scale / extensively"
 - Only list proper nouns a single time, ignoring their component nouns.
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
 - Take note of words withing <gikun> tags. The kanji used for words wrapped in <gikun> tags are to be ignored and the word listed in hiragana. For example: <k><gikun> 不埒[だら]し</gikun></k><k> 無[な]い</k> should be processed as if it was だらし 無[な]い
