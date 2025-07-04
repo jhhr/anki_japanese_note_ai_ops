@@ -24,7 +24,7 @@ from ..kana_conv import to_hiragana
 from ..utils import copy_into_new_note, get_field_config
 from ..configuration import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
 
-DEBUG = True
+DEBUG = False
     
 WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
   "nouns": "Noun",
@@ -77,7 +77,7 @@ def match_words_to_notes(
     updated_notes_dict: dict[NoteId, Note],
     progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
-    update_word_list_in_dict: Callable[[list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]]], None],
+    update_word_list_in_dict: Callable[[list[ProcessedWordTuple]], None],
     note_type: NotetypeDict,
     replace_existing: bool = False
 ):
@@ -155,7 +155,6 @@ def match_words_to_notes(
         return word_tuples
     
     processed_word_tuples = cast(list[ProcessedWordTuple],word_tuples.copy())
-    final_word_tuples: list[FinalWordTuple] = []
     
     if DEBUG:
         print(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
@@ -185,6 +184,8 @@ def match_words_to_notes(
         nonlocal processed_word_tuples, updated_notes_dict
         # If the word contains only non-japanese characters, skip it
         if not re.search(r'[ぁ-んァ-ン一-龯]', word):
+            if DEBUG:
+                print(f"Skipping word '{word}' at index {word_index} as it contains no Japanese characters")
             processed_word_tuples[word_index] = None
         # Check for existing suru verbs words including する in either field, remove する in the word
         if word.endswith("する") and reading.endswith("する"):
@@ -709,12 +710,11 @@ _Current sentence_: {sentence}
     new_tasks_count = 0
     
     def handle_return_word_tuples():
-        nonlocal processed_word_tuples, final_word_tuples
+        nonlocal processed_word_tuples
         if DEBUG:
             print(f"Returning processed word tuples: {processed_word_tuples}")
         # filter out any None values from processed_word_tuples
-        final_word_tuples = [wt for wt in processed_word_tuples if wt is not None]
-        update_word_list_in_dict(final_word_tuples)
+        update_word_list_in_dict(processed_word_tuples)
     need_update_note = False
     
     def create_result_handler(word_index, word):
@@ -851,14 +851,14 @@ _Current sentence_: {sentence}
             # Wait for all word-specific tasks to complete
             await asyncio.gather(*note_tasks)
             if DEBUG:
-                print(f"All word tasks completed, updating word list with final processed_word_tuples: {final_word_tuples}")
-            update_word_list_in_dict(final_word_tuples)
+                print(f"All word tasks completed, updating word list with final processed_word_tuples: {processed_word_tuples}")
+            update_word_list_in_dict(processed_word_tuples)
         
         # Add this task, but don't add it to note_tasks to avoid circular waiting
         tasks.append(asyncio.create_task(final_update_task()))
 
     if DEBUG:
-        print(f"Final processed word tuples: {final_word_tuples}")
+        print(f"Final processed word tuples: {processed_word_tuples}")
     if not note_tasks and need_update_note:
         if DEBUG:
             print("No word tasks were created, but we need to update the note with final_word_tuples")
@@ -962,7 +962,7 @@ def match_words_to_notes_for_note(
         async def wait_for_tasks(
               all_note_tasks: list[asyncio.Task],
               current_note: Note,
-              updated_word_list_dict: dict[str, list[Union[raw_one_meaning_word_type, matched_word_type]]],
+              updated_word_list_dict: dict[str, list[FinalWordTuple]],
             ):
             await asyncio.gather(*all_note_tasks)
             if current_note.id in updated_notes_dict:
@@ -983,10 +983,10 @@ def match_words_to_notes_for_note(
             )
         
         def make_word_list_updater(current_key):
-            def update_function(updated_tuples):
+            def update_function(updated_tuples: list[ProcessedWordTuple]):
                 if DEBUG:
                     print(f"Updating word list for key '{current_key}' with tuples: {updated_tuples}")
-                word_list_dict[current_key] = updated_tuples
+                word_list_dict[current_key] = [wt for wt in updated_tuples if wt is not None]
             return update_function
         
         for word_list_key in word_list_keys:
