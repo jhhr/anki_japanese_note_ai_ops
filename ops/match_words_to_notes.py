@@ -510,7 +510,7 @@ How you will indicate your choice in the `meanings`:
 - `meaning_number´: The ordinal number of the meaning listed above to signify it is being selected and/or modified. Provide this for actions 1. and 3. and omit for action 2.
 - `is_matched_meaning`: true to indicate action 1. otherwise false
 - `jp_meaning`: Provide to modify japanese meaning in action 1. or 3. or to create a new meaning in action 2. where it is required
-- `en_meaning`: Same as above but the english meaning. 
+- `en_meaning`: Same as above but the english meaning.
 
 You must provide at least one object (action 1. or 2.) and at most one more than the number of meanings listed above (action 2. + action 3. on all meanings)
 
