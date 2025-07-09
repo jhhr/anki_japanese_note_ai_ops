@@ -165,12 +165,12 @@ def get_extracted_words_from_model(
         current_lists_addition = f"""The sentence has been processed before and the current word lists are shown below. Your task should be to consider only whether more words should be added to any lists and whether any words may have been categorized differently from the current instructions below - the instructions when you processed these last time may have been different.
 
 Instructions on modifying the current lists:
-- Linked words are word arrays that have 4 elements: 3 strings and one positive or negative long integer may only be moved to another list, not modified and definitely not removed. 
+- Linked words are word arrays that have 4 elements: 3 strings and one positive or negative long integer may only be moved to another list, not modified and definitely not removed.
   - The most common case is that the linked multi-meaning word's 3rd string is the same as the 1st string. For example ["上る","のぼる",上る", 1378555077520]
   - When there are more than one multi-meaning words in this form will have the two first strings be identical but the 3rd string and final integer will differ. For example: ["控える","おさえる","控える (m1)", 1378555133370] and [控える","おさえる","控える (m2)", 1616058016685]
 - Generally you should only add more words, not remove any. Removal can be considered for compound verbs or expressions that are sufficiently accounted for by their individual components that are already listed in other word categories. Or, if there appears to be too many multi-meaning words, when one less meaning may suffice to account for each usage of the word. However, if the multi-meaning words are already linked, they should not be touched.
 - If there is a case of a pair or more of homophone+homograph words occurring in the sentence but the current list does not list the word enough times, the to-be-added additional multi-meaning words' meaning index number depends on whether the current words are linked or not.
-  a. If there is only a single 2-element non-linked word, you should modify it to add the meaning index number to it, starting from 1, and add new word(s) with meanings number incrementing from there. For example, there being ["上がる","あがる"] only but 2 meanings of 上がる used in the sentence --> the result would contain ["上がる","あがる", 1] and ["上がる","あがる", 2] 
+  a. If there is only a single 2-element non-linked word, you should modify it to add the meaning index number to it, starting from 1, and add new word(s) with meanings number incrementing from there. For example, there being ["上がる","あがる"] only but 2 meanings of 上がる used in the sentence --> the result would contain ["上がる","あがる", 1] and ["上がる","あがる", 2]
   b. If there is more than one 2-element word - which should contain meaning numbers already - continue adding more words with meaning numbers beginning from the highest index + 1 of the current words. For example, ["上がる","あがる", 1] and ["上がる","あがる", 2] being present but 3 meanings of 上がる are used in the sentence --> add one more, so ["上がる","あがる", 3]
   c. If there are any 4-element linked words, the meaning numbers you use for the new word or words you add do not need count the linked word(s). For example, there is ["当て","あて","当て (m1)", 1744043020707] and 2 meanings of 当て used --> only add ["当て","あて", 1]. If there is ["当て","あて","当て (m5)", 1744043020711] and ["当て","あて", 1] but 3 meanings of 当て used --> only add ["当て","あて", 2]
 
@@ -185,14 +185,15 @@ More details on the categorization
 - Don't list verbs いる or される when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
 - Avoid listing words ending in particles or copula, as this would create many variants of the same word. The exceptions would be when the copula/particle-added form is overwhelmingly more common than the word being used without the particle/copula. For example, with the particle に, the adverb 共に is overhelmingly more common over the plain noun form 共, so whenever 共に occurs, 共に and not 共 should be listed. Only, if 共 were to occur alone (not as part of a compound word), it should be listed.
-- Don't list verbs in たい or たくない forms, except when these forms are overwhelmingly more common compared to the verb occurring in base form.
+- Don't list verbs in たい, たくない, せる or other non-base forms, except when such a form has a special meaning. Examples of special meanings, 食えない "shrewd" vs literal "cannot eat", 唸らせる "to impress" vs literal "to make someone groan". Example of non-special meaning: 齧らせる is simply "to make someone bite"
 - Don't list adjectives in さ form, list them in their い-form. Avoid listing adjectives in く-form as well, excpect when they have a meaning that isn't merely adverbial; for example, 大きく has the meaning "on a grand scale / extensively"
+- Don't list nouns which may take the genitive case の with the particle, list them in their plain form. For example, 上の should be listed as just 上.
 - Only list proper nouns a single time, ignoring their component nouns.
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
 - Take note of words withing <gikun> tags. The kanji used for words wrapped in <gikun> tags are to be ignored and the word listed in hiragana. For example: <k><gikun> 不埒[だら]し</gikun></k><k> 無[な]い</k> should be processed as if it was だらし 無[な]い
 - Otherwise ignore any HTML that may be in the text, leaving any HTML out of the word lists.
-- A word occuring twice or more with the same kanji form and reading needs to considered for homonymity. If it is a used in the same meaning, the word should be listed just once. If the meanings differ, the word listed once for each different meaning, with a 1-based index number included to differentiate them. For example, 行く as "physically move to a place" vs "participate in an activity" vs "reach a point (in an activity, not physical place)" 
-- Additionally, a word occuring twice with the same meaning but, for some reason in kanji form and in hiragana, should result in one entry using the kanji form. 
+- A word occuring twice or more with the same kanji form and reading needs to considered for homonymity. If it is a used in the same meaning, the word should be listed just once. If the meanings differ, the word listed once for each different meaning, with a 1-based index number included to differentiate them. For example, 行く as "physically move to a place" vs "participate in an activity" vs "reach a point (in an activity, not physical place)"
+- Additionally, a word occuring twice with the same meaning but, for some reason in kanji form and in hiragana, should result in one entry using the kanji form.
 
 
 Example sentence 1: 私[わたし]も<b> 連[つ]れて 行[い]って</b><k> 下[くだ]さい</k>。
