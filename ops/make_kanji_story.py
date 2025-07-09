@@ -12,6 +12,7 @@ from .base_ops import (
     get_response,
     bulk_notes_op,
     selected_notes_op,
+    AsyncTaskProgressUpdater,
 )
 from .write_kanji_component_words import KANJI_STORY_COMPONENT_WORDS_LOG
 from ..utils import get_field_config
@@ -20,11 +21,11 @@ DEBUG = False
 
 
 def get_kanji_story_from_model(
-        config: Dict[str, str],
-        kanji: str,
-        components: str,
-        current_story: str,
-    ) -> str:
+    config: Dict[str, str],
+    kanji: str,
+    components: str,
+    current_story: str,
+) -> str:
     media_path = Path(mw.pm.profileFolder(), "collection.media")
     # Get stored dict of words used for component in the kanji_story_component_words.log file
     with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), "r", encoding="utf-8") as f:
@@ -126,10 +127,10 @@ def get_kanji_story_from_model(
 
 
 def make_story_for_note(
-        config: Dict[str, str],
-        note: Note, 
-        notes_to_add_dict: Dict[str, list[Note]] = {},
-    ) -> bool:
+    config: Dict[str, str],
+    note: Note,
+    notes_to_add_dict: Dict[str, list[Note]] = {},
+) -> bool:
     model = note.note_type()
     if not model:
         if DEBUG:
@@ -175,11 +176,12 @@ def make_story_for_note(
 
 
 def bulk_make_stories_op(
-        col: Collection,
-        notes: Sequence[Note],
-        edited_nids: list[NoteId],
-        notes_to_add_dict: Dict[str, list[Note]] = {},
-    ):
+    col: Collection,
+    notes: Sequence[Note],
+    edited_nids: list[NoteId],
+    progress_updater: AsyncTaskProgressUpdater,
+    notes_to_add_dict: Dict[str, list[Note]] = {},
+):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -187,10 +189,13 @@ def bulk_make_stories_op(
     model = config.get("kanji_story_model", "")
     message = "Updated stories"
     op = make_story_for_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
+    return bulk_notes_op(
+        message, config, op, col, notes, edited_nids, progress_updater, notes_to_add_dict, model
+    )
 
 
 def make_stories_for_selected_notes(nids: Sequence[NoteId], parent: Browser):
+    progress_updater = AsyncTaskProgressUpdater(title="Async AI op: Making kanji stories")
     done_text = "Updated stories"
     bulk_op = bulk_make_stories_op
-    return selected_notes_op(done_text, bulk_op, nids, parent)
+    return selected_notes_op(done_text, bulk_op, nids, parent, progress_updater)

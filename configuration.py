@@ -1,7 +1,6 @@
 from typing import Union
 from anki.notes import NoteId
 
-
 # Raw word, tuple of 1) word, 2) reading
 raw_one_meaning_word_type = tuple[str, str]
 # Raw word, tuple of 1) word, 2) reading and 3) meaning number
@@ -13,4 +12,4 @@ raw_multi_meaning_word_type = tuple[str, str, int]
 # so it is used to distinguish between them
 # The note_id references the exact note that the word is matched to, it can be a real note ID
 # or a placeholder ID used to identify new note that is to be created but hasn't yet
-matched_word_type = tuple[str, str, str, Union[NoteId,int]]
+matched_word_type = tuple[str, str, str, Union[NoteId, int]]

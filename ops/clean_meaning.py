@@ -10,6 +10,7 @@ from .base_ops import (
     get_response,
     bulk_notes_op,
     selected_notes_op,
+    AsyncTaskProgressUpdater,
 )
 from ..utils import get_field_config
 
@@ -17,28 +18,27 @@ DEBUG = False
 
 
 def get_single_meaning_from_model(
-        config: Dict[str, str],
-        vocab: str,
-        sentence: str,
-        dict_entry: str,
-    ):
+    config: Dict[str, str],
+    vocab: str,
+    sentence: str,
+    dict_entry: str,
+):
     return_field = "cleaned_meaning"
-    prompt = f'\
-    Below, the dictionary entry for the word or phrase may contain multiple meanings.\
-    Extract the one meaning matching the usage of the word in the sentence.\
-    If there are only two meanings for this word or phrase, one literal and one figurative, pick both and shorten their respective descriptions.\
-    Omit any example sentences the matching meaning included (often include within 「」 brackets).\
-    Shorten and simplify the meaning as much possible, ideally into 1-3 sentences, with more complex meanings being allowed more sentences.\
-    Descriptions of animals and plants are often scientific. From these omit descriptions on their ecology and only describe their appearance and type of plant/animal with simple language.\
-    In case there is only a single meaning, return that.\
-    Clean off meaning numberings and other notation leaving only a plain text description.\
-    \
-    Return the extracted meaning, in Japanese, in a JSON string as the value of the key "{return_field}".\
-    \
-    word_or_phrase: {vocab}\
-    sentence: {sentence}\
-    dictionary_entry_for_word: {dict_entry}\
-    '
+    prompt = (
+        "    Below, the dictionary entry for the word or phrase may contain multiple meanings.   "
+        " Extract the one meaning matching the usage of the word in the sentence.    If there are"
+        " only two meanings for this word or phrase, one literal and one figurative, pick both and"
+        " shorten their respective descriptions.    Omit any example sentences the matching"
+        " meaning included (often include within 「」 brackets).    Shorten and simplify the"
+        " meaning as much possible, ideally into 1-3 sentences, with more complex meanings being"
+        " allowed more sentences.    Descriptions of animals and plants are often scientific. From"
+        " these omit descriptions on their ecology and only describe their appearance and type of"
+        " plant/animal with simple language.    In case there is only a single meaning, return"
+        " that.    Clean off meaning numberings and other notation leaving only a plain text"
+        " description.        Return the extracted meaning, in Japanese, in a JSON string as the"
+        f' value of the key "{return_field}".        word_or_phrase: {vocab}    sentence:'
+        f" {sentence}    dictionary_entry_for_word: {dict_entry}    "
+    )
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
@@ -51,36 +51,33 @@ def get_single_meaning_from_model(
 
 
 def get_new_meaning_from_model(
-        config: Dict[str, str],
-        vocab: str,
-        sentence: str,
-    ) -> tuple[str, str]:
+    config: Dict[str, str],
+    vocab: str,
+    sentence: str,
+) -> tuple[str, str]:
     meaning_return_field = "new_meaning"
     en_meaning_return_field = "english_translation"
-    prompt = f'\
-    Below is a sentence containing a word or phrase.\
-    Your task is to generate a short monolingual dictionary style definition of the general meaning used in the sentence by the word or phrase.\
-    If there are two usage patterns for this word or phrase - for example, one literal and one figurative - describe both shortly.\
-    If there are more than two usage patterns for this word or phrase, describe the one used in the sentence.\
-    The word itself should not be used in the definition.\
-    Generally aim to for the definition to be a single sentence.\
-    If it is necessary to explain more, the maximum length should be 3 sentences.\
-    The definition should be in the same language as the sentence.\
-    \
-    Also, generate a very short English translation of the meaning, ideally a list of equivalent words or phrases but explaining further, if necessary.\
-    \
-    word_or_phrase: {vocab}\
-    sentence: {sentence}\
-    \
-    Return the meaning in a JSON string as the value of the key "{meaning_return_field}".\
-    Return the English translation in a JSON string as the value of the key "{en_meaning_return_field}".\
-    '
+    prompt = (
+        "    Below is a sentence containing a word or phrase.    Your task is to generate a short"
+        " monolingual dictionary style definition of the general meaning used in the sentence by"
+        " the word or phrase.    If there are two usage patterns for this word or phrase - for"
+        " example, one literal and one figurative - describe both shortly.    If there are more"
+        " than two usage patterns for this word or phrase, describe the one used in the sentence. "
+        "   The word itself should not be used in the definition.    Generally aim to for the"
+        " definition to be a single sentence.    If it is necessary to explain more, the maximum"
+        " length should be 3 sentences.    The definition should be in the same language as the"
+        " sentence.        Also, generate a very short English translation of the meaning, ideally"
+        " a list of equivalent words or phrases but explaining further, if necessary.       "
+        f" word_or_phrase: {vocab}    sentence: {sentence}        Return the meaning in a JSON"
+        f' string as the value of the key "{meaning_return_field}".    Return the English'
+        f' translation in a JSON string as the value of the key "{en_meaning_return_field}".    '
+    )
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
         # Return nothing if the generating failed
         return "", ""
-    
+
     new_meaning = ""
     en_meaning = ""
     try:
@@ -99,7 +96,7 @@ def clean_meaning_in_note(
     config: Dict[str, str],
     note: Note,
     notes_to_add_dict: Dict[str, list[Note]],
-    ) -> bool:
+) -> bool:
     note_type = note.note_type()
     if not note_type:
         print("Error: note_type() call failed for note", note.id)
@@ -121,7 +118,12 @@ def clean_meaning_in_note(
         print("word_field in note", word_field in note)
         print("sentence_field in note", sentence_field in note)
     # Check if the note has the required fields
-    if meaning_field in note and en_meaning_field in note and word_field in note and sentence_field in note:
+    if (
+        meaning_field in note
+        and en_meaning_field in note
+        and word_field in note
+        and sentence_field in note
+    ):
         if DEBUG:
             print("note has fields")
         # Get the values from fields
@@ -131,9 +133,7 @@ def clean_meaning_in_note(
         # Check if the value is non-empty
         if dict_entry:
             # Call API to get single meaning from the raw dictionary entry
-            modified_meaning_jp = get_single_meaning_from_model(
-                config, word, sentence, dict_entry
-            )
+            modified_meaning_jp = get_single_meaning_from_model(config, word, sentence, dict_entry)
 
             # Update the note with the new value
             note[meaning_field] = modified_meaning_jp
@@ -161,8 +161,9 @@ def bulk_clean_notes_op(
     col: Collection,
     notes: Sequence[Note],
     edited_nids: list,
+    progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: Dict[str, list[Note]] = {},
-    ):
+):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -170,10 +171,13 @@ def bulk_clean_notes_op(
     model = config.get("word_meaning_model", "")
     message = "Cleaning meaning"
     op = clean_meaning_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
+    return bulk_notes_op(
+        message, config, op, col, notes, edited_nids, progress_updater, notes_to_add_dict, model
+    )
 
 
 def clean_selected_notes(nids: Sequence[NoteId], parent: Browser):
+    progress_updater = AsyncTaskProgressUpdater(title="Async AI op: Cleaning meanings")
     done_text = "Updated meaning"
     bulk_op = bulk_clean_notes_op
-    return selected_notes_op(done_text, bulk_op, nids, parent)
+    return selected_notes_op(done_text, bulk_op, nids, parent, progress_updater)

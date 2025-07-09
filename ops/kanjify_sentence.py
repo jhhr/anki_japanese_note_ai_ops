@@ -10,6 +10,7 @@ from .base_ops import (
     get_response,
     bulk_notes_op,
     selected_notes_op,
+    AsyncTaskProgressUpdater,
 )
 from ..utils import get_field_config
 
@@ -17,9 +18,9 @@ DEBUG = False
 
 
 def get_kanjified_sentence_from_model(
-        config: dict[str, str],
-        sentence: str,
-    ) -> Union[list[str], None]:
+    config: dict[str, str],
+    sentence: str,
+) -> Union[list[str], None]:
     kanjified_sentence_return_field = "kanjified_sentence"
 
     prompt = f"""Below is a sentence in Japanese that includes furigana in brackets after kanji words. Your task is to convert the sentence into a fully kanjified version, where all hiragana and katakana words are replaced with their kanji equivalents"
@@ -84,10 +85,10 @@ Kanjified example 8: <ul><li><k> 色々[いろいろ]</k>な<k> 物[もの]</k>�
 Example sentence 9: しかもけっして 食欲[しょくよく]がないからではなかったのだ。また、 彼[かれ]の 口[くち]にもっと 合[あ]うような 別[べつ]な 食[た]べものをもってくるのだろうか。 妹[いもうと]が 自分[じぶん]でそうしてくれないだろうか。
 Kanjified example 9: <k> 然[しか]も</k><k> 決[け]っして</k> 食欲[しょくよく]が<k> 無[な]い</k>からでは<k> 無[な]かった</k>のだ。<k> 又[また]</k>、 彼[かれ]の 口[くち]にもっと<k> 合[あ]う</k><k> 様[よう]な</k><k> 別[べつ]</k>な<k> 食[た]べ物[もの]</k>を<k> 持[も]って</k><k> 来[く]る</k>のだろうか。 妹[いもうと]が 自分[じぶん]で<k> 然[そ]う</k><k> 為[し]て</k><k> 呉[く]れない</k>だろうか。
 
-Return a JSON string with the following key-value pairs: 
+Return a JSON string with the following key-value pairs:
  "{kanjified_sentence_return_field}": The fully kanjified sentence.
- 
-The sentence to process: {sentence} 
+
+The sentence to process: {sentence}
 """
     model = config.get("kanjify_sentence_model", "")
     result = get_response(model, prompt)
@@ -108,7 +109,7 @@ def kanjify_sentence_in_note(
     config: dict[str, str],
     note: Note,
     notes_to_add_dict: dict[str, list[Note]] = {},
-    ) -> bool:
+) -> bool:
     model = note.note_type()
     if not model:
         if DEBUG:
@@ -116,9 +117,7 @@ def kanjify_sentence_in_note(
         return False
     try:
         furigana_sentence_field = get_field_config(config, "furigana_sentence_field", model)
-        kanjified_sentence_field = get_field_config(
-            config, "kanjified_sentence_field", model
-        )
+        kanjified_sentence_field = get_field_config(config, "kanjified_sentence_field", model)
     except Exception as e:
         print(e)
         return False
@@ -161,11 +160,12 @@ def kanjify_sentence_in_note(
 
 
 def bulk_kanjify_notes_op(
-        col: Collection,
-        notes: Sequence[Note],
-        edited_nids: list[NoteId],
-        notes_to_add_dict: dict[str, list[Note]] = {},
-    ):
+    col: Collection,
+    notes: Sequence[Note],
+    edited_nids: list[NoteId],
+    progress_updater: AsyncTaskProgressUpdater,
+    notes_to_add_dict: dict[str, list[Note]] = {},
+):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -173,10 +173,13 @@ def bulk_kanjify_notes_op(
     model = config.get("kanjify_sentence_model", "")
     message = "Kanjifying sentences"
     op = kanjify_sentence_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
+    return bulk_notes_op(
+        message, config, op, col, notes, edited_nids, progress_updater, notes_to_add_dict, model
+    )
 
 
 def kanjify_selected_notes(nids: Sequence[NoteId], parent: Browser):
+    progress_updater = AsyncTaskProgressUpdater(title="Async AI op: Kanjifying sentences")
     done_text = "Updated kanjified sentences"
     bulk_op = bulk_kanjify_notes_op
-    return selected_notes_op(done_text, bulk_op, nids, parent)
+    return selected_notes_op(done_text, bulk_op, nids, parent, progress_updater)

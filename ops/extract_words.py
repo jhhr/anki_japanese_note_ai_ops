@@ -6,20 +6,28 @@ from anki.collection import Collection
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
-from collections.abc import Sequence
 
 from .base_ops import (
     get_response,
     bulk_notes_op,
     selected_notes_op,
+    AsyncTaskProgressUpdater,
 )
 from ..utils import get_field_config
-from ..configuration import raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type
+from ..configuration import (
+    raw_one_meaning_word_type,
+    raw_multi_meaning_word_type,
+    matched_word_type,
+)
 
-DEBUG = False 
+DEBUG = False
 
 
-def word_tuple_sort_key(word_tuple: Sequence) -> tuple[Union[str, None], Union[str, None], Union[str, None], Union[int, None], Union[int, None]]:
+def word_tuple_sort_key(
+    word_tuple: Sequence,
+) -> tuple[
+    Union[str, None], Union[str, None], Union[str, None], Union[int, None], Union[int, None]
+]:
     """
     Sort key for word tuples. This is used to sort the words in the word list.
     The sort order is:
@@ -63,11 +71,12 @@ def word_tuple_sort_key(word_tuple: Sequence) -> tuple[Union[str, None], Union[s
             meaning_number = 0
     # Return a tuple that can be used for sorting
     return (word, reading, sort_word, note_id, meaning_number)
-        
+
+
 def compared_word_lists(
-        cur_word_list: list[tuple],
-        new_word_list: list[tuple],
-    ) -> list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]]:
+    cur_word_list: list[tuple],
+    new_word_list: list[tuple],
+) -> list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]]:
     """
     Compare two word lists and return a list of words that combine both lists, keeping all previous
     words and only adding new words that are not already in the current list.
@@ -85,7 +94,7 @@ def compared_word_lists(
     added_list: list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type]] = []
     for word_tuple in added_set:
         word, reading, meaning_number, sort_word, note_id = None, None, None, None, None
-        
+
         if len(word_tuple) == 2:
             word, reading = word_tuple
         elif len(word_tuple) == 3:
@@ -96,7 +105,7 @@ def compared_word_lists(
             if DEBUG:
                 print(f"Word tuple with invalid length {word_tuple} in added_set, skipping")
             continue
-        
+
         # at least word and reading must be present
         if word and reading:
             # sort_word and note_id should not be present in the added_set, any new words that had
@@ -106,16 +115,22 @@ def compared_word_lists(
             # existing words sort sort_word and note_id as-is
             if sort_word is not None or note_id is not None:
                 if DEBUG:
-                    print(f"Invalid new word tuple with sort_word/note_id preset {word_tuple} in added_set, skipping")
+                    print(
+                        f"Invalid new word tuple with sort_word/note_id preset {word_tuple} in"
+                        " added_set, skipping"
+                    )
                 continue
             elif meaning_number is not None:
-               added_list.append((word, reading, meaning_number))
+                added_list.append((word, reading, meaning_number))
             else:
                 # if meaning_number is not present, this is allowed
                 added_list.append((word, reading))
         else:
             if DEBUG:
-                print(f"Invalid new word tuple with missing word/reading {word_tuple} in added_set, skipping")
+                print(
+                    f"Invalid new word tuple with missing word/reading {word_tuple} in added_set,"
+                    " skipping"
+                )
             continue
     # Return the sorted combined list of current words and new words
     # Ensure all elements are tuples
@@ -123,21 +138,27 @@ def compared_word_lists(
     combined_list.sort(key=word_tuple_sort_key)
     return combined_list
 
+
 def word_lists_str_format(
-        word_lists: dict,
-    ) -> Union[str, None]:
+    word_lists: dict,
+) -> Union[str, None]:
     """
     Convert the word list dict into the same format used in the prompt
     """
     if not word_lists:
         return None
-    return "{\n" + ",\n".join([f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k,v in word_lists.items()]) + "\n}" 
+    return (
+        "{\n"
+        + ",\n".join(
+            [f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k, v in word_lists.items()]
+        )
+        + "\n}"
+    )
+
 
 def get_extracted_words_from_model(
-        sentence: str,
-        current_lists: Union[str, None],
-        config: dict[str, str]
-    ) -> Union[dict, None]:
+    sentence: str, current_lists: Union[str, None], config: dict[str, str]
+) -> Union[dict, None]:
     current_lists_addition = ""
     if current_lists:
         # If current_lists is not empty, add the portion to the instructions to examine it
@@ -218,7 +239,7 @@ Example results 2:
 }}
 Example sentence 3:  <k> 此[こ]れ</k>は 正[まさ]に 天高[てんたか]く 馬肥[うまこ]ゆる 秋[あき]と 言[い]った<k> 物[も]ん</k>だな。
 Example result 3:
-{{ 
+{{
   "nouns": [["天","てん"],["馬","うま"],["秋","あき"],["物","もの"]],
   "proper_nouns": [],
   "numbers": [],
@@ -383,7 +404,7 @@ Example results 10:
 
 {current_lists_addition}
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings, or two strings and one number for multi-meaning words.
- 
+
 The sentence to process: {sentence}
 """
     model = config.get("extract_words_model", "")
@@ -400,17 +421,17 @@ def extract_words_in_note(
     config: dict,
     note: Note,
     notes_to_add_dict: dict[str, list[Note]] = {},
-    ) -> bool:
+) -> bool:
     note_type = note.note_type()
     if not note_type:
         if DEBUG:
             print("Missing note type for note", note.id)
         return False
     try:
-        word_extraction_sentence_field = get_field_config(config, "word_extraction_sentence_field", note_type)
-        word_list_field = get_field_config(
-            config, "word_list_field", note_type
+        word_extraction_sentence_field = get_field_config(
+            config, "word_extraction_sentence_field", note_type
         )
+        word_list_field = get_field_config(config, "word_list_field", note_type)
     except Exception as e:
         print(e)
         return False
@@ -435,15 +456,13 @@ def extract_words_in_note(
             # Reformat the current word lists to the same format so formatting differences do not
             # cause issues
             if current_word_lists_raw and not ignore_current_word_lists:
-                current_word_lists = word_lists_str_format(
-                    json.loads(current_word_lists_raw)
-                )
+                current_word_lists = word_lists_str_format(json.loads(current_word_lists_raw))
                 if DEBUG:
                     print("Calling API with sentence")
             else:
                 if DEBUG:
                     print("Calling API with sentence and no current word lists")
-            
+
             word_lists = get_extracted_words_from_model(sentence, current_word_lists, config)
             if DEBUG:
                 print("result from API", word_lists)
@@ -455,7 +474,7 @@ def extract_words_in_note(
                 # Update the note with the new values
                 if not isinstance(word_lists, dict):
                     if DEBUG:
-                        print(f"API response is not a dictionary, resetting to empty")
+                        print("API response is not a dictionary, resetting to empty")
                     word_lists = {}
                 if DEBUG:
                     print("new_list", word_lists)
@@ -498,11 +517,12 @@ def extract_words_in_note(
 
 
 def bulk_extract_from_notes_op(
-        col: Collection,
-        notes: Sequence[Note], 
-        edited_nids: list[NoteId],
-        notes_to_add_dict: dict[str, list[Note]]
-    ):
+    col: Collection,
+    notes: Sequence[Note],
+    edited_nids: list[NoteId],
+    progress_updater: AsyncTaskProgressUpdater,
+    notes_to_add_dict: dict[str, list[Note]],
+):
     config = mw.addonManager.getConfig(__name__)
     if not config:
         showWarning("Missing addon configuration")
@@ -510,10 +530,21 @@ def bulk_extract_from_notes_op(
     model = config.get("extract_words_model", "")
     message = "Extracting words"
     op = extract_words_in_note
-    return bulk_notes_op(message, config, op, col, notes, edited_nids, notes_to_add_dict, model)
+    return bulk_notes_op(
+        message,
+        config,
+        op,
+        col,
+        notes,
+        edited_nids,
+        progress_updater,
+        notes_to_add_dict,
+        model,
+    )
 
 
 def extract_words_from_selected_notes(nids: Sequence[NoteId], parent: Browser):
+    progress_updater = AsyncTaskProgressUpdater(title="Async AI op: Extracting words")
     done_text = "Updated word lists"
     bulk_op = bulk_extract_from_notes_op
-    return selected_notes_op(done_text, bulk_op, nids, parent)
+    return selected_notes_op(done_text, bulk_op, nids, parent, progress_updater)
