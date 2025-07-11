@@ -522,7 +522,7 @@ class AsyncTaskProgressUpdater:
             time_msg += f""" | <small> Avg time per note: {avg_per_note_s:.2f}s</small>
             <br><code>ETA: {eta_time}</code>"""
         task_progress_msg = f"""<strong>Adding notes:</strong>
-            <br><strong><code>{self.notes_done}/{notes_added}</code></strong> notes"""
+            <br><strong><code>{notes_added}/{total_notes}</code></strong> notes"""
         mw.taskman.run_on_main(
             lambda: mw.progress.update(
                 label=f"{task_progress_msg}{time_msg}",
