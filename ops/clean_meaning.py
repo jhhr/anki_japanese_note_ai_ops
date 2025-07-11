@@ -21,33 +21,42 @@ def get_single_meaning_from_model(
     config: Dict[str, str],
     vocab: str,
     sentence: str,
-    dict_entry: str,
+    jp_dict_entry: str,
+    en_dict_entry: str = "",
 ):
-    return_field = "cleaned_meaning"
-    prompt = (
-        "    Below, the dictionary entry for the word or phrase may contain multiple meanings.   "
-        " Extract the one meaning matching the usage of the word in the sentence.    If there are"
-        " only two meanings for this word or phrase, one literal and one figurative, pick both and"
-        " shorten their respective descriptions.    Omit any example sentences the matching"
-        " meaning included (often include within 「」 brackets).    Shorten and simplify the"
-        " meaning as much possible, ideally into 1-3 sentences, with more complex meanings being"
-        " allowed more sentences.    Descriptions of animals and plants are often scientific. From"
-        " these omit descriptions on their ecology and only describe their appearance and type of"
-        " plant/animal with simple language.    In case there is only a single meaning, return"
-        " that.    Clean off meaning numberings and other notation leaving only a plain text"
-        " description.        Return the extracted meaning, in Japanese, in a JSON string as the"
-        f' value of the key "{return_field}".        word_or_phrase: {vocab}    sentence:'
-        f" {sentence}    dictionary_entry_for_word: {dict_entry}    "
-    )
+    jp_meaning_return_field = "cleaned_meaning"
+    en_meaning_return_field = "english_meaning"
+    prompt = f"""Below, the dictionary entry for the word or phrase may contain multiple meanings. Your task is to extract the one meaning matching the usage of the word in the sentence.
+- If there are only two meanings for this word or phrase, one literal and one figurative, pick both and shorten their respective descriptions.
+- Omit any example sentences the matching meaning included (often include within 「」 brackets).
+- Shorten and simplify the meaning as much possible, ideally into 1-3 sentences, with more complex meanings being allowed more sentences.
+- Descriptions of animals and plants are often scientific. From these omit descriptions on their ecology and only describe their appearance and type of plant/animal with simple language.
+- In case there is only a single meaning, return that.
+- Clean off meaning numberings and other notation leaving only a plain text description.
+
+Additionally, but only if it seems necessary, reword the English dictionary definition to fit the Japanese one. The English definition should ideally simply list equivalent words, if there are some, and only explain in sentences when it's necessary.
+
+Return a JSON object with two fields:
+Return the extracted and possibly modified Japanese meaning as the value of the key "{jp_meaning_return_field}".
+Return the possibly modified English meaning as the value of the key "{en_meaning_return_field}".
+
+Word or phrase: {vocab}
+---
+Sentence: {sentence}
+---
+Japanese dictionary entry: {jp_dict_entry}
+"""
+    if en_dict_entry:
+        prompt += f"---\nEnglish dictionary entry: {en_dict_entry}\n"
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
         # Return original dict_entry unchanged if the cleaning failed
-        return dict_entry
+        return jp_dict_entry, en_dict_entry
     try:
-        return result[return_field]
+        return result[jp_meaning_return_field], result[en_meaning_return_field]
     except KeyError:
-        return dict_entry
+        return jp_dict_entry, en_dict_entry
 
 
 def get_new_meaning_from_model(
@@ -55,23 +64,24 @@ def get_new_meaning_from_model(
     vocab: str,
     sentence: str,
 ) -> tuple[str, str]:
-    meaning_return_field = "new_meaning"
-    en_meaning_return_field = "english_translation"
-    prompt = (
-        "    Below is a sentence containing a word or phrase.    Your task is to generate a short"
-        " monolingual dictionary style definition of the general meaning used in the sentence by"
-        " the word or phrase.    If there are two usage patterns for this word or phrase - for"
-        " example, one literal and one figurative - describe both shortly.    If there are more"
-        " than two usage patterns for this word or phrase, describe the one used in the sentence. "
-        "   The word itself should not be used in the definition.    Generally aim to for the"
-        " definition to be a single sentence.    If it is necessary to explain more, the maximum"
-        " length should be 3 sentences.    The definition should be in the same language as the"
-        " sentence.        Also, generate a very short English translation of the meaning, ideally"
-        " a list of equivalent words or phrases but explaining further, if necessary.       "
-        f" word_or_phrase: {vocab}    sentence: {sentence}        Return the meaning in a JSON"
-        f' string as the value of the key "{meaning_return_field}".    Return the English'
-        f' translation in a JSON string as the value of the key "{en_meaning_return_field}".    '
-    )
+    jp_meaning_return_field = "new_meaning"
+    en_meaning_return_field = "english_meaning"
+    prompt = f"""Below is a sentence containing a word or phrase. Your task is to generate a short monolingual dictionary style definition of the general meaning used in the sentence by the word or phrase.
+
+- If there are two usage patterns for this word or phrase - for example, one literal and one figurative - describe both shortly.
+- If there are more than two usage patterns for this word or phrase, describe the one used in the sentence.
+- The word itself should not be used in the definition.
+- Generally aim to for the definition to be a single sentence. If it is necessary to explain more, the maximum length should be 3 sentences.
+
+The definition should be in the same language as the sentence. Also, generate a very short English translation of the meaning, ideally a list of equivalent words or phrases but explaining further, if necessary.
+
+Return a JSON object with two fields:
+Return the meaning ias the value of the key "{jp_meaning_return_field}".
+Return the English translation as the value of the key "{en_meaning_return_field}".
+
+Word or phrase: {vocab}
+Sentence: {sentence}
+"""
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
@@ -81,9 +91,9 @@ def get_new_meaning_from_model(
     new_meaning = ""
     en_meaning = ""
     try:
-        new_meaning = result[meaning_return_field]
+        new_meaning = result[jp_meaning_return_field]
     except KeyError:
-        print(f"Error: '{meaning_return_field}' not found in the result")
+        print(f"Error: '{jp_meaning_return_field}' not found in the result")
 
     try:
         en_meaning = result[en_meaning_return_field]
@@ -127,28 +137,30 @@ def clean_meaning_in_note(
         if DEBUG:
             print("note has fields")
         # Get the values from fields
-        dict_entry = note[meaning_field]
+        jp_dict_entry = note[meaning_field]
+        en_dict_entry = note[en_meaning_field]
         word = note[word_field]
         sentence = note[sentence_field]
         # Check if the value is non-empty
-        if dict_entry:
+        if jp_dict_entry:
             # Call API to get single meaning from the raw dictionary entry
-            modified_meaning_jp = get_single_meaning_from_model(config, word, sentence, dict_entry)
+            new_jp_meaning, new_en_meaning = get_single_meaning_from_model(
+                config, word, sentence, jp_dict_entry, en_dict_entry
+            )
 
             # Update the note with the new value
-            note[meaning_field] = modified_meaning_jp
+            note[meaning_field] = new_jp_meaning
+            note[en_meaning_field] = new_en_meaning
             # Return success, if the we changed something
-            if modified_meaning_jp != dict_entry:
+            if new_jp_meaning != jp_dict_entry or new_en_meaning != en_dict_entry:
                 return True
             return False
         else:
             # If there's no dict_entry, we'll use chatGPT to generate one from scratch
             new_meaning, en_meaning = get_new_meaning_from_model(config, word, sentence)
             note[meaning_field] = new_meaning
-            # Optionally fill in the English meaning field, if it is empty
-            if not note[en_meaning_field]:
-                note[en_meaning_field] = en_meaning
-            if new_meaning != "":
+            note[en_meaning_field] = en_meaning
+            if new_meaning != "" or en_meaning != "":
                 return True
             return False
 
