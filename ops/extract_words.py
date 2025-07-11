@@ -192,7 +192,8 @@ More details on the categorization
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
 - Take note of words withing <gikun> tags. The kanji used for words wrapped in <gikun> tags are to be ignored and the word listed in hiragana. For example: <k><gikun> 不埒[だら]し</gikun></k><k> 無[な]い</k> should be processed as if it was だらし 無[な]い
 - Otherwise ignore any HTML that may be in the text, leaving any HTML out of the word lists.
-- A word occuring twice or more with the same kanji form and reading needs to considered for homonymity. If it is a used in the same meaning, the word should be listed just once. If the meanings differ, the word listed once for each different meaning, with a 1-based index number included to differentiate them. For example, 行く as "physically move to a place" vs "participate in an activity" vs "reach a point (in an activity, not physical place)"
+- A word occuring twice or more with the same kanji form and reading needs to considered for homonymity. If it is a used in the same meaning, the word should be listed just once. If the meanings differ, the word listed once for each different meaning, with a 1-based index number included to differentiate them. For example, 行く as "physically move to a place" vs "participate in an activity" vs "reach a point (in an activity, not physical place)".
+- Note, homonym listing of individual can only be done, if a word actually occurs more than once.
 - Additionally, a word occuring twice with the same meaning but, for some reason in kanji form and in hiragana, should result in one entry using the kanji form.
 
 
