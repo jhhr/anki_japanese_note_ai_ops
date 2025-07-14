@@ -159,7 +159,7 @@ def get_response_from_gemini(
         print("No configuration found for the addon.")
         return None
     google_api_key = config.get("google_api_key", "")
-    request_timeout = config.get("request_timeout", 30)
+    request_timeout = config.get("request_timeout", 300)
 
     # Make the API call
     req = CancellableRequest()
@@ -247,7 +247,7 @@ def get_response_from_openai(
         print("No configuration found for the addon.")
         return None
     openai_api_key = config.get("openai_api_key", "")
-    request_timeout = config.get("request_timeout", 30)
+    request_timeout = config.get("request_timeout", 300)
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {openai_api_key}",
