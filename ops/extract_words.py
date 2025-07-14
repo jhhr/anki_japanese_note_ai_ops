@@ -404,6 +404,27 @@ Example results 10:
   "yojijukugo": []
 }}
 
+Example sentence 11: <k> 例えば[たとえば]</k>、イギリスや 香港[ほんこん]では3 月[がつ]1 日[にち]に 加齢[かれい]<k> 為[さ]れ</k>、 日本[にっぽん]やニュージーランドでは2 月[がつ]28 日[にち]に 加齢[かれい]<k> 為[さ]れる</k>。 日本[にっぽん]でグレゴリオ 暦[れき]を 採用[さいよう]<k> 為[する]</k> 際[さい]、2 月[がつ]29 日[にち]を<b> 閏[うるう] 日[び]</b>と 定[さだ]めた。
+Example results 11:
+{{
+  "nouns": [["加齢","かれい"],["グレゴリオ暦","ぐれごりおれき"],["暦","れき"],["採用","さいよう"],["際","さい"],["閏日","うるうび"],["閏","うるう"],["日","ひ"]],
+  "proper_nouns": [["イギリス","いぎりす"],["香港","ほんこん"],["日本","にっぽん"],["ニュージーランド","にゅーじーらんど"]],
+  "numbers": [["3","さん"],["1","いち"],["2","に"]],
+  "counters": [["月","がつ"],["日","にち"]],
+  "verbs": [["定める","さだめる"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["や","や"],["で","で"],["は","は"],["に","に"],["を","を"],["と","と"]],
+  "conjunctions": [],
+  "pronouns": [],
+  "suffixes": [],
+  "prefixes": [],
+  "expressions": [["例えば","たとえば"]],
+  "yojijukugo": []
+}}
+
 {current_lists_addition}
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings, or two strings and one number for multi-meaning words.
 
