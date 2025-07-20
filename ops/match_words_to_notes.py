@@ -1192,6 +1192,9 @@ def match_words_to_notes_for_note(
             word_list_dict = json.loads(note[word_list_field])
         except json.JSONDecodeError as e:
             print(f"Error decoding JSON from word list field: {e}")
+            # tag note
+            note.add_tag("invalid_word_list_json")
+            updated_notes_dict[note.id] = note
             word_list_dict = {}
         if not isinstance(word_list_dict, dict):
             print("Error: Invalid word list format in the note, expected a dictionary")
