@@ -182,6 +182,7 @@ Current word lists: {current_lists}
 More details on the categorization
 - Compound words, expressions or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ", "XY" and "Z" in the result.
 - This applies to compound verbs as well - include both the compound verb and its component verbs when they exist as separate valid words. For example: 飲[の]み 込[こ]まれた --> 飲み込む, 飲む and 込む
+- However, don't list compound words that do not form a significantly different meaning from their components. For example, from 委員会議長[いいんかいぎちょう] the words to list would be just 委員会 ("committee") and 議長 ("chairman") as the compound is simply "committee chairman" and thus perfectly described by the two components.
 - Don't list verbs いる or される when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
 - Avoid listing words ending in particles or copula, as this would create many variants of the same word. The exceptions would be when the copula/particle-added form is overwhelmingly more common than the word being used without the particle/copula. For example, with the particle に, the adverb 共に is overhelmingly more common over the plain noun form 共, so whenever 共に occurs, 共に and not 共 should be listed. Only, if 共 were to occur alone (not as part of a compound word), it should be listed.
@@ -422,6 +423,69 @@ Example results 11:
   "suffixes": [],
   "prefixes": [],
   "expressions": [["例えば","たとえば"]],
+  "yojijukugo": []
+}}
+
+Example sentence 12: <b> 鳥肌[とりはだ]</b>が 立[た]つ<k> 位[くらい]</k><k> 痺[しび]れる</k> 演奏[えんそう] 聴[き]かせて<k> 遣[や]っから</k>
+Example results 12:
+{{
+  "nouns": [["鳥肌", "とりはだ", "鳥肌", 1753015449046], ["演奏", "えんそう"], ["位", "くらい"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters": [],
+  "verbs": [["立つ", "たつ"], ["痺れる", "しびれる"], ["聴く", "きく"], ["遣る", "やる"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["が", "が"], ["から", "から"]],
+  "conjunctions": [],
+  "pronouns": [],
+  "suffixes": [],
+  "prefixes": [],
+  "expressions": [["鳥肌が立つ", "とりはだがたつ"]],
+  "yojijukugo": []
+}}
+
+Example sentence 13: 私[わたし]<k> 達[たち]</k>は 今[いま] 生徒会[せいとかい]に<b> 頭[あたま]ごなし</b>に 出展[しゅってん] 拒否[きょひ]<k> 為[さ]れている</k> 状況[じょうきょう]で 。
+Example results 13:
+{{
+  "nouns": [["生徒会", "せいとかい"], ["頭", "あたま"], ["出展", "しゅってん"], ["拒否", "きょひ"], ["状況", "じょうきょう"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters": [],
+  "verbs": [],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [["今", "いま"]],
+  "adjectivals": [],
+  "particles": [["は", "は"], ["に", "に"], ["で", "で"]],
+  "conjunctions": [],
+  "pronouns": [["私", "わたし"]],
+  "suffixes": [["達", "たち"]],
+  "prefixes": [],
+  "expressions": [["頭ごなし", "あたまごなし"]],
+  "yojijukugo": []
+}}
+
+Example sentence 14: 私[わたし]には 生徒会[せいとかい]の<b> 総意[そうい]</b>を 覆[くつがえ]す<k> 様[よう]な</k> 力[ちから]は<k> 有[あ]りません</k>よ！ 前[まえ]も 言[い]いましたが<k> 先[ま]ずは</k> 証拠[しょうこ]！
+Example results 14:
+{{
+  "nouns": [["生徒会", "せいとかい"], ["総意", "そうい"], ["力", "ちから"], ["前", "まえ"], ["証拠", "しょうこ"], ["様", "よう"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters": [],
+  "verbs": [["覆す", "くつがえす"], ["有る", "ある"], ["言う", "いう"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [["先ず", "まず"]],
+  "adjectivals": [],
+  "particles": [["に", "に"], ["は", "は"], ["の", "の"], ["を", "を"], ["も", "も"], ["よ", "よ"]],
+  "conjunctions": [],
+  "pronouns": [["私", "わたし"]],
+  "suffixes": [],
+  "prefixes": [],
+  "expressions": [],
   "yojijukugo": []
 }}
 
