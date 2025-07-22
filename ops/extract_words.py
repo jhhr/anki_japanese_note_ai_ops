@@ -543,7 +543,11 @@ def extract_words_in_note(
             # Reformat the current word lists to the same format so formatting differences do not
             # cause issues
             if current_word_lists_raw and not ignore_current_word_lists:
-                current_word_lists = word_lists_str_format(json.loads(current_word_lists_raw))
+                try:
+                    current_word_lists = word_lists_str_format(json.loads(current_word_lists_raw))
+                except json.JSONDecodeError as e:
+                    print("Error decoding JSON from current word lists:", e)
+                    return False
                 if DEBUG:
                     print("Calling API with sentence")
             else:
