@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Sequence
 from typing import Union
 from anki.notes import Note, NoteId
@@ -538,6 +539,8 @@ def extract_words_in_note(
             print("sentence", sentence)
         # Check if the value is non-empty
         if sentence:
+            # Remove text within <i> tags, as it is not relevant for word extraction
+            sentence = re.sub(r"<i>.*?</i>", "", sentence, flags=re.DOTALL)
             current_word_lists_raw = note[word_list_field]
             current_word_lists = None
             # Reformat the current word lists to the same format so formatting differences do not
