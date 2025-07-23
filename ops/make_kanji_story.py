@@ -113,6 +113,11 @@ def get_kanji_story_from_model(
         "\n  component_radicals_or_kanji: 足,就"
         "\n  story: <i>あし</i>の <i>しゅうしょく</i>は ものを <b>ける</b> こと。"
         "\n"
+        "\n  kanji: 諭"
+        "\n  component_radicals_or_kanji: 言,俞"
+        "\n  story: <i>いいたい</i> こと を <i>いやしの こぶね</i> を こぎ ながら つたえる と、"
+        "せんちょう が しずに してくれと <b>さとした</b>"
+        "\n"
         f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
     )
     model = config.get("kanji_story_model", "")
