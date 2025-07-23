@@ -490,6 +490,27 @@ Example results 14:
   "yojijukugo": []
 }}
 
+Example sentence 15: 人一倍[ひといちばい]<b> 照[て]れ 屋[や]</b>だった 父[ちち]は、 酒[さけ]<k> 無[な]し</k>には 人[ひと]と 話[はなし]も<k> 出来[でき]</k>なかった。
+Example results 15:
+{{
+  "nouns": [["人", "ひと"], ["無し", "なし"], ["照れ屋", "てれや"], ["父", "ちち"], ["話", "はなし"], ["酒", "さけ"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters": [],
+  "verbs": [["出来る", "できる"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [["人一倍", "ひといちばい"]],
+  "adjectivals": [],
+  "particles": [["だ", "だ"], ["は", "は"], ["に", "に"], ["と", "と"], ["も", "も"]],
+  "conjunctions": [],
+  "pronouns": [],
+  "suffixes": [],
+  "prefixes": [],
+  "expressions": [],
+  "yojijukugo": []
+}}
+
 {current_lists_addition}
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings, or two strings and one number for multi-meaning words.
 
