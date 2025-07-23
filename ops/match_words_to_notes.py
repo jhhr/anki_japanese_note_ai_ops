@@ -64,8 +64,11 @@ def make_new_note_id(note: Note) -> int:
     """
     if not note:
         return 0
-    # Use the current epoch time in nanoseconds as a temporary unique ID
-    return -time.time_ns() + random.randint(0, 100)
+    timestamp_ms = int(time.time())
+    random_component = random.randint(0, 9999)
+
+    # Combine timestamp and random component, make negative for fake IDs
+    return -(timestamp_ms * 10000 + random_component)
 
 
 ProcessedWordTuple = Union[
