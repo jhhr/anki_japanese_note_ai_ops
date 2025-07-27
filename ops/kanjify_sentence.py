@@ -85,6 +85,15 @@ Kanjified example 8: <ul><li><k> 色々[いろいろ]</k>な<k> 物[もの]</k>�
 Example sentence 9: しかもけっして 食欲[しょくよく]がないからではなかったのだ。また、 彼[かれ]の 口[くち]にもっと 合[あ]うような 別[べつ]な 食[た]べものをもってくるのだろうか。 妹[いもうと]が 自分[じぶん]でそうしてくれないだろうか。
 Kanjified example 9: <k> 然[しか]も</k><k> 決[け]っして</k> 食欲[しょくよく]が<k> 無[な]い</k>からでは<k> 無[な]かった</k>のだ。<k> 又[また]</k>、 彼[かれ]の 口[くち]にもっと<k> 合[あ]う</k><k> 様[よう]な</k><k> 別[べつ]</k>な<k> 食[た]べ物[もの]</k>を<k> 持[も]って</k><k> 来[く]る</k>のだろうか。 妹[いもうと]が 自分[じぶん]で<k> 然[そ]う</k><k> 為[し]て</k><k> 呉[く]れない</k>だろうか。
 
+Example sentence 10: 私[わたし]は 毎朝[まいあさ]<b>コーヒー</b>を 飲[の]みます。
+Kanjified example 10: 私[わたし]は 毎朝[まいあさ]<b><k> 珈琲[コーヒー]</k></b>を 飲[の]みます。
+
+Example sentence 11: <b> 上司[じょうし]</b>に 相談[そうだん]してみます。
+Kanjified example 11: <b> 上司[じょうし]</b>に 相談[そうだん]<k> 為[し]て</k><k> 見[み]ます</k>。
+
+Example sentence 12: <b> 未来[みらい]</b>は 誰[だれ]にも 分[わ]からない。
+Kanjified example 12: <b> 未来[みらい]</b>は 誰[だれ]にも 分[わ]からない。
+
 Return a JSON string with the following key-value pairs:
  "{kanjified_sentence_return_field}": The fully kanjified sentence.
 
