@@ -1,3 +1,4 @@
+import re
 from typing import Union
 from anki.notes import Note, NoteId
 from anki.collection import Collection
@@ -17,6 +18,73 @@ from ..utils import get_field_config
 DEBUG = False
 
 
+K_WORD_REC = re.compile(r"<k>([^<]*)</k>")
+K_INNER_REC = re.compile(r"( [\d々\u4e00-\u9faf\u3400-\u4dbf]+\[[^[]*\][^>[]*?)")
+
+SO_WITHOUT_NO = re.compile(r"<k> 其\[そ\]</k>の?")
+
+K_INNER_REVERSING_REC = re.compile(r" [\d々\u4e00-\u9faf\u3400-\u4dbf]+\[([^[]*)\]([^>[]*?)")
+
+
+def make_k_word_replacer(sentence: str):
+    # Check if the match can be found in the original sentence
+    k_words_in_sentence = False
+
+    def inner_k_word_replacer(match: re.Match[str]) -> str:
+        nonlocal k_words_in_sentence
+        word = match.group(1)
+        if word in sentence:
+            # remove <k> tags if the word was kanjified in the original sentence
+            k_words_in_sentence = True
+            return word
+        else:
+            # Keep the <k> word unchanged
+            return match.group(0)
+
+    def k_word_replacer(match: re.Match[str]) -> str:
+        # the match is of the form <k>...</k> which may contain multiple furigana words
+        res = K_INNER_REC.sub(inner_k_word_replacer, match.group(1))
+        if k_words_in_sentence:
+            return res
+        else:
+            return match.group(0)
+
+    return k_word_replacer
+
+
+def inner_k_word_reversing_replacer(match: re.Match[str]) -> str:
+    furigana = match.group(1)
+    okurigana = match.group(2) or ""
+    return f"{furigana}{okurigana}"
+
+
+def k_word_reversing_replacer(match: re.Match[str]) -> str:
+    # the match is of the form <k>...</k> which may contain multiple furigana words
+    return K_INNER_REVERSING_REC.sub(inner_k_word_reversing_replacer, match.group(1))
+
+
+B_TAGS_REC = re.compile(r"<b>|</b>")
+GIKUN_TAGS_REC = re.compile(r"<gikun>|</gikun>")
+
+NUMBER_FURI_REC = re.compile(r"(\d+)\[([^\]]+)\]([あ-ん]*)")
+
+
+def make_number_furi_replacer(sentence: str):
+    def number_furi_replacer(match: re.Match[str]) -> str:
+        # Check if the original sentence has the number with furigana or not
+        number = match.group(1)
+        okurigana = match.group(3) or ""
+        whole_match = match.group(0)
+        if whole_match in sentence:
+            # It has furigana too, keep the number with furigana
+            return whole_match
+        else:
+            # it doesn't, so return just the number and okurigana
+            return number + okurigana
+
+    return number_furi_replacer
+
+
 def get_kanjified_sentence_from_model(
     config: dict[str, str],
     sentence: str,
@@ -31,8 +99,10 @@ The result should be text where only foreign words or names in katakana, particl
 
 Content modification rules:
 - To signify the changes made to the text, wrap each kanjified word in <k> tags with a space before the kanji: "これ" becomes "<k> 此[こ]れ</k>". Include the okurigana of verbs and adjectives within the <k> tags, for example "まわってた" becomes "<k> 回[まわ]ってた</k>".
-- <k> tags should wrap a contiguous sequence of kanji conversions, stopping on a word that was already in kanji. For example "とうもろこし" becomes "<k> 玉蜀黍[とうもろこし]</k>" and "タンパク 質[しつ]" becomes "<k> 蛋白[たんぱく]</k> 質[しつ]".
+- <k> tags should wrap a contiguous sequence of kanji conversions, stopping on a word that was already in kanji. For example "とうもろこし" becomes "<k> 玉蜀黍[とうもろこし]</k>" and "タンパク 質[しつ]" becomes "<k> 蛋白[たんぱく]</k> 質[しつ]". Make sure add spaces when there's multiple furigana words within one <k> tag, for example "つきあい" becomes "<k> 付[つ]き 合[あ]い</k>".
 - Keep any existing HTML tags in the sentence as they are. Added <k> tags should be placed inside existing tags, leaving them outermost so that multiple <k> tags can, if necessary, be within the existing tag. For example "<b>これ見よがしに</b>" becomes "<b><k> 此[こ]れ</k> 見[み]よがしに</b>".
+- Preserve the katakana of kanjifiable words by including in the furigana. For example, "バカ" becomes "<k> 馬鹿[バカ]</k>".
+- Maintain the original colloquial shortenings when kanjifying. For example when もの (者 or 物) is written as もん: バカもん becomes "<k> 馬鹿者[バカもん]</k>", そんなもんなんか becomes "<k> 其[そ]んな 物[もん]</k>なんか". Note, that these kind of shortenings should not be considered <gikun> cases.
 
 Policy on edge cases (not be considered an exhaustive list, but can be used as a guideline for cases not listed here):
 
@@ -56,6 +126,11 @@ Do kanjify:
 - the honorific prefix お
 - the adverb もう as semantically equivalent to 最早, when the meaning is "already/now/no longer" or as semantically equivalent to 復, when the meaning is "again/once more". These are both <gikun> cases.
 - よう as 様[よう] in all its forms, ような, ように, ようだ, etc.
+- Romaji numbers, keep them as is though furigana can be added without adding <k> tags. For example, １つ (no furigana) becomes "１[ひと]つ". 10分[ぷん] becomes "10分[じゅっぷん]". 1000[せん]円[えん] stays as is.
+- The expression として should be considered to not contain する and should be left as is.
+
+Important final checks:
+- MAKE SURE TO NOT TO OMIT ANY PARTICLES OR COPULA FROM THE KANJIFIED SENTENCE
 
 # Examples to illustrate the conversions:
 Example sentence 1: 「これでもちゃんと 皆[みな]さんのことを 考[かんが]えてるつもりなんですよ！」<br>「なんかいよいよお 前[まえ]も 完全[かんぜん]に 内政[ないせい] 官[かん]だな。」
@@ -71,7 +146,7 @@ Example sentence 4: おかげで　この 守銭奴[しゅせんど]の 性[し�
 Kanjified example 4: <k> 御蔭[おかげ]</k>で<k> 此[この]</k> 守銭奴[しゅせんど]の 性[しょう] 悪天使[あくてんし]にぼっ<k> 手繰[たく]られた</k>ぜ。
 
 Example sentence 5: 毎日[まいにち]一キロ 以上[いじょう] 水泳[すいえい]をしてきただけのことはあって、 彼[かれ]は九十 歳[さい]の 今[いま]もかくしゃくとしている。
-Kanjified example 5: 毎日[まいにち] 一[いち]キロ 以上[いじょう] 水泳[すいえい]を<k> 為[し]て</k><k> 来[き]た</k>だけの<k> 事[こと]</k>は<k> 有[あ]って</k>、 彼[かれ]は 九十[きゅうじゅう] 歳[さい]の 今[いま]も<k> 矍鑠[かくしゃく]</k>と<k> 為[し]ている</k>。
+Kanjified example 5: 毎日[まいにち] 一[いち]キロ 以上[いじょう] 水泳[すいえい]を<k> 為[し]て</k><k> 来[き]た</k>だけの<k> 事[こと]</k>は<k> 有[あ]って</k>、 彼[かれ]は 九十[きゅうじゅう] 歳[さい]の 今[いま]も<k> 矍鑠[かくしゃく]</k>として<k> 居[い]る</k>。
 
 Example sentence 6: 俺はちっぽけでどうしようもないろくでなしですよ。
 Kanjified example 6: 俺[おれ]は<k> 小[ち]</k>っぽけで<k> 如何[どう]</k><k> 仕様[しよう]</k>も<k> 無[な]い</k><k> 碌[ろく]</k>で<k> 無[な]し</k> ですよ。
@@ -94,6 +169,33 @@ Kanjified example 11: <b> 上司[じょうし]</b>に 相談[そうだん]<k> �
 Example sentence 12: <b> 未来[みらい]</b>は 誰[だれ]にも 分[わ]からない。
 Kanjified example 12: <b> 未来[みらい]</b>は 誰[だれ]にも 分[わ]からない。
 
+Example sentence 13: お 坊[ぼう]さんが 鐘[かね]を<b> 鳴[な]らして</b>いますね。
+Example kanjified 13: <k> 御[お]</k> 坊[ぼう]さんが 鐘[かね]を<b> 鳴[な]らして</b>いますね。
+
+Example sentence 14: 彼[かれ]らは<b> 裸[はだか]</b>のつきあいをしているよ。
+Kanjified example 14: 彼[かれ]らは<b> 裸[はだか]</b>の<k> 付[つ]き 合[あ]い</k>を<k> 為[し]ている</k>よ。
+
+Example sentence 15: <b> 作業[さぎょう]</b>するにはもっと 広[ひろ]いスペースが 必要[ひつよう]だ。
+Example kanjified 15: <b> 作業[さぎょう]</b><k> 為[す]る</k>にはもっと 広[ひろ]いスペースが 必要[ひつよう]だ。
+
+Example sentence 16: 娘[むすめ]が 初[はじ]めて<b> 寝返[ねがえ]り</b>しました。
+Example kanjified 16: 娘[むすめ]が 初[はじ]めて<b> 寝返[ねがえ]り</b><k> 為[し]</k>ました。
+
+Example sentence 17: <b>とにかく</b> 現場[げんば]へ 行[い]ってみましょう。
+Example kanjified 17: <b><k> 兎[と]に 角[かく]</k></b> 現場[げんば]へ 行[い]って<k> 見[み]ましょう</k>。
+
+Example sentence 18: <i>なっ…バカもん！ 麦[むぎ]のあとは 放牧[ほうぼく]だ。</i> 切[き]り 株[かぶ]を 長[なが]めに 残[のこ]しておくのはあとで 家畜[かちく]に 食[く]わせるためなんだぞ。
+Example kanjified 18: <i>なっ…<k> 馬鹿者[バカもん]</k>！ 麦[むぎ]の<k> 後[あと]</k>は 放牧[ほうぼく]だ。</i> 切[き]り 株[かぶ]を 長[なが]めに 残[のこ]しておくのは<k> 後[あと]</k>で 家畜[かちく]に<b> 食[く]わせる</b><k> 為[ため]</k>なんだぞ。
+
+Example sentence 19: あの 逃[に]げ 方[かた]は 一番[いちばん]マズい。 背中[せなか]を<b> 蹴[け]って</b>くれと 言[い]ってるようなものだ
+Example kanjified 19: <k> 彼[あの]</k> 逃[に]げ 方[かた]は 一番[いちばん]<k> 不味[マズ]い</k>。 背中[せなか]を<b> 蹴[け]って</b><k> 呉[く]れ</k>と 言[い]ってる<k> 様[よう]な</k><k> 物[もの]</k>だ
+
+Example sentence 20: 北[きた]アメリカでは １つの 家[いえ]に １つ<b>ないし</b> ２つの 車庫[しゃこ]があるのはよくあることだ。
+Example kanjified 20: 北アメリカでは １[ひと]つの 家[いえ]に １[ひと]つ<b><k> 乃至[ないし]</k></b> ２[ふた]つの 車庫[しゃこ]が<k> 有[あ]る</k>のは<k> 良[よ]く</k><k> 有[あ]る</k><k> 事[こと]</k>だ。
+
+Example sentence 21: それに 触[ふ]れた 銀[ぎん]の<b>カバ</b>ノキも 見[み]えます。
+Example kanjified 21: <k> 其[そ]れ</k>に 触[ふ]れた 銀[ぎん]の<b><k> 樺[カバ]</k></b>ノ<k> 木[キ]</k>も 見[み]えます。
+
 Return a JSON string with the following key-value pairs:
  "{kanjified_sentence_return_field}": The fully kanjified sentence.
 
@@ -114,10 +216,14 @@ The sentence to process: {sentence}
         return None
 
 
+MAX_ATTEMPTS = 5
+
+
 def kanjify_sentence_in_note(
     config: dict[str, str],
     note: Note,
     notes_to_add_dict: dict[str, list[Note]] = {},
+    attempt: int = 1,
 ) -> bool:
     model = note.note_type()
     if not model:
@@ -158,8 +264,64 @@ def kanjify_sentence_in_note(
                 if DEBUG:
                     print("kanjified_sentence", kanjified_sentence)
 
+                # Clean up common mistakes by the AI
+                # Sometimes kanjifying する results in 為[し]る
+                kanjified_sentence = kanjified_sentence.replace(
+                    "<k> 為[し]る</k>", "<k> 為[す]る</k>"
+                )
+                # Sometimes when kanjifying その it leaves out the の --> <k> 其[そ]</k>
+                kanjified_sentence = SO_WITHOUT_NO.sub("<k> 其[そ]の</k>", kanjified_sentence)
+                # Sometimes it wraps the sentence in 「」when the original sentence wasn't
+                if not (sentence.startswith("「") and sentence.endswith("」")) and (
+                    kanjified_sentence.startswith("「") and kanjified_sentence.endswith("」")
+                ):
+                    # Remove the wrapping
+                    kanjified_sentence = kanjified_sentence[1:-1]
+
+                # It may unnecessarily wrap words in <k> tags that were already kanjified in the
+                # original sentence
+
+                k_word_replacer = make_k_word_replacer(sentence)
+                kanjified_sentence = K_WORD_REC.sub(k_word_replacer, kanjified_sentence)
+
+                # Clean double spaces
+                kanjified_sentence = kanjified_sentence.replace("  ", " ")
+                # Clean extra space before <k> tags
+                kanjified_sentence = kanjified_sentence.replace(" <k> ", "<k> ")
+
                 # Update the note with the new values
                 note[kanjified_sentence_field] = kanjified_sentence
+
+                # Check if reversing the kanjification results in the original sentence and tag
+                # the note if not
+                reversed_sentence = B_TAGS_REC.sub("", kanjified_sentence)
+                reversed_sentence = GIKUN_TAGS_REC.sub("", reversed_sentence)
+                reversed_sentence = K_WORD_REC.sub(k_word_reversing_replacer, reversed_sentence)
+                number_furi_replacer = make_number_furi_replacer(sentence)
+                reversed_sentence = NUMBER_FURI_REC.sub(number_furi_replacer, reversed_sentence)
+                # Remove all whitespace as the comparison often fails due to trivial differences
+                reversed_sentence = re.sub(r"\s", "", reversed_sentence)
+
+                cleaned_sentence = B_TAGS_REC.sub("", sentence)
+                cleaned_sentence = re.sub(r"\s", "", cleaned_sentence)
+                if cleaned_sentence != reversed_sentence:
+                    note.add_tag("kanjify_sentence_mismatch")
+                    # try again until MAX_ATTEMPTS is reached
+                    print(
+                        f"Reversed sentence does not match original:\n{reversed_sentence}\n"
+                        f"{cleaned_sentence}"
+                    )
+                    if attempt < MAX_ATTEMPTS:
+                        if DEBUG:
+                            print(
+                                f"Reversed sentence does not match original. Attempt {attempt} of"
+                                f" {MAX_ATTEMPTS}"
+                            )
+                        return kanjify_sentence_in_note(
+                            config, note, notes_to_add_dict, attempt + 1
+                        )
+                elif note.has_tag("kanjify_sentence_mismatch"):
+                    note.remove_tag("kanjify_sentence_mismatch")
                 return True
             return False
         return False
