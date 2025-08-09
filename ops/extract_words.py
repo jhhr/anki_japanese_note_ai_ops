@@ -430,7 +430,7 @@ Example results 11:
 Example sentence 12: <b> 鳥肌[とりはだ]</b>が 立[た]つ<k> 位[くらい]</k><k> 痺[しび]れる</k> 演奏[えんそう] 聴[き]かせて<k> 遣[や]っから</k>
 Example results 12:
 {{
-  "nouns": [["鳥肌", "とりはだ", "鳥肌", 1753015449046], ["演奏", "えんそう"], ["位", "くらい"]],
+  "nouns": [["鳥肌", "とりはだ"], ["演奏", "えんそう"], ["位", "くらい"]],
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
@@ -509,6 +509,27 @@ Example results 15:
   "prefixes": [],
   "expressions": [],
   "yojijukugo": []
+}}
+
+Example sentence 16: どんな 手段[しゅだん]を<k> 持[も]って</k>も、<k> 俺[おれ]</k>を 殺[ころ]さずには<b> 措[お]かない</b> 気[き]でいるに<k> 違[ちが]い 無[な]い</k>。
+Example results 16:
+{{
+  "nouns": [["手段", "しゅだん"], ["気", "き"], ["違い", "ちがい"]],
+  "proper_nouns": [],
+  "verbs": [["持つ", "もつ"], ["措く", "おく"], ["殺す", "ころ"], ["殺す", "ころす"]],
+  "compound_verbs": [],
+  "adjectives": [["無い", "ない"]],
+  "adverbs": [],
+  "adjectivals": [["どんな", "どんな"]],
+  "particles": [["で", "で"], ["に", "に"], ["も", "も"], ["を", "を"]],
+  "pronouns": [["俺", "おれ"]],
+  "suffixes": [],
+  "expressions": [["に違いない", "にちがいない"]],
+  "yojijukugo": [],
+  "numbers": [],
+  "counters": [],
+  "conjunctions": [],
+  "prefixes": []
 }}
 
 {current_lists_addition}
