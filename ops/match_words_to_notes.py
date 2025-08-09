@@ -2,7 +2,6 @@ import random
 import json
 import re
 import asyncio
-import time
 from typing import Union, Sequence, Callable, Any, Coroutine, cast
 from aqt import mw
 
@@ -60,15 +59,12 @@ def make_new_note_id(note: Note) -> int:
         note (Note): The note to generate the ID for.
 
     Returns:
-        str: A unique ID for the note represinted as a negative integer.
+        int: A unique ID for the note represented as a negative integer.
     """
     if not note:
         return 0
-    timestamp_ms = int(time.time())
-    random_component = random.randint(0, 9999)
-
-    # Combine timestamp and random component, make negative for fake IDs
-    return -(timestamp_ms * 10000 + random_component)
+    # Use a simple random negative number for fake IDs
+    return -random.randint(1000000, 9999999)
 
 
 ProcessedWordTuple = Union[
