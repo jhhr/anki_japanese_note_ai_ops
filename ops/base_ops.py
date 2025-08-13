@@ -19,7 +19,7 @@ from ..utils import get_field_config
 
 # from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 
-DEBUG = True
+DEBUG = False
 
 
 MAX_TOKENS_VALUE = 8000
