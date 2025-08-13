@@ -532,7 +532,27 @@ Example results 16:
   "prefixes": []
 }}
 
-{current_lists_addition}
+Example sentence 17: 見[み]た 目[め]は 私[わたし]より<k> 余程[よっぽど]</k> 悪役[あくやく] 令嬢[れいじょう]っぽい。 声[こえ] 高々[たかだか]に<b> 配役[はいやく]</b>ミスを 主張[しゅちょう]<k> 為[し]たい</k>。
+example results 17:
+{{
+  "nouns": [["ミス", "みす"], ["主張", "しゅちょう"], ["令嬢", "れいじょう"], ["声", "こえ"], ["悪役", "あくやく"], ["目", "め"], ["配役", "はいやく"]],
+  "proper_nouns": [["私", "わたし"]],
+  "verbs": [["為る", "する"], ["見る", "みる"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [["余程", "よっぽど"], ["高々", "たかだか"]],
+  "adjectivals": [],
+  "particles": [["に", "に"], ["は", "は"], ["より", "より"], ["を", "を"]],
+  "pronouns": [["私", "わたし"]],
+  "suffixes": [["っぽい", "っぽい"]],
+  "expressions": [["声高々", "こえたかだか"], ["悪役令嬢", "あくやくれいじょう"], ["見た目", "みため"], ["配役ミス", "はいやくみす"]],
+  "yojijukugo": [],
+  "numbers": [],
+  "counters": [],
+  "conjunctions": [],
+  "prefixes": []
+}}
+
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings, or two strings and one number for multi-meaning words.
 
 The sentence to process: {sentence}
