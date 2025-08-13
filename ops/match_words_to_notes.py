@@ -496,15 +496,15 @@ def match_words_to_notes(
             " and choose one or more actions perform:"
         )
         prompt = f"""{good_matches_intro if not reading_matches_only else reading_matches_only_intro}
- 1. Either, select one of the meanings as matching the how the word is used in the current sentence. You may or may not modify the meaning.
+ 1. Either, select one of the meanings as matching the how the word is used in the current sentence. You may modify the meaning, when absolutely necessary
  2. Or, determine that none of the meanings below match how the word is used in the current sentence and a new high quality dictionary-like definition should be created.
- 3. And in addition to performing actions 1 or 2, one or more of the meanings should be improved so that its new formulation will better fit both its example sentence and the current sentence.
+ 3. And in addition to performing actions 1 or 2, one or more of the meanings should be improved so that its new formulation will better fit both its example sentence and the current sentence. Keep the updated meaning to one sentence whenever possible, not lengthening the previous meaning.
 
 More details on choosing a meaning:
 - First and foremost, the ideal standard for multi-meaning words' definitions should be to slice the space of possible meanings into the smallest possible set of definitions that avoids any possible ambiguity when assigning a word's usage in a sentence to some meaning.
 - Secondarily, the meanings should be easy to understand for a language-learner; explanations should use simple speech as much the topic of the word allows. Technical jargon or subtle nuances must be adequately explained though - the actual information on what the meaning *is* mustn't be lost in simplification.
-- The inclication of these definitions should then be toward explaining closely related nuances in a single definition and splitting to different definitions when a clear topic border is found.
-- Thus, avoid increasing the specificity of existing meanings, except when their current state is low-quality ambiguousness.
+- The general approach of these definitions should then be toward explaining closely related nuances in a single definition and splitting to different definitions when a clear topic border is found.
+- Thus, avoid increasing the specificity of existing meanings, except when their current state is that of low-quality ambiguousness.
 
 How you will indicate your choice in the `meanings`:
 - `meaning_number´: The ordinal number of the meaning listed above to signify it is being selected and/or modified. Provide this for actions 1. and 3. and omit for action 2.
