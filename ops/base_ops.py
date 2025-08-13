@@ -1,6 +1,7 @@
 import json
 import asyncio
 import time
+import traceback
 import requests  # type: ignore
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Callable, Coroutine, Any, Union
@@ -18,7 +19,7 @@ from ..utils import get_field_config
 
 # from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 
-DEBUG = False
+DEBUG = True
 
 
 MAX_TOKENS_VALUE = 8000
@@ -915,12 +916,13 @@ async def bulk_notes_op(
     cancel_state = CancelState()
     # Start all tasks
     for i, note in enumerate(notes):
-        # Create partial functions that bind the current note value or otherwise we end up
         # adding the same note to
+        def handle_error(current_note, e):
+            print(f"Error during operation with note {current_note.id}: {e}")
+            traceback.print_tb(e.__traceback__)
+
         handle_op_error = partial(
-            lambda current_note, e: print(
-                f"Error during operation with note {current_note.id}: {e}"
-            ),
+            lambda current_note, e: handle_error(current_note, e),
             note,
         )
 
@@ -1091,6 +1093,8 @@ def selected_notes_op(
                         " be run"
                     )
                 total_notes = len(notes_to_add)
+                failed_cnt = 0
+                added_cnt = 0
                 for index, note in enumerate(notes_to_add):
                     note_type = note.note_type()
                     if note_type is None:
@@ -1129,7 +1133,6 @@ def selected_notes_op(
                         total_notes=total_notes,
                         failed=failed_cnt,
                     )
-                    op_changes = mw.col.merge_undo_entries(pos)
                 if new_notes_op:
                     # Run the new notes operation if provided
                     # col.add_note mutates the note given, adding the id to it

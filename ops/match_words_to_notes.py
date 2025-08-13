@@ -2,6 +2,7 @@ import random
 import json
 import re
 import asyncio
+import traceback
 from typing import Union, Sequence, Callable, Any, Coroutine, cast
 from aqt import mw
 
@@ -1055,7 +1056,7 @@ _Current sentence_: {sentence}
 
         def handle_op_error(e: Exception):
             print(f"Error processing word tuple {word_tuple} at index {i}: {e}")
-            raise e
+            traceback.print_tb(e.__traceback__)
 
         handle_op_result = create_result_handler(i, word)
 
