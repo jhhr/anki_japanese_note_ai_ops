@@ -8,8 +8,6 @@ from aqt import mw
 from aqt.browser import Browser
 from aqt.qt import QAction, qconnect, QMenu
 
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-
 from .utils import get_field_config
 
 from .ops.clean_meaning import (
@@ -34,6 +32,9 @@ from .ops.extract_words import (
 from .ops.match_words_to_notes import (
     match_words_to_notes_from_selected,
 )
+
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+
 
 # Function to be executed when the browser menus are initialized
 def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
@@ -99,12 +100,12 @@ def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
     if note_type_name == "Kanji draw":
         story_field = get_field_config(config, "story_field", note_type)
         if field_name == story_field and cur_field_value == "":
-            return make_story_for_note(config,note )
+            return make_story_for_note(config, note)
 
     if note_type_name == "Japanese vocab note":
         translated_sentence_field = get_field_config(config, "translated_sentence_field", note_type)
         if field_name == translated_sentence_field and cur_field_value == "":
-            return translate_sentence_in_note(config,note,{})
+            return translate_sentence_in_note(config, note, {})
 
 
 def run_op_on_add_note(note: Note):
@@ -118,6 +119,11 @@ def run_op_on_add_note(note: Note):
         return
 
     if note_type_name == "Japanese vocab note":
+        if note.has_tag("new_matched_jp_word"):
+            # If the note has the tag, don't run the ops as this is happening within the
+            # match_words_to_notes and causes some problems
+            print("Skipping ops for note with 'new_matched_jp_word' tag")
+            return
         clean_meaning_in_note(config, note, {})
         extract_words_in_note(config, note, {})
 
