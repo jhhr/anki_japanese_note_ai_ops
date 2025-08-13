@@ -522,22 +522,29 @@ class AsyncTaskProgressUpdater:
         self,
         notes_added: int = 0,
         total_notes: int = 0,
+        failed: int = 0,
     ):
         """
         Update the Step 2 progress dialog for note adding operations occuring after async tasks
         are done.
         """
-        elapsed_s = time.time() - self.start_time
-        elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_s))
-        time_msg = f"<br><code>Time: {elapsed_time}</code>"
-        if notes_added > 0:
-            eta_s = (notes_added - self.notes_done) * (elapsed_s / notes_added)
-            eta_time = time.strftime("%H:%M:%S", time.gmtime(eta_s))
-            avg_per_note_s = elapsed_s / notes_added
-            time_msg += f""" | <small> Avg time per note: {avg_per_note_s:.2f}s</small>
-            <br><code>ETA: {eta_time}</code>"""
-        task_progress_msg = f"""<strong>Adding notes:</strong>
-            <br><strong><code>{notes_added}/{total_notes}</code></strong> notes"""
+        try:
+            elapsed_s = time.time() - self.start_time
+            elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_s))
+            time_msg = f"<br><code>Time: {elapsed_time}</code>"
+            if notes_added > 0:
+                eta_s = (notes_added - self.notes_done) * (elapsed_s / notes_added)
+                eta_time = time.strftime("%H:%M:%S", time.gmtime(eta_s))
+                avg_per_note_s = elapsed_s / notes_added
+                time_msg += f""" | <small> Avg time per note: {avg_per_note_s:.2f}s</small>
+                <br><code>ETA: {eta_time}</code>"""
+            task_progress_msg = f"""<strong>Adding notes:</strong>
+                <br><strong><code>{notes_added}/{total_notes}</code></strong> notes"""
+            if failed > 0:
+                task_progress_msg += f""" | <strong style="color: red;">{failed} failed</strong>"""
+        except Exception as e:
+            print(f"Error updating note adding progress: {e}")
+            return
         mw.taskman.run_on_main(
             lambda: mw.progress.update(
                 label=f"{task_progress_msg}{time_msg}",
@@ -629,12 +636,14 @@ def make_inner_bulk_op(
             try:
                 await asyncio.sleep(target_time - current_time)
             except asyncio.CancelledError:
+                print("Inner bulk operation CancelledError encountered")
                 return False
         try:
             # Acquire semaphore to limit concurrent operations
             async with semaphore:
                 # Check for cancel request before starting the operation
                 if mw.progress.want_cancel():
+                    print("Inner bulk operation mw.progress.want_cancel()")
                     return False
 
                 # Use ThreadPoolExecutor for CPU-bound operations
@@ -653,6 +662,8 @@ def make_inner_bulk_op(
                                 return False
                             return op(config, notes_to_add_dict=notes_to_add_dict, **op_args)
                         except Exception as e:
+                            if DEBUG:
+                                print("Inner process op error, passing to handle_op_error")
                             handle_op_error(e)
                             return False
                         finally:
@@ -753,20 +764,27 @@ async def bulk_nested_notes_op(
 
             # Then cancel the monitor task if it's still running
             if not cancel_manager.monitor_task.done():
+                print("Cancelling monitor task first check")
                 cancel_manager.monitor_task.cancel()
 
             # Wait for it to finish cancellation
             try:
+                print("Waiting for monitor task to finish cancellation")
                 await asyncio.wait_for(cancel_manager.monitor_task, timeout=0.5)
+                print("Monitor task finished cancellation")
             except (asyncio.TimeoutError, asyncio.CancelledError):
+                print("Monitor task CancelledError encountered")
                 pass
         except asyncio.CancelledError:
+            print("Cancelling bulk operation")
             pass
         finally:
             if not cancel_manager.monitor_task.done():
+                print("Cancelling monitor task second check")
                 cancel_manager.monitor_task.cancel()
 
         if cancel_manager.is_cancel_requested():
+            print("Bulk operation was cancelled, returning results so far")
             updated_notes = list(updated_notes_dict.values())
             return updated_notes, pos, notes_to_add_dict
 
@@ -1097,10 +1115,19 @@ def selected_notes_op(
                         if DEBUG:
                             print("Bulk notes op cancelled during note adding")
                         break
-                    mw.col.add_note(note, insert_deck_id)
+                    try:
+                        print(f"Adding note {index} to deck {insert_deck_id}")
+                        mw.col.add_note(note, insert_deck_id)
+                        added_cnt += 1
+                        op_changes = mw.col.merge_undo_entries(pos)
+                    except Exception as e:
+                        print(f"Error adding note {index}: {e}")
+                        failed_cnt += 1
+
                     progress_updater.update_note_adding_progress(
-                        notes_added=index + 1,
+                        notes_added=added_cnt,
                         total_notes=total_notes,
+                        failed=failed_cnt,
                     )
                     op_changes = mw.col.merge_undo_entries(pos)
                 if new_notes_op:
