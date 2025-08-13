@@ -561,10 +561,21 @@ _Current sentence_: {sentence}
             },
             "required": ["meanings"],
         }
+        # The response is not expected to be very long, 1k tokens would about 30 meanings and
+        # generally a word might have 1-3 meanings with some rare words having 5+
+        # Reaching this limit very likely means the model got stuck in a loop repeating the same
+        # text over and over
+        # However the thinking tokens are also counted towards the limit so the total token count
+        # of thinking + response must be considered
+        max_output_tokens = 3000
         if DEBUG:
             print(f"\n\nmeanings_str: {meanings_str}")
         raw_result = get_response(
-            model, prompt, cancel_state=cancel_state, response_schema=response_schema
+            model,
+            prompt,
+            cancel_state=cancel_state,
+            response_schema=response_schema,
+            max_output_tokens=max_output_tokens,
         )
         if raw_result is None:
             if DEBUG:
@@ -833,7 +844,8 @@ _Current sentence_: {sentence}
                         matched_note = note
                         break
                 if not matched_note:
-                    # This shoudln't happen as the meaning came from one of the notes in the list
+                    # This shouldn't happen as the meaning came from one of the notes in the list
+                    # and indicates the matched_meaning somehow isn't in the matching_notes
                     if DEBUG:
                         print(
                             f"Error: Matched note with ID {matched_note_id} not found for word"

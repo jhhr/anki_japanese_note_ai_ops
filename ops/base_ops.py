@@ -21,7 +21,7 @@ from ..utils import get_field_config
 DEBUG = False
 
 
-MAX_TOKENS_VALUE = 2000
+MAX_TOKENS_VALUE = 8000
 
 
 class CancelState:
@@ -42,6 +42,7 @@ def get_response(
     prompt: str,
     cancel_state: Optional[CancelState] = None,
     response_schema: Optional[dict] = None,
+    max_output_tokens: Optional[int] = None,
 ) -> Union[dict, None]:
     """Get a response from the appropriate model based on the configuration.
 
@@ -53,11 +54,19 @@ def get_response(
     """
     if model.startswith("gemini"):
         return get_response_from_gemini(
-            model, prompt, cancel_state=cancel_state, response_schema=response_schema
+            model,
+            prompt,
+            cancel_state=cancel_state,
+            response_schema=response_schema,
+            max_output_tokens=max_output_tokens,
         )
     elif model.startswith("gpt") or model.startswith("o3") or model.startswith("o1"):
         return get_response_from_openai(
-            model, prompt, cancel_state=cancel_state, response_schema=response_schema
+            model,
+            prompt,
+            cancel_state=cancel_state,
+            response_schema=response_schema,
+            max_output_tokens=max_output_tokens,
         )
     else:
         print(f"Unsupported model: {model}")
@@ -103,6 +112,7 @@ def get_response_from_gemini(
     prompt: str,
     cancel_state: Optional[CancelState] = None,
     response_schema: Optional[dict] = None,
+    max_output_tokens: Optional[int] = None,
 ) -> Union[dict, None]:
     """Get a response from Google's Gemini API.
 
@@ -119,7 +129,7 @@ def get_response_from_gemini(
         return None
 
     # Create the request body
-    data = {
+    data: dict[str, Any] = {
         "contents": [
             {
                 # "role": "user",
@@ -139,13 +149,15 @@ def get_response_from_gemini(
         },
         "generationConfig": {
             "responseMimeType": "application/json",
+            # maxOutputTokens includes both thinking and output so it needs to be large enough
+            "maxOutputTokens": max_output_tokens or MAX_TOKENS_VALUE,
         },
     }
+    if max_output_tokens is not None and DEBUG:
+        if DEBUG:
+            print("Using max_output_tokens", max_output_tokens)
     if response_schema:
-        data["generationConfig"] = {
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-        }
+        data["generationConfig"]["responseSchema"] = response_schema
         if DEBUG:
             print("Using response schema", response_schema)
 
@@ -222,6 +234,7 @@ def get_response_from_openai(
     prompt: str,
     cancel_state: Optional[CancelState] = None,
     response_schema: Optional[dict] = None,
+    max_output_tokens: Optional[int] = None,
 ) -> Union[dict, None]:
     if DEBUG:
         print("OpenAI call, model", model)
@@ -253,15 +266,17 @@ def get_response_from_openai(
         "Authorization": f"Bearer {openai_api_key}",
     }
 
-    data = {
+    data: dict[str, Any] = {
         "model": model,
         "response_format": {"type": "json_object"},
         "messages": messages,
     }
     if any(model.startswith(m) for m in ["o3", "o1"]):
-        data["max_completion_tokens"] = MAX_TOKENS_VALUE  # type: ignore
+        # This is total completion tokens, including both reasoning and output
+        data["max_completion_tokens"] = max_output_tokens or MAX_TOKENS_VALUE
     else:
-        data["max_tokens"] = MAX_TOKENS_VALUE  # type: ignore
+        # This is for GPT models and only limits output, not reasoning
+        data["max_tokens"] = max_output_tokens or MAX_TOKENS_VALUE
     if response_schema:
         data["response_format"] = {
             "type": "json_schema",
