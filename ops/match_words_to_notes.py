@@ -789,8 +789,8 @@ _Current sentence_: {sentence}
                             # Else, same but add a space
                             new_note[word_sort_field] += f" (m{largest_meaning_index})"
                             note_to_copy[word_sort_field] += f" (m{largest_meaning_index -1})"
-                            new_note_id = make_new_note_id(new_note)
-                            new_note[new_note_id_field] = new_note_id
+                        new_note_id = make_new_note_id(new_note)
+                        new_note[new_note_id_field] = new_note_id
                         updated_notes_dict[new_note_id] = note_to_copy
                     # Note to copy was missing sort field somehow? Add it now + the meaning numbers
                     else:
