@@ -281,9 +281,9 @@ def match_words_to_notes(
             reading = reading[:-2]
         reading_query = f'"{word_reading_field}:{to_hiragana(reading)}"'
         reading_query_suru = f'"{word_reading_field}:{to_hiragana(reading)}する"'
-        word_query = f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}"'
+        word_query = f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}")'
         word_query_suru = (
-            f'"{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
+            f'("{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
         )
         no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
         query = (
