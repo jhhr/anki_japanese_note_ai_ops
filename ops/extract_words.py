@@ -538,7 +538,7 @@ Return only the JSON formatted result containing all properties with at least em
 The sentence to process: {sentence}
 """
     model = config.get("extract_words_model", "")
-    result = get_response(model, prompt)
+    result = get_response(model, prompt, max_output_tokens=6000)
     if result is None:
         if DEBUG:
             print("Failed to get a response from the API.")
