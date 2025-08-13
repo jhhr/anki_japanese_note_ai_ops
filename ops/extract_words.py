@@ -184,7 +184,7 @@ More details on the categorization
 - Compound words, expressions or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ", "XY" and "Z" in the result.
 - This applies to compound verbs as well - include both the compound verb and its component verbs when they exist as separate valid words. For example: 飲[の]み 込[こ]まれた --> 飲み込む, 飲む and 込む
 - However, don't list compound words that do not form a significantly different meaning from their components. For example, from 委員会議長[いいんかいぎちょう] the words to list would be just 委員会 ("committee") and 議長 ("chairman") as the compound is simply "committee chairman" and thus perfectly described by the two components.
-- Don't list verbs いる or される when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
+- Don't list verbs いる, される or しまう when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
 - Avoid listing words ending in particles or copula, as this would create many variants of the same word. The exceptions would be when the copula/particle-added form is overwhelmingly more common than the word being used without the particle/copula. For example, with the particle に, the adverb 共に is overhelmingly more common over the plain noun form 共, so whenever 共に occurs, 共に and not 共 should be listed. Only, if 共 were to occur alone (not as part of a compound word), it should be listed.
 - Don't list verbs in たい, たくない, せる or other non-base forms, except when such a form has a special meaning. Examples of special meanings, 食えない "shrewd" vs literal "cannot eat", 唸らせる "to impress" vs literal "to make someone groan". Example of non-special meaning: 齧らせる is simply "to make someone bite"
@@ -551,6 +551,44 @@ example results 17:
   "counters": [],
   "conjunctions": [],
   "prefixes": []
+}}
+
+Example sentence 18: <k> 蛇[ヘビ]</k>を 見[み]て 足[あし]が<b><k> 竦[すく]んで</k><k> 仕舞[しま]った</k></b>。
+Example results 18:
+{{
+  "nouns": [["蛇", "へび"], ["蛇", "ヘビ"], ["足", "あし"]],
+  "proper_nouns": [],
+  "verbs": [["仕舞う", "しまう"], ["竦む", "すくむ"], ["見る", "みる"]],
+  "compound_verbs": [["竦んで仕舞う", "すくんでしまう"]],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["が", "が"], ["を", "を"]],
+  "pronouns": [],
+  "suffixes": [],
+  "expressions": [],
+  "yojijukugo": [],
+  "numbers": [],
+  "counters": [],
+  "conjunctions": [],
+  "prefixes": []
+}}
+"nouns":[["蛇","へび"],["蛇","ヘビ"],["足","あし"]],
+"proper_nouns":[],
+"verbs":[["仕舞う","しまう"],["竦む","すくむ"],["見る","みる"]],
+"compound_verbs":[["竦んで仕舞う","すくんでしまう"]],
+"adjectives":[],
+"adverbs":[],
+"adjectivals":[],
+"particles":[["が","が"],["を","を"]],
+"pronouns":[],
+"suffixes":[],
+"expressions":[],
+"yojijukugo":[],
+"numbers":[],
+"counters":[],
+"conjunctions":[],
+"prefixes":[]
 }}
 
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings, or two strings and one number for multi-meaning words.
