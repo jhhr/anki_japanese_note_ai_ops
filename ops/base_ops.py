@@ -185,6 +185,7 @@ def get_response_from_gemini(
             "responseMimeType": "application/json",
             # maxOutputTokens includes both thinking and output so it needs to be large enough
             "maxOutputTokens": max_output_tokens or MAX_TOKENS_VALUE,
+            "thinkingConfig": {"thinkingBudget": 6000},
         },
     }
     if instructions:
