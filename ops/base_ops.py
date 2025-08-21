@@ -1149,15 +1149,35 @@ def selected_notes_op(
                     additional_updates_notes_dict = new_notes_op(
                         notes_to_add, config, progress_updater
                     )
+
                     additional_updated_notes = list(additional_updates_notes_dict.values())
                     if additional_updated_notes:
-                        mw.col.update_notes(additional_updated_notes)
+                        # Skip notes where the id is still zero, something went wrong during adding
+                        valid_notes = []
+                        invalid_notes = []
+                        for note in additional_updated_notes:
+                            if note.id == 0:
+                                invalid_notes.append(note)
+                            else:
+                                valid_notes.append(note)
+                        if invalid_notes:
+                            if DEBUG:
+                                print(f"Invalid notes found after adding: {len(invalid_notes)}")
+                            new_notes_tsv_str = make_tsv_from_notes(
+                                notes=invalid_notes,
+                                config=mw.addonManager.getConfig(__name__) or {},
+                            )
+                            if new_notes_tsv_str:
+                                # Write the TSV to the media folder
+                                import_tsv_file(
+                                    "new_notes.tsv",
+                                    new_notes_tsv_str,
+                                    do_import=False,
+                                )
                         op_changes = mw.col.merge_undo_entries(pos)
-                        edited_nids.extend([
-                            note.id
-                            for note in additional_updated_notes
-                            if note.id not in edited_nids
-                        ])
+                        edited_nids.extend(
+                            [note.id for note in valid_notes if note.id not in edited_nids]
+                        )
             return op_changes
 
         # Create and run the event loop

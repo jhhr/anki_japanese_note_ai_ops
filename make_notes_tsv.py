@@ -42,7 +42,7 @@ def prompt_os_to_save_file(
                 file.write(text)
 
 
-def import_tsv_file(filename: str, text: str) -> None:
+def import_tsv_file(filename: str, text: str, do_import: bool = True) -> None:
     """
     Write text to a file in the media folder
     """
@@ -56,10 +56,11 @@ def import_tsv_file(filename: str, text: str) -> None:
         file.write(text)
 
     # Import the file using Anki's import functionality
-    import_file(
-        mw,
-        file_path,
-    )
+    if do_import:
+        import_file(
+            mw,
+            file_path,
+        )
 
 
 def make_tsv_from_notes(
