@@ -951,7 +951,11 @@ async def bulk_notes_op(
         # adding the same note to
         def handle_error(current_note, e):
             print(f"Error during operation with note {current_note.id}: {e}")
-            traceback.print_tb(e.__traceback__)
+            # Format traceback as string to avoid Anki's error dialog
+            tb_lines = traceback.format_tb(e.__traceback__)
+            print("Traceback:")
+            for line in tb_lines:
+                print(line.rstrip())
 
         handle_op_error = partial(
             lambda current_note, e: handle_error(current_note, e),

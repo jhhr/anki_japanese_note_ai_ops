@@ -1081,7 +1081,11 @@ _Current sentence_: {sentence}"""
 
         def handle_op_error(e: Exception):
             print(f"Error processing word tuple {word_tuple} at index {i}: {e}")
-            traceback.print_tb(e.__traceback__)
+            # Format traceback as string to avoid Anki's error dialog
+            tb_lines = traceback.format_tb(e.__traceback__)
+            print("Traceback:")
+            for line in tb_lines:
+                print(line.rstrip())
 
         handle_op_result = create_result_handler(i, word)
 
