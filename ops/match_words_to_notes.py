@@ -545,7 +545,6 @@ If you are given 2 meanings and you decide the first one is a match but needs a 
 _Targeted word_: {word}
 _Current sentence_: {sentence}"""
 
-"""
         response_schema = {
             "type": "object",
             "properties": {
@@ -643,6 +642,15 @@ _Current sentence_: {sentence}"""
         # contains though...
         valid_meaning_objects = []
         valid_matched_meaning_found = False
+        # If there's an invalid number of meanings, reject the result, the AI got confused and we
+        # can't trust this result
+        if len(meaning_list) > len(meanings) + 1:
+            if DEBUG:
+                print(
+                    f"Error: Invalid number of meanings. Expected at most {len(meanings) + 1}, got"
+                    f" {len(meaning_list)}."
+                )
+            return False
         for i, res in enumerate(meaning_list):
             if not isinstance(res, dict):
                 if DEBUG:
@@ -698,6 +706,11 @@ _Current sentence_: {sentence}"""
             meaning_number = res.get("meaning_number", None)
             jp_meaning = res.get("jp_meaning", None)
             en_meaning = res.get("en_meaning", None)
+            # If meaning_number is too big, the AI got confused, skip this
+            if meaning_number is not None and meaning_number > len(meanings):
+                if DEBUG:
+                    print(f"Error: invalid 'meaning_number' at index {i}, too large. Result: {res}")
+                continue
             if is_matched_meaning and meaning_number is not None:
                 meaning_number = meaning_number - 1  # Convert to 0-based index
                 try:
