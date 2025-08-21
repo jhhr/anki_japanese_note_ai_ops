@@ -149,6 +149,11 @@ def update_fake_note_ids(
     return updated_notes_dict
 
 
+def json_result_corrector(json_result: str) -> str:
+    # Sometimes the AI omits the closing ] and } causing json decoding to fail
+    return json_result + "]}"
+
+
 def match_words_to_notes(
     config: dict,
     current_note: Note,
@@ -577,6 +582,7 @@ _Current sentence_: {sentence}
             cancel_state=cancel_state,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            json_result_corrector=json_result_corrector,
         )
         if raw_result is None:
             if DEBUG:

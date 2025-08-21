@@ -17,7 +17,7 @@ from collections.abc import Sequence
 
 from ..utils import get_field_config
 
-# from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
+from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 
 DEBUG = False
 
@@ -44,6 +44,7 @@ def get_response(
     cancel_state: Optional[CancelState] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     """Get a response from the appropriate model based on the configuration.
 
@@ -60,6 +61,7 @@ def get_response(
             cancel_state=cancel_state,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            json_result_corrector=json_result_corrector,
         )
     elif model.startswith("gpt") or model.startswith("o3") or model.startswith("o1"):
         return get_response_from_openai(
@@ -68,6 +70,7 @@ def get_response(
             cancel_state=cancel_state,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            json_result_corrector=json_result_corrector,
         )
     else:
         print(f"Unsupported model: {model}")
@@ -108,12 +111,26 @@ class CancellableRequest:
 active_requests: list[CancellableRequest] = []
 
 
+def decode_json_result(json_str: str):
+    if DEBUG:
+        print("json_result", json_str)
+    try:
+        result = json.loads(json_str)
+        if DEBUG:
+            print("Parsed result from json", result)
+        return result
+    except json.JSONDecodeError:
+        print(f"Failed to parse JSON response, json_result: {json_str}")
+        return None
+
+
 def get_response_from_gemini(
     model: str,
     prompt: str,
     cancel_state: Optional[CancelState] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     """Get a response from Google's Gemini API.
 
@@ -218,16 +235,12 @@ def get_response_from_gemini(
 
     # Extract the JSON from the response
     json_result = extract_json_string(content_text)
-    if DEBUG:
-        print("json_result", json_result)
-    try:
-        result = json.loads(json_result)
-        if DEBUG:
-            print("Parsed result from json", result)
-        return result
-    except json.JSONDecodeError:
-        print(f"Failed to parse JSON response, json_result: {json_result}")
-        return None
+
+    result = decode_json_result(json_result)
+    if not result and json_result_corrector:
+        json_result = json_result_corrector(json_result)
+        result = decode_json_result(json_result)
+    return result
 
 
 def get_response_from_openai(
@@ -236,6 +249,7 @@ def get_response_from_openai(
     cancel_state: Optional[CancelState] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     if DEBUG:
         print("OpenAI call, model", model)
@@ -325,16 +339,12 @@ def get_response_from_openai(
 
     # Extract the cleaned meaning from the response
     json_result = extract_json_string(content_text)
-    if DEBUG:
-        print("json_result", json_result)
-    try:
-        result = json.loads(json_result)
-        if DEBUG:
-            print("Parsed result from json", result)
-        return result
-    except json.JSONDecodeError:
-        print("Failed to parse JSON response")
-        return None
+
+    result = decode_json_result(json_result)
+    if not result and json_result_corrector:
+        json_result = json_result_corrector(json_result)
+        result = decode_json_result(json_result)
+    return result
 
 
 def extract_json_string(content_text):
