@@ -191,6 +191,7 @@ More details on the categorization
 - Don't list adjectives in さ form, list them in their い-form. Avoid listing adjectives in く-form as well, excpect when they have a meaning that isn't merely adverbial; for example, 大きく has the meaning "on a grand scale / extensively"
 - Don't list nouns which may take the genitive case の with the particle, list them in their plain form. For example, 上の should be listed as just 上.
 - Only list proper nouns a single time, ignoring their component nouns.
+- Don't list words in two categories, e.g. an adjective yojijukugo should only be listed in yojijukugo, a compound verb should only be listed in compound verbs and not expressions.
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
 - Take note of words withing <gikun> tags. The kanji used for words wrapped in <gikun> tags are to be ignored and the word listed in hiragana. For example: <k><gikun> 不埒[だら]し</gikun></k><k> 無[な]い</k> should be processed as if it was だらし 無[な]い
 - Otherwise ignore any HTML that may be in the text, leaving any HTML out of the word lists.
@@ -573,22 +574,26 @@ Example results 18:
   "conjunctions": [],
   "prefixes": []
 }}
-"nouns":[["蛇","へび"],["蛇","ヘビ"],["足","あし"]],
-"proper_nouns":[],
-"verbs":[["仕舞う","しまう"],["竦む","すくむ"],["見る","みる"]],
-"compound_verbs":[["竦んで仕舞う","すくんでしまう"]],
-"adjectives":[],
-"adverbs":[],
-"adjectivals":[],
-"particles":[["が","が"],["を","を"]],
-"pronouns":[],
-"suffixes":[],
-"expressions":[],
-"yojijukugo":[],
-"numbers":[],
-"counters":[],
-"conjunctions":[],
-"prefixes":[]
+
+Example sentence 19: 自由自在[じゆうじざい]な 人物[じんぶつ]、 大空[おおぞら]を<b>翔[かけ]る</b> 奔馬[ほんば]だ。
+Example results 19:
+{{
+  "nouns": [["人物", "じんぶつ"], ["大空", "おおぞら"], ["奔馬", "ほんば"]],
+  "proper_nouns": [],
+  "verbs": [["翔る", "かける"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["な", "な"], ["を", "を"]],
+  "pronouns": [],
+  "suffixes": [],
+  "expressions": [],
+  "yojijukugo": [["自由自在", "じゆうじざい"]],
+  "numbers": [],
+  "counters": [],
+  "conjunctions": [],
+  "prefixes": []
 }}
 
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings, or two strings and one number for multi-meaning words.
