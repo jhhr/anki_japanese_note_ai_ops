@@ -1200,6 +1200,7 @@ def selected_notes_op(
                                     new_notes_tsv_str,
                                     do_import=False,
                                 )
+                        mw.col.update_notes(valid_notes)
                         op_changes = mw.col.merge_undo_entries(pos)
                         edited_nids.extend(
                             [note.id for note in valid_notes if note.id not in edited_nids]
