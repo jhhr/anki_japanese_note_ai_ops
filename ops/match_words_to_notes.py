@@ -572,10 +572,11 @@ _Current sentence_: {sentence}
         # Reaching this limit very likely means the model got stuck in a loop repeating the same
         # text over and over
         # However the thinking tokens are also counted towards the limit so the total token count
-        # of thinking + response must be considered
-        max_output_tokens = 3000
+        # of thinking + response must be considered. Thinking can take a several thousand tokens
+        max_output_tokens = 8000
         if DEBUG:
             print(f"\n\nmeanings_str: {meanings_str}")
+
         raw_result = get_response(
             model,
             prompt,
@@ -683,7 +684,10 @@ _Current sentence_: {sentence}
             jp_meaning = res.get("jp_meaning", None)
             en_meaning = res.get("en_meaning", None)
             if is_matched_meaning and meaning_number is not None:
-                if meaning_number < 1 or meaning_number > len(meanings) + 1:
+                meaning_number = meaning_number - 1  # Convert to 0-based index
+                try:
+                    meanings[meaning_number]
+                except IndexError:
                     if DEBUG:
                         print(
                             f"Error: Matched meaning number {meaning_number} is out of range for"
