@@ -1291,9 +1291,18 @@ def match_words_to_notes_for_note(
 
             return update_function
 
+        encountered_words = set()
         for word_list_key in word_list_keys:
             # Go through each list and replace the key in the dict with the result
             word_tuples = word_list_dict.get(word_list_key, [])
+            # Check if any words have already been encountered
+            for wt in word_tuples:
+                word = wt[0]
+                if word in encountered_words:
+                    # remove word from word_tuples
+                    word_tuples.remove(wt)
+                else:
+                    encountered_words.add(word)
             if not isinstance(word_tuples, list):
                 print(f"Error: Invalid word list format for key '{word_list_key}' in the note")
                 continue
