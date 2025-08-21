@@ -476,7 +476,7 @@ def match_words_to_notes(
             match_word,
         ) in enumerate(meanings):
             word_header = (
-                f"Meaning {i+1}:" if not reading_matches_only else f"Matching reading {i+1}:"
+                f"Meaning number {i+1}:" if not reading_matches_only else f"Matching reading {i+1}:"
             )
             word_for_reading = f"\n- *word*: {match_word}" if reading_matches_only else ""
 
@@ -487,49 +487,63 @@ def match_words_to_notes(
 """
 
         good_matches_intro = (
-            "Below are listed some dictionary entry-like _meanings_ for a targeted word along with"
-            " _examples sentences_ for each meaning, and a _current sentence_ being used for"
-            " determining which meaning to assign to _the word_. Your task is to determine whether"
-            " any of the meanings match the usage in the sentence and choose one or more actions"
-            " perform:"
+            "Your task is to analyze a list of dictionary-style meanings for a specific word and"
+            " determine how they relate to the word's usage in a _current sentence_"
         )
         reading_matches_only_intro = (
-            "Below are listed some dictionary entry-like _meanings_ for words that match the"
-            " reading for the targeted word along with _examples sentences_ for each meaning, and a"
-            " _current sentence_ being used for determining which meaning to assign to _the word_."
-            " Your task is to determine whether any of the meanings match the usage in the sentence"
-            " and choose one or more actions perform:"
+            "Your task is to analyze a list of dictionary-style meanings for words that share the"
+            " same *reading* as the target word and determine how they relate to the word's usage"
+            " in a _current sentence_"
         )
-        prompt = f"""{good_matches_intro if not reading_matches_only else reading_matches_only_intro}
- 1. Either, select one of the meanings as matching the how the word is used in the current sentence. You may modify the meaning, when absolutely necessary
- 2. Or, determine that none of the meanings below match how the word is used in the current sentence and a new high quality dictionary-like definition should be created.
- 3. And in addition to performing actions 1 or 2, one or more of the meanings should be improved so that its new formulation will better fit both its example sentence and the current sentence. Keep the updated meaning to one sentence whenever possible, not lengthening the previous meaning.
+        instructions = f"""{good_matches_intro if not reading_matches_only else reading_matches_only_intro}
 
-More details on choosing a meaning:
-- First and foremost, the ideal standard for multi-meaning words' definitions should be to slice the space of possible meanings into the smallest possible set of definitions that avoids any possible ambiguity when assigning a word's usage in a sentence to some meaning.
-- Secondarily, the meanings should be easy to understand for a language-learner; explanations should use simple speech as much the topic of the word allows. Technical jargon or subtle nuances must be adequately explained though - the actual information on what the meaning *is* mustn't be lost in simplification.
-- The general approach of these definitions should then be toward explaining closely related nuances in a single definition and splitting to different definitions when a clear topic border is found.
-- Thus, avoid increasing the specificity of existing meanings, except when their current state is that of low-quality ambiguousness.
+You must choose one of the following actions:
+1.  **MATCH**: One of the existing meanings is a good fit. You can optionally suggest minor improvements to its wording.
+2.  **CREATE NEW**: None of the existing meanings fit. Create a new, high-quality meaning for the word as used in the sentence.
+3.  **IMPROVE ONLY**: You cannot decide on a match, but you can improve the wording of one or more existing meanings.
 
-How you will indicate your choice in the `meanings`:
-- `meaning_number´: The ordinal number of the meaning listed above to signify it is being selected and/or modified. Provide this for actions 1. and 3. and omit for action 2.
-- `is_matched_meaning`: true to indicate action 1. otherwise false
-- `jp_meaning`: Provide to modify japanese meaning in action 1. or 3. or to create a new meaning in action 2. where it is required
-- `en_meaning`: Same as above but the english meaning.
+Based on your choice, you will generate a JSON object.
 
-You must provide at least one object (action 1. or 2.) and at most one more than the number of meanings listed above (action 2. + action 3. on all meanings)
+**JSON OUTPUT RULES:**
 
-Some fields are required depending on the action you choose:
-At most, one object can have `is_matched_meaning` set to true (action 1.), all others must have it set to false.
-For action 1. `meaning_number` is required
-For action 2. `meaning_number` must be omitted or null
-For action 3. `meaning_number` is required and either or both of `jp_meaning` and `en_meaning` must be provided.
+- The output is a JSON object with a single key: "meanings", which is an array of objects.
+- Each object in the array represents a meaning you are matching, creating, or improving.
 
-THE MEANINGS AND EXAMPLE SENTENCES
+**Action 1: MATCH**
+- Create one object with `is_matched_meaning` set to `true`.
+- Set `meaning_number` to the 1-based index of the meaning you are matching from the list.
+- You can optionally provide `jp_meaning` and/or `en_meaning` to suggest improvements.
+
+**Action 2: CREATE NEW**
+- Create one object with `is_matched_meaning` set to `false`.
+- Omit `meaning_number` (or set it to null).
+- You MUST provide a new `jp_meaning` and `en_meaning`.
+
+**Action 3: IMPROVE ONLY**
+- Create one or more objects, all with `is_matched_meaning` set to `false`.
+- For each, set `meaning_number` to the 1-based index of the meaning you are improving.
+- You MUST provide an improved `jp_meaning` and/or `en_meaning`.
+
+**CRITICAL: `meaning_number` must be a valid 1-based index from the "MEANINGS AND EXAMPLE SENTENCES" list. Do not invent numbers.**
+
+**EXAMPLE:**
+If you are given 2 meanings and you decide the first one is a match but needs a better English definition, your output should look like this:
+```json
+{{
+  "meanings": [
+    {{
+      "is_matched_meaning": true,
+      "meaning_number": 1,
+      "en_meaning": "A new, improved English definition."
+    }}
+  ]
+}}
+```"""
+        prompt = f"""MEANINGS AND EXAMPLE SENTENCES
 {meanings_str}
 
 _Targeted word_: {word}
-_Current sentence_: {sentence}
+_Current sentence_: {sentence}"""
 
 """
         response_schema = {
@@ -581,6 +595,7 @@ _Current sentence_: {sentence}
             model,
             prompt,
             cancel_state=cancel_state,
+            instructions=instructions,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
             json_result_corrector=json_result_corrector,

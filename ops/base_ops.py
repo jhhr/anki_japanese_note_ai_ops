@@ -42,6 +42,7 @@ def get_response(
     model: str,
     prompt: str,
     cancel_state: Optional[CancelState] = None,
+    instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
@@ -59,6 +60,7 @@ def get_response(
             model,
             prompt,
             cancel_state=cancel_state,
+            instructions=instructions,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
             json_result_corrector=json_result_corrector,
@@ -68,6 +70,7 @@ def get_response(
             model,
             prompt,
             cancel_state=cancel_state,
+            instructions=instructions,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
             json_result_corrector=json_result_corrector,
@@ -122,12 +125,23 @@ def decode_json_result(json_str: str):
     except json.JSONDecodeError:
         print(f"Failed to parse JSON response, json_result: {json_str}")
         return None
+    except ValueError as ve:
+        print(f"Failed to parse JSON response - ValueError: {ve}")
+        if "integer string conversion" in str(ve):
+            print("Large integer detected in JSON response")
+        print(f"json_result: {json_str}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error parsing JSON: {e}")
+        print(f"json_result: {json_str}")
+        return None
 
 
 def get_response_from_gemini(
     model: str,
     prompt: str,
     cancel_state: Optional[CancelState] = None,
+    instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
@@ -157,13 +171,15 @@ def get_response_from_gemini(
             },
         ],
         "system_instruction": {
-            "parts": [{
-                "text": (
-                    "You are a helpful assistant for processing Japanese text. You are a"
-                    " superlative expert in the Japanese language and its writing system. You are"
-                    " designed to output JSON."
-                )
-            }]
+            "parts": [
+                {
+                    "text": (
+                        "You are a helpful assistant for processing Japanese text. You are a"
+                        " superlative expert in the Japanese language and its writing system. You"
+                        " are designed to output JSON."
+                    )
+                },
+            ]
         },
         "generationConfig": {
             "responseMimeType": "application/json",
@@ -171,6 +187,8 @@ def get_response_from_gemini(
             "maxOutputTokens": max_output_tokens or MAX_TOKENS_VALUE,
         },
     }
+    if instructions:
+        data["system_instruction"]["parts"].append({"text": instructions})
     if max_output_tokens is not None and DEBUG:
         if DEBUG:
             print("Using max_output_tokens", max_output_tokens)
@@ -247,6 +265,7 @@ def get_response_from_openai(
     model: str,
     prompt: str,
     cancel_state: Optional[CancelState] = None,
+    instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
@@ -270,6 +289,8 @@ def get_response_from_openai(
         },
         {"role": "user", "content": prompt},
     ]
+    if instructions:
+        messages[0]["content"] += f"\n{instructions}"
     config = mw.addonManager.getConfig(__name__)
     if config is None:
         print("No configuration found for the addon.")
