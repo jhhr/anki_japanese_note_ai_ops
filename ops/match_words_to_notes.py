@@ -2,7 +2,6 @@ import random
 import json
 import re
 import asyncio
-import traceback
 from typing import Union, Sequence, Callable, Any, Coroutine, cast
 from aqt import mw
 
@@ -21,7 +20,7 @@ from .base_ops import (
 from .clean_meaning import clean_meaning_in_note
 from .extract_words import word_lists_str_format
 from ..kana_conv import to_hiragana
-from ..utils import copy_into_new_note, get_field_config
+from ..utils import copy_into_new_note, get_field_config, print_error_traceback
 from ..configuration import (
     raw_one_meaning_word_type,
     raw_multi_meaning_word_type,
@@ -33,8 +32,8 @@ DEBUG = False
 WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
     "nouns": "Noun",
     "proper_nouns": "Proper Noun",
-    "number": "Number",
-    "counter": "Counter",
+    "numbers": "Number",
+    "counters": "Counter",
     "verbs": "Verb",
     "compound_verbs": "Verb",
     "adjectives": "Adjective",
@@ -601,6 +600,8 @@ _Current sentence_: {sentence}"""
             max_output_tokens=max_output_tokens,
             json_result_corrector=json_result_corrector,
         )
+        if DEBUG:
+            print(f"Raw result: {raw_result}")
         if raw_result is None:
             if DEBUG:
                 print("Failed to get a response from the API.")
@@ -1096,11 +1097,7 @@ _Current sentence_: {sentence}"""
 
         def handle_op_error(e: Exception):
             print(f"Error processing word tuple {word_tuple} at index {i}: {e}")
-            # Format traceback as string to avoid Anki's error dialog
-            tb_lines = traceback.format_tb(e.__traceback__)
-            print("Traceback:")
-            for line in tb_lines:
-                print(line.rstrip())
+            print_error_traceback(e)
 
         handle_op_result = create_result_handler(i, word)
 

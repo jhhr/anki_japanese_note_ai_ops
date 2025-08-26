@@ -1,7 +1,6 @@
 import json
 import asyncio
 import time
-import traceback
 import requests  # type: ignore
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Callable, Coroutine, Any, Union
@@ -15,7 +14,7 @@ from aqt.operations import CollectionOp
 from aqt.utils import tooltip
 from collections.abc import Sequence
 
-from ..utils import get_field_config
+from ..utils import get_field_config, print_error_traceback
 
 from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 
@@ -741,7 +740,7 @@ async def bulk_nested_notes_op(
     progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: dict[str, list[Note]],
     model: str = "",
-):
+) -> tuple[list[Note], int, dict[str, list[Note]]]:
     """
     Perform a bulk operation on a sequence of notes, with multiple nested async operations occurring
     per note instead of just one. Otherwise similar to `bulk_notes_op` except this cannot be
@@ -760,7 +759,7 @@ async def bulk_nested_notes_op(
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     if not model:
         print("Model arg missing in bulk_nested_notes_op, aborting")
-        return None
+        return [], pos, {}
     config["rate_limits"] = config.get("rate_limits", {})
     rate_limit = config["rate_limits"].get(model, None)
     updated_notes_dict: dict[NoteId, Note] = {}
@@ -769,7 +768,7 @@ async def bulk_nested_notes_op(
 
     if not rate_limit:
         print("No rate limit set for model, can't run nested async op")
-        return col.merge_undo_entries(pos)
+        return [], pos, {}
     else:
         tasks: list[asyncio.Task] = []
 
@@ -951,11 +950,7 @@ async def bulk_notes_op(
         # adding the same note to
         def handle_error(current_note, e):
             print(f"Error during operation with note {current_note.id}: {e}")
-            # Format traceback as string to avoid Anki's error dialog
-            tb_lines = traceback.format_tb(e.__traceback__)
-            print("Traceback:")
-            for line in tb_lines:
-                print(line.rstrip())
+            print_error_traceback(e)
 
         handle_op_error = partial(
             lambda current_note, e: handle_error(current_note, e),
@@ -1116,7 +1111,11 @@ def selected_notes_op(
             edited_other_nids = [n.id for n in updated_notes if n.id not in edited_nids_set]
             edited_nids = list(edited_nids)
 
-            mw.col.update_notes(updated_notes)
+            try:
+                mw.col.update_notes(updated_notes)
+            except Exception as e:
+                print(f"Error updating notes: {e}")
+                print_error_traceback(e)
             op_changes = mw.col.merge_undo_entries(pos)
             notes_to_add = []
             if notes_to_add_dict:
@@ -1200,7 +1199,11 @@ def selected_notes_op(
                                     new_notes_tsv_str,
                                     do_import=False,
                                 )
-                        mw.col.update_notes(valid_notes)
+                        try:
+                            mw.col.update_notes(valid_notes)
+                        except Exception as e:
+                            print(f"Error updating valid notes after new_notes_op: {e}")
+                            print_error_traceback(e)
                         op_changes = mw.col.merge_undo_entries(pos)
                         edited_nids.extend(
                             [note.id for note in valid_notes if note.id not in edited_nids]
