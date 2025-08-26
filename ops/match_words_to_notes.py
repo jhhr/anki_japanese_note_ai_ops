@@ -378,6 +378,8 @@ def match_words_to_notes(
                     new_note[word_sort_field] = f"{word} (kun)(r{largest_r_number + 1})"
                 elif found_on and not found_kun:
                     new_note[word_sort_field] = f"{word} (on)(r{largest_r_number + 1})"
+                elif not found_kun and not found_on:
+                    new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
                 else:
                     # If we found both (kun) and (on) markers, we can't decide which one to use,
                     # so just use the word without any markers and add a tag to the note for this
