@@ -487,16 +487,7 @@ def match_words_to_notes(
 - *en_meaning*: {en_meaning}
 """
 
-        good_matches_intro = (
-            "Your task is to analyze a list of dictionary-style meanings for a specific word and"
-            " determine how they relate to the word's usage in a _current sentence_"
-        )
-        reading_matches_only_intro = (
-            "Your task is to analyze a list of dictionary-style meanings for words that share the"
-            " same *reading* as the target word and determine how they relate to the word's usage"
-            " in a _current sentence_"
-        )
-        instructions = f"""{good_matches_intro if not reading_matches_only else reading_matches_only_intro}
+        instructions = """Your task is to analyze a list of dictionary-style meanings for a specific word and determine how they relate to the word's usage in a _current sentence_
 
 You must choose one of the following actions:
 1.  **MATCH**: One of the existing meanings is a good fit. You can optionally suggest minor improvements to its wording.
@@ -517,18 +508,18 @@ Based on your choice, you will generate a JSON object.
 
 **Action 2: CREATE NEW**
 - Create one object with `is_matched_meaning` set to `false`.
-- Omit `meaning_number` (or set it to null).
+- Set `meaning_number` to null.
 - You MUST provide a new `jp_meaning` and `en_meaning`.
 
-**Action 3: IMPROVE ONLY**
+**Optional extra action: IMPROVE**
 - Create one or more objects, all with `is_matched_meaning` set to `false`.
 - For each, set `meaning_number` to the 1-based index of the meaning you are improving.
 - You MUST provide an improved `jp_meaning` and/or `en_meaning`.
 
 **CRITICAL: `meaning_number` must be a valid 1-based index from the "MEANINGS AND EXAMPLE SENTENCES" list. Do not invent numbers.**
 
-**EXAMPLE:**
-If you are given 2 meanings and you decide the first one is a match but needs a better English definition, your output should look like this:
+**Example: MATCH**
+You are given 2 meanings and you decide the first one is a match but needs a better English definition. Your output should look like this:
 ```json
 {{
   "meanings": [
@@ -539,48 +530,71 @@ If you are given 2 meanings and you decide the first one is a match but needs a 
     }}
   ]
 }}
+```
+
+**Example: CREATE NEW with IMPROVE:**
+You are given 2 meanings and you decide none of them fit, so you create a new meaning. You decide the second meaning needs improvement to better differentiate it from the new meaning to be created. Your output should look like this:
+```json
+{{
+  "meanings": [
+    {{
+      "is_matched_meaning": false,
+      "meaning_number": null,
+      "en_meaning": "A new English definition.",
+      "jp_meaning": "新しい日本語の定義。"
+    }},
+    {{
+      "is_matched_meaning": false,
+      "meaning_number": 2,
+      "en_meaning": "An improved English definition.",
+      "jp_meaning": "改善された日本語の定義。"
+    }}
+  ]
+}}
 ```"""
+
         prompt = f"""MEANINGS AND EXAMPLE SENTENCES
 {meanings_str}
 
 _Targeted word_: {word}
 _Current sentence_: {sentence}"""
 
-        response_schema = {
-            "type": "object",
-            "properties": {
-                "meanings": {
-                    "type": "array",
-                    "description": "Array of meaning objects for this word",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "is_matched_meaning": {
-                                "type": "boolean",
-                                "description": "Whether this meaning matches an existing note",
-                            },
-                            "meaning_number": {
-                                "type": "integer",
-                                "description": (
-                                    "The number of the listed meaning if it matches, or null if it"
-                                    " doesn't match"
-                                ),
-                            },
-                            "en_meaning": {
-                                "type": "string",
-                                "description": "New English meaning definition for the word",
-                            },
-                            "jp_meaning": {
-                                "type": "string",
-                                "description": "New Japanese meaning definition for the word",
-                            },
-                        },
-                        "required": ["is_matched_meaning"],
-                    },
-                }
-            },
-            "required": ["meanings"],
-        }
+        # response_schema = {
+        #     "type": "object",
+        #     "properties": {
+        #         "meanings": {
+        #             "type": "array",
+        #             "description": "Array of meaning objects for this word",
+        #             "items": {
+        #                 "type": "object",
+        #                 "properties": {
+        #                     "is_matched_meaning": {
+        #                         "type": "boolean",
+        #                         "description": "Whether this meaning matches an existing note",
+        #                     },
+        #                     "meaning_number": {
+        #                         "type": "integer",
+        #                         "description": (
+        #                             "The number of the listed meaning if it matches, or null if it"
+        #                             " doesn't match"
+        #                         ),
+        #                     },
+        #                     "en_meaning": {
+        #                         "type": "string",
+        #                         "description": "New English meaning definition for the word",
+        #                     },
+        #                     "jp_meaning": {
+        #                         "type": "string",
+        #                         "description": "New Japanese meaning definition for the word",
+        #                     },
+        #                 },
+        #                 "required": ["is_matched_meaning"],
+        #             },
+        #         }
+        #     },
+        #     "required": ["meanings"],
+        # }
+
         # The response is not expected to be very long, 1k tokens would about 30 meanings and
         # generally a word might have 1-3 meanings with some rare words having 5+
         # Reaching this limit very likely means the model got stuck in a loop repeating the same
@@ -596,7 +610,9 @@ _Current sentence_: {sentence}"""
             prompt,
             cancel_state=cancel_state,
             instructions=instructions,
-            response_schema=response_schema,
+            # The response schema seems to actually make the model mess up the result more as the
+            # schema doesn't match the complex rules described in the instructions
+            # response_schema=response_schema,
             max_output_tokens=max_output_tokens,
             json_result_corrector=json_result_corrector,
         )
