@@ -1111,6 +1111,11 @@ def selected_notes_op(
             edited_other_nids = [n.id for n in updated_notes if n.id not in edited_nids_set]
             edited_nids = list(edited_nids)
 
+            # Remove note.id=0 notes from updated_notes
+            for note in updated_notes:
+                if note.id == 0:
+                    print(f"Found note.id=0, fields: {note.fields}")
+            updated_notes = [n for n in updated_notes if n.id != 0]
             try:
                 mw.col.update_notes(updated_notes)
             except Exception as e:
