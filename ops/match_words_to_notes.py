@@ -398,7 +398,12 @@ def match_words_to_notes(
             if DEBUG:
                 print(f"1 notes_to_add_dict after adding new note: {notes_to_add_dict}")
             create_meaning_result = clean_meaning_in_note(config, new_note, notes_to_add_dict)
-            processed_word_tuples[word_index] = (word, reading, word, new_note_id)
+            processed_word_tuples[word_index] = (
+                word,
+                reading,
+                new_note[word_sort_field],
+                new_note_id,
+            )
             return create_meaning_result
 
         matching_notes = []
