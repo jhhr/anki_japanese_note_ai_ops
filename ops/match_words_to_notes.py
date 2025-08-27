@@ -284,30 +284,42 @@ def match_words_to_notes(
         if word.endswith("する") and reading.endswith("する"):
             word = word[:-2]
             reading = reading[:-2]
-        reading_query = f'"{word_reading_field}:{to_hiragana(reading)}"'
-        reading_query_suru = f'"{word_reading_field}:{to_hiragana(reading)}する"'
-        word_query = f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}")'
+        word_query = (
+            f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}" OR'
+            f' "{word_normal_field}:{reading}")'
+        )
         word_query_suru = (
             f'("{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
         )
         no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
-        query = (
-            f"(({word_query} {reading_query}) OR ({word_query_suru} {reading_query_suru}))"
-            f" {no_x_in_sort_field}"
-        )
+        query = f"({word_query} OR {word_query_suru}) {no_x_in_sort_field}"
         if DEBUG:
             print(f"Searching for notes with query: {query}")
         note_ids: Sequence[NoteId] = mw.col.find_notes(query)
-        reading_matches_only = False
-        if not note_ids:
-            reading_matches_only = True
-            # If no good matches were found, check only by matching the reading
-            note_ids = mw.col.find_notes(
-                f"({reading_query} OR {reading_query_suru}) {no_x_in_sort_field}"
-            )
+        # Filter by reading matches, we don't do this in the query since it's not easy to check
+        # for a reading where some parts are in katakana
+
+        hiragana_reading = to_hiragana(reading)
+        hiragana_reading_suru = to_hiragana(reading + "する")
+        matching_notes = []
+        for note_id in note_ids:
+            note = mw.col.get_note(note_id)
+            if note and word_reading_field in note:
+                note_reading = to_hiragana(note[word_reading_field])
+                if DEBUG:
+                    print(
+                        f"Comparing note reading: {note_reading} with {hiragana_reading} and"
+                        f" {hiragana_reading_suru}"
+                    )
+                if note_reading in [hiragana_reading, hiragana_reading_suru]:
+                    matching_notes.append(note)
+
+        if DEBUG:
+            print(f"Found matching notes: {[note[word_sort_field] for note in matching_notes]}")
+
         matching_new_notes = notes_to_add_dict.get(word, [])
 
-        if not note_ids and not matching_new_notes:
+        if not matching_notes and not matching_new_notes:
             new_note = Note(col=mw.col, model=note_type)
             new_note[word_kanjified_field] = word
             new_note[word_normal_field] = word
@@ -321,11 +333,11 @@ def match_words_to_notes(
             # - if there is (kun)(rX) --> this should be (kun)(rY) where Y is the next number in
             #   the sequence, same for (on)(rX)
             # - if there is no marker, this should have none
-            marker_regex = f"^{word} ((?:\((?:kun|on)\))?(?:\(r\d+\))?)$"
+            marker_regex = f"^{word} ?(?:\((?:kun|on)\))?(?:\(r\d+\))?(?:\(m\d+\))?$"
             marker_note_ids = mw.col.find_notes(f'"{word_sort_field}:re:{marker_regex}"')
-            marker_notes = [mw.col.get_note(nid) for nid in marker_note_ids]
             # Additionally, search the notes_to_add_dict to see if any of them have a marker like
             # this, as we'll need to increment the rX number higher than the largest one found
+            marker_notes = [mw.col.get_note(note_id) for note_id in marker_note_ids]
             if word in notes_to_add_dict:
                 for added_note in notes_to_add_dict[word]:
                     if word_sort_field in added_note:
@@ -334,9 +346,38 @@ def match_words_to_notes(
                             # If the marker matches, we can add this note ID to the marker notes
                             marker_notes.append(added_note)
 
+            # When checking the marker notes, theres' two cases
+            # Case 1: The existing notes had some (rX) number, the new should be (rY) where Y is
+            #         the next number in the sequence. No edits needed to the existing notes
+            # Case 2: If the existing notes didn't have (rX) the new note will have (r2) and the
+            #         existing notes will be edited to have (r1)
+            def update_marker_note(a_marker_note: Note):
+                # Case 2: No (rX) present
+                # If there's other markers, place (r1) between (kun/on) and the rest
+
+                if a_marker_note.id and a_marker_note.id in updated_notes_dict:
+                    # Replace note with the one from the dict so all edits to the note are in it
+                    a_marker_note = updated_notes_dict[a_marker_note.id]
+                other_markers_match = re.search(
+                    r"(\((?:kun|on)\))?(\(\w\d+\))?",
+                    a_marker_note[word_sort_field],
+                )
+                other_markers = ""
+                kun_on_marker = ""
+                if other_markers_match:
+                    kun_on_marker = other_markers_match.group(1) or ""
+                    other_markers = other_markers_match.group(2) or ""
+                a_marker_note[word_sort_field] = f"{word} {kun_on_marker}(r1){other_markers}"
+
+                # This is needed for an existing note that hasn't been edited yet
+                if a_marker_note.id:
+                    updated_notes_dict[a_marker_note.id] = a_marker_note
+
             if len(marker_notes) == 1:
                 marker_note = marker_notes[0]
                 if marker_note and word_sort_field in marker_note:
+                    if marker_note.id and marker_note.id in updated_notes_dict:
+                        marker_note = updated_notes_dict[marker_note.id]
                     marker_sort_field = marker_note[word_sort_field]
                     # Check if the sort field has a (kun) or (on) marker
                     if "(kun)" in marker_sort_field:
@@ -351,10 +392,14 @@ def match_words_to_notes(
                     if r_match:
                         r_number = int(r_match.group(1)) + 1
                         new_note[word_sort_field] += f"(r{r_number})"
+                    else:
+                        new_note[word_sort_field] += " (r2)"
+                        update_marker_note(marker_note)
+
             elif len(marker_notes) > 1:
-                # This ought to be case where there's multiple rX markers for the same word,
-                # so get the largest rX number and otherwise use the same (kun)/(on) logic as
-                # above
+                # This ought to be case where there's either zero or multiple rX markers for the
+                # same word, so get the largest rX number and otherwise use the same (kun)/(on)
+                # logic as above
                 largest_r_number = 0
                 # Hopefully there are only either (kun)(rX) or (on)(rX) markers, and not both
                 # as we can't know which kind of reading this word is using without doing some
@@ -385,6 +430,10 @@ def match_words_to_notes(
                     # to be manually checked
                     new_note[word_sort_field] = word
                     new_note.add_tag("check_reading_marker")
+                if largest_r_number == 0:
+                    # Case 2: need to update the marker notes
+                    for marker_note in marker_notes:
+                        update_marker_note(marker_note)
 
             new_note[furigana_sentence_field] = sentence
             new_note[meaning_field] = ""
@@ -392,11 +441,7 @@ def match_words_to_notes(
             new_note[english_meaning_field] = ""
             new_note_id = make_new_note_id(new_note)
             new_note[new_note_id_field] = str(new_note_id)
-            if DEBUG:
-                print(f"1 notes_to_add_dict before adding new note: {notes_to_add_dict}")
             notes_to_add_dict.setdefault(word, []).append(new_note)
-            if DEBUG:
-                print(f"1 notes_to_add_dict after adding new note: {notes_to_add_dict}")
             create_meaning_result = clean_meaning_in_note(config, new_note, notes_to_add_dict)
             processed_word_tuples[word_index] = (
                 word,
@@ -406,12 +451,6 @@ def match_words_to_notes(
             )
             return create_meaning_result
 
-        matching_notes = []
-        if note_ids:
-            # If we have existing notes that match the word, we should use them
-            matching_notes = [
-                updated_notes_dict.get(nid) or mw.col.get_note(nid) for nid in note_ids
-            ]
         if matching_new_notes:
             # If we have notes to add that match the word, we should add them to the list of notes
             # to check against, so we are comparing against both existing notes and new notes
@@ -481,12 +520,7 @@ def match_words_to_notes(
             en_meaning,
             match_word,
         ) in enumerate(meanings):
-            word_header = (
-                f"Meaning number {i+1}:" if not reading_matches_only else f"Matching reading {i+1}:"
-            )
-            word_for_reading = f"\n- *word*: {match_word}" if reading_matches_only else ""
-
-            meanings_str += f"""{word_header}{word_for_reading}
+            meanings_str += f"""Meaning number {i+1}:
 - *jp_meaning*: {jp_meaning}
 - *example_sentence* {example_sentence}
 - *en_meaning*: {en_meaning}
@@ -867,7 +901,7 @@ _Current sentence_: {sentence}"""
                             new_note[word_sort_field] += f" (m{largest_meaning_index})"
                             note_to_copy[word_sort_field] += f" (m{largest_meaning_index -1})"
                         new_note_id = make_new_note_id(new_note)
-                        new_note[new_note_id_field] = new_note_id
+                        new_note[new_note_id_field] = str(new_note_id)
                         updated_notes_dict[new_note_id] = note_to_copy
                     # Note to copy was missing sort field somehow? Add it now + the meaning numbers
                     else:
@@ -875,12 +909,8 @@ _Current sentence_: {sentence}"""
                         note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index -1})"
                         new_note_id = make_new_note_id(new_note)
                         updated_notes_dict[new_note_id] = note_to_copy
-                        new_note[new_note_id_field] = new_note_id
-                    if DEBUG:
-                        print(f"2 notes_to_add_dict before adding new note: {notes_to_add_dict}")
+                        new_note[new_note_id_field] = str(new_note_id)
                     notes_to_add_dict.setdefault(word, []).append(new_note)
-                    if DEBUG:
-                        print(f"2 notes_to_add_dict after adding new note: {notes_to_add_dict}")
                     # Note, new_note.id will be 0 here, we'll instead use the sort field value to
                     # find it after insertion and then update the processed_word_tuples
                     processed_word_tuples[word_index] = (
