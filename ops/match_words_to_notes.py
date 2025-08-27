@@ -863,7 +863,7 @@ _Current sentence_: {sentence}"""
                         word,
                         reading,
                         new_note[word_sort_field],
-                        new_note.id,
+                        new_note[new_note_id_field],
                     )
                     return True
                 else:
