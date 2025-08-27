@@ -804,6 +804,9 @@ _Current sentence_: {sentence}"""
                         # Replace note object from dict if its there
                         note_to_copy = updated_notes_dict[note_to_copy.id]
                     new_note = copy_into_new_note(note_to_copy)
+                    # Don't copy tags and the word list field to the new note
+                    new_note.set_tags_from_str = ""
+                    new_note[word_list_field] = ""
                     new_note.add_tag("new_matched_jp_word")
                     new_note[meaning_field] = jp_meaning.strip() if jp_meaning else ""
                     new_note[english_meaning_field] = en_meaning.strip() if en_meaning else ""
