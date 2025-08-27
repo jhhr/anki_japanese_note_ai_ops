@@ -1161,6 +1161,7 @@ def selected_notes_op(
                         op_changes = mw.col.merge_undo_entries(pos)
                     except Exception as e:
                         print(f"Error adding note {index}: {e}")
+                        print_error_traceback(e)
                         failed_cnt += 1
 
                     progress_updater.update_note_adding_progress(
