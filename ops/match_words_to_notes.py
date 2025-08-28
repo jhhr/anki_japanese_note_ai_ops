@@ -946,7 +946,7 @@ _Current sentence_: {sentence}"""
                     )
                 # We have a match, so we can update the note with the matched meaning
                 matched_note = None
-                matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number - 1]
+                matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number]
                 for note in matching_notes:
                     if note.id == matched_note_id and matched_meaning == note[meaning_field]:
                         # Ensure the matched meaning is the same as in the note to account for id=0
