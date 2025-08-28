@@ -220,6 +220,7 @@ def match_words_to_notes(
     word_reading_field = get_field_config(config, "word_reading_field", note_type)
     word_sort_field = get_field_config(config, "word_sort_field", note_type)
     meaning_field = get_field_config(config, "meaning_field", note_type)
+    meaning_audio_field = get_field_config(config, "meaning_audio_field", note_type)
     furigana_sentence_field = get_field_config(config, "furigana_sentence_field", note_type)
     part_of_speech_field = get_field_config(config, "part_of_speech_field", note_type)
     english_meaning_field = get_field_config(config, "english_meaning_field", note_type)
@@ -862,6 +863,7 @@ _Current sentence_: {sentence}"""
                     # Don't copy tags and the word list field to the new note
                     new_note.set_tags_from_str = ""
                     new_note[word_list_field] = ""
+                    new_note[meaning_audio_field] = ""
                     new_note.add_tag("new_matched_jp_word")
                     new_note[meaning_field] = jp_meaning.strip() if jp_meaning else ""
                     new_note[english_meaning_field] = en_meaning.strip() if en_meaning else ""
