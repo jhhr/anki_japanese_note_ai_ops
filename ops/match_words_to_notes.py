@@ -890,6 +890,8 @@ _Current sentence_: {sentence}"""
                                     largest_meaning_index = max(
                                         largest_meaning_index, int(mx_match.group(1)) + 1
                                     )
+                    new_note_id = make_new_note_id(new_note)
+                    new_note[new_note_id_field] = str(new_note_id)
                     if prev_sort_field and mxRec.search(prev_sort_field):
                         # Replace the existing (mX) with the new meaning number
                         new_note[word_sort_field] = mxRec.sub(
@@ -930,7 +932,7 @@ _Current sentence_: {sentence}"""
                         word,
                         reading,
                         new_note[word_sort_field],
-                        new_note[new_note_id_field],
+                        new_note_id,
                     )
                     return True
                 else:
