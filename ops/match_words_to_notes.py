@@ -525,75 +525,96 @@ def match_words_to_notes(
             match_word,
         ) in enumerate(meanings):
             meanings_str += f"""Meaning number {i+1}:
+- *match_word*: {match_word}
 - *jp_meaning*: {jp_meaning}
-- *example_sentence* {example_sentence}
+- *example_sentence*: {example_sentence}
 - *en_meaning*: {en_meaning}
 """
 
-        instructions = """Your task is to analyze a list of dictionary-style meanings for a specific word and determine how they relate to the word's usage in a _current sentence_
+        instructions = """You are an expert Japanese lexicographer. Your task is to analyze how a Japanese word is used in a _current sentence_ and compare it to a list of existing dictionary meanings. You are designed to output JSON.
 
-You must choose one of the following actions:
-1.  **MATCH**: One of the existing meanings is a good fit. You can optionally suggest minor improvements to its wording.
-2.  **CREATE NEW**: None of the existing meanings fit. Create a new, high-quality meaning for the word as used in the sentence.
-3.  **IMPROVE ONLY**: You cannot decide on a match, but you can improve the wording of one or more existing meanings.
+**Primary Goal: Find the Best Match**
+Your main goal is to **MATCH** the word's usage to an existing meaning with modifications. Aim to expand existing meanings to be more general as far as is reasonable. Only **CREATE NEW** a meaning, if none of the existing meanings cannot be modified to fit additional contexts.
 
-Based on your choice, you will generate a JSON object.
+**Your Actions**
+You will generate a JSON object containing an array of "meanings". This array will describe your actions. You must provide a single primary action. You may combine the Primary action with the Optional action.
+
+1.  **MATCH (Primary Action)**
+    -   Choose this if one existing meaning either accurately represents the word's usage in the sentence or can be modified to fit its previous meaning and the current context.
+    -   In the JSON, create one object with `"is_matched_meaning": true`.
+    -   Set `"meaning_number"` to the 1-based index of the matching meaning.
+    -   You can optionally provide improved `"jp_meaning"` or `"en_meaning"` in this same object if the original has minor flaws.
+
+2.  **CREATE NEW (Primary Action)**
+    -   Choose this **only if every existing meaning is unsuitable**.
+    -   In the JSON, create one object with `"is_matched_meaning": false"` and `"meaning_number": null`.
+    -   You MUST provide a new `"jp_meaning"` and `"en_meaning"`.
+
+3.  **IMPROVE (Optional Secondary Action)**
+    -   You can perform this action **in addition to** MATCH or CREATE NEW.
+    -   Use this to improve other existing meanings that are NOT the primary match, to make them clearer or more distinct.
+    -   For each meaning you want to improve, add a separate object to the JSON array with `"is_matched_meaning": false"` and the corresponding `"meaning_number"`.
+    -   You MUST provide the improved `"jp_meaning"` or `"en_meaning"`.
 
 **JSON OUTPUT RULES:**
+- The output is a JSON object: `{"meanings": [...]}`.
+- The `meanings` array MUST contain exactly one primary action (either a `MATCH` or `CREATE NEW` object).
+- The `meanings` array CAN optionally contain additional `IMPROVE` objects.
+- **CRITICAL**: `meaning_number` must be a valid 1-based index from the provided list. Do not invent numbers.
 
-- The output is a JSON object with a single key: "meanings", which is an array of objects.
-- Each object in the array represents a meaning you are matching, creating, or improving.
-
-**Action 1: MATCH**
-- Create one object with `is_matched_meaning` set to `true`.
-- Set `meaning_number` to the 1-based index of the meaning you are matching from the list.
-- You can optionally provide `jp_meaning` and/or `en_meaning` to suggest improvements.
-
-**Action 2: CREATE NEW**
-- Create one object with `is_matched_meaning` set to `false`.
-- Set `meaning_number` to null.
-- You MUST provide a new `jp_meaning` and `en_meaning`.
-
-**Optional extra action: IMPROVE**
-- Create one or more objects, all with `is_matched_meaning` set to `false`.
-- For each, set `meaning_number` to the 1-based index of the meaning you are improving.
-- You MUST provide an improved `jp_meaning` and/or `en_meaning`.
-
-**CRITICAL: `meaning_number` must be a valid 1-based index from the "MEANINGS AND EXAMPLE SENTENCES" list. Do not invent numbers.**
-
-**Example: MATCH**
-You are given 2 meanings and you decide the first one is a match but needs a better English definition. Your output should look like this:
+---
+**Example 1: MATCH with an improvement to the matched meaning**
+The first meaning is a good match, but its English and Japanese are modified to match the current usage.
 ```json
-{{
+{
   "meanings": [
-    {{
+    {
       "is_matched_meaning": true,
       "meaning_number": 1,
-      "en_meaning": "A new, improved English definition."
-    }}
+      "jp_meaning": "改善された日本語の定義。",
+      "en_meaning": "A new, improved English definition for the matched meaning."
+    }
   ]
-}}
+}
 ```
 
-**Example: CREATE NEW with IMPROVE:**
-You are given 2 meanings and you decide none of them fit, so you create a new meaning. You decide the second meaning needs improvement to better differentiate it from the new meaning to be created. Your output should look like this:
+**Example 2: CREATE NEW and also IMPROVE an existing meaning**
+None of the meanings fit, so you create a new one. You also improve meaning #2 to differentiate it.
 ```json
-{{
+{
   "meanings": [
-    {{
+    {
       "is_matched_meaning": false,
       "meaning_number": null,
-      "en_meaning": "A new English definition.",
-      "jp_meaning": "新しい日本語の定義。"
-    }},
-    {{
+      "jp_meaning": "新しい日本語の定義。",
+      "en_meaning": "A new English definition for the new usage."
+    },
+    {
       "is_matched_meaning": false,
       "meaning_number": 2,
-      "en_meaning": "An improved English definition.",
-      "jp_meaning": "改善された日本語の定義。"
-    }}
+      "jp_meaning": "改善された日本語の定義。",
+      "en_meaning": "An improved English definition for an existing meaning."
+    }
   ]
-}}
+}
+```
+
+**Example 3: MATCH and also IMPROVE a DIFFERENT existing meaning**
+Meaning #1 is the correct match. You also want to improve the wording of meaning #2.
+```json
+{
+  "meanings": [
+    {
+      "is_matched_meaning": true,
+      "meaning_number": 1
+    },
+    {
+      "is_matched_meaning": false,
+      "meaning_number": 2,
+      "en_meaning": "An improved English definition for a different, existing meaning."
+    }
+  ]
+}
 ```"""
 
         prompt = f"""MEANINGS AND EXAMPLE SENTENCES
@@ -912,16 +933,12 @@ _Current sentence_: {sentence}"""
                                 .replace(") (", ")(")
                                 .replace("  ", " ")
                             )
-                        new_note_id = make_new_note_id(new_note)
-                        new_note[new_note_id_field] = str(new_note_id)
                         updated_notes_dict[new_note_id] = note_to_copy
                     # Note to copy was missing sort field somehow? Add it now + the meaning numbers
                     else:
                         new_note[word_sort_field] = f"{word} (m{largest_meaning_index})"
                         note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index -1})"
-                        new_note_id = make_new_note_id(new_note)
                         updated_notes_dict[new_note_id] = note_to_copy
-                        new_note[new_note_id_field] = str(new_note_id)
                     notes_to_add_dict.setdefault(word, []).append(new_note)
                     new_note[word_sort_field] = (
                         new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
