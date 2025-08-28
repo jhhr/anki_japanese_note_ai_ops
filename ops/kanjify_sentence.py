@@ -64,7 +64,6 @@ def k_word_reversing_replacer(match: re.Match[str]) -> str:
 
 
 B_TAGS_REC = re.compile(r"<b>|</b>")
-GIKUN_TAGS_REC = re.compile(r"<gikun>|</gikun>")
 
 NUMBER_FURI_REC = re.compile(r"(\d+)\[([^\]]+)\]([あ-ん]*)")
 
@@ -114,17 +113,14 @@ Do not kanjify:
 - もう used purely as exclamatory particle, for example もう！ or もう、やめてよ！
 - もっと as it is not truly component in もっとも which does have a kanjified form as 最も or 尤も
 - そんな, こんな, あんな, どんな
+― Gikun-type, reading-as-meaning conversions. Only perform kanjification if there is some evidence of usage in literature, online texts or dictionaries.
 Do kanjify:
 - ない when used as a standalone word, including conjugated forms like なかった, なくて. 無い is even currently used in modern text, but is simply often written in hiragana.
 - いる and いく when is used as a standalone verb, for example 彼は家にいる, あっちにいく
 - する, even in suru-verbs. Historically, suru-verbs were written with 為る so this is a valid kanjification.
-― semantically equivalance but no actual historical usage of the reading: kanjify but wrap with additional <gikun> tags within the <k> tags.
-  - Examples ケチ in ケチがつく means "flaw/blemish" and matches 疵 in meaning but 疵 has never been read as けち; "ケチがつく" --> converts "<k><gikun> 疵[けち]</gikun></k>が<k> 付[つ]く</k>"
-  - すっかり means ことごとく but 悉 has no historical usage of the reading すっかり; "すっかり" --> converts "<k><gikun> 悉[すっかり]</gikun></k>"
 - なんか when it is clearly a contraction of なにか its removal would change the questioning meaning of a phrase, for example なんか食べたい
 - やすい as used in verbs like 食べやすい, 書きやすい, etc. This is a a form of 易い
 - the honorific prefix お
-- the adverb もう as semantically equivalent to 最早, when the meaning is "already/now/no longer" or as semantically equivalent to 復, when the meaning is "again/once more". These are both <gikun> cases.
 - よう as 様[よう] in all its forms, ような, ように, ようだ, etc.
 - Romaji numbers, keep them as is though furigana can be added without adding <k> tags. For example, １つ (no furigana) becomes "１[ひと]つ". 10分[ぷん] becomes "10分[じゅっぷん]". 1000[せん]円[えん] stays as is.
 - The expression として should be considered to not contain する and should be left as is.
@@ -295,7 +291,6 @@ def kanjify_sentence_in_note(
                 # Check if reversing the kanjification results in the original sentence and tag
                 # the note if not
                 reversed_sentence = B_TAGS_REC.sub("", kanjified_sentence)
-                reversed_sentence = GIKUN_TAGS_REC.sub("", reversed_sentence)
                 reversed_sentence = K_WORD_REC.sub(k_word_reversing_replacer, reversed_sentence)
                 number_furi_replacer = make_number_furi_replacer(sentence)
                 reversed_sentence = NUMBER_FURI_REC.sub(number_furi_replacer, reversed_sentence)
