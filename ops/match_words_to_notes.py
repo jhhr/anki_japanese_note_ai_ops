@@ -392,7 +392,7 @@ def match_words_to_notes(
                     r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
                     if r_match:
                         r_number = int(r_match.group(1)) + 1
-                        new_note[word_sort_field] += f"(r{r_number})"
+                        new_note[word_sort_field] += f" (r{r_number})"
                     else:
                         new_note[word_sort_field] += " (r2)"
                         update_marker_note(marker_note)
@@ -444,6 +444,9 @@ def match_words_to_notes(
             new_note[new_note_id_field] = str(new_note_id)
             notes_to_add_dict.setdefault(word, []).append(new_note)
             create_meaning_result = clean_meaning_in_note(config, new_note, notes_to_add_dict)
+            new_note[word_sort_field] = (
+                new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
+            )
             processed_word_tuples[word_index] = (
                 word,
                 reading,
@@ -480,7 +483,7 @@ def match_words_to_notes(
                 if meaning:
                     sort_field = note[word_sort_field]
                     # Get the meaning number, if any from sort field, in the form (m1), (m2), etc.
-                    match = re.match(r"\(m(\d+)\)\.", sort_field)
+                    match = re.match(r"\(m(\d+)\)", sort_field)
                     meaning_number = 0
                     if not note_to_copy:
                         # Ensure we have a note to copy that has a meaning
@@ -902,6 +905,11 @@ _Current sentence_: {sentence}"""
                             # Else, same but add a space
                             new_note[word_sort_field] += f" (m{largest_meaning_index})"
                             note_to_copy[word_sort_field] += f" (m{largest_meaning_index -1})"
+                            note_to_copy[word_sort_field] = (
+                                note_to_copy[word_sort_field]
+                                .replace(") (", ")(")
+                                .replace("  ", " ")
+                            )
                         new_note_id = make_new_note_id(new_note)
                         new_note[new_note_id_field] = str(new_note_id)
                         updated_notes_dict[new_note_id] = note_to_copy
@@ -913,6 +921,9 @@ _Current sentence_: {sentence}"""
                         updated_notes_dict[new_note_id] = note_to_copy
                         new_note[new_note_id_field] = str(new_note_id)
                     notes_to_add_dict.setdefault(word, []).append(new_note)
+                    new_note[word_sort_field] = (
+                        new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
+                    )
                     # Note, new_note.id will be 0 here, we'll instead use the sort field value to
                     # find it after insertion and then update the processed_word_tuples
                     processed_word_tuples[word_index] = (
