@@ -1072,7 +1072,7 @@ _Current sentence_: {sentence}"""
             # If this the id is a negative number, it means the word was added as a new note
             # and should try to set the id to an actual note.id, if the note was created
             try:
-                fake_note_id = int(word_tuple[3].strip())
+                fake_note_id = int(word_tuple[3])
             except Exception as e:
                 if DEBUG:
                     print(f"Error: Invalid third value in word tuple: {word_tuple}, {e}")
