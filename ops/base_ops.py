@@ -173,9 +173,13 @@ def get_response_from_gemini(
             "parts": [
                 {
                     "text": (
-                        "You are a helpful assistant for processing Japanese text. You are a"
-                        " superlative expert in the Japanese language and its writing system. You"
-                        " are designed to output JSON."
+                        instructions
+                        if instructions
+                        else (
+                            "You are a helpful assistant for processing Japanese text. You are a"
+                            " superlative expert in the Japanese language and its writing system."
+                            " You are designed to output JSON."
+                        )
                     )
                 },
             ]
@@ -187,8 +191,6 @@ def get_response_from_gemini(
             "thinkingConfig": {"thinkingBudget": 6000},
         },
     }
-    if instructions:
-        data["system_instruction"]["parts"].append({"text": instructions})
     if max_output_tokens is not None and DEBUG:
         if DEBUG:
             print("Using max_output_tokens", max_output_tokens)
@@ -282,15 +284,17 @@ def get_response_from_openai(
         {
             "role": "system",
             "content": (
-                "You are a helpful assistant for processing Japanese text. You are a superlative"
-                " expert in the Japanese language and its writing system. You are designed to"
-                " output JSON."
+                instructions
+                if instructions
+                else (
+                    "You are a helpful assistant for processing Japanese text. You are a"
+                    " superlative expert in the Japanese language and its writing system. You are"
+                    " designed to output JSON."
+                )
             ),
         },
         {"role": "user", "content": prompt},
     ]
-    if instructions:
-        messages[0]["content"] += f"\n{instructions}"
     config = mw.addonManager.getConfig(__name__)
     if config is None:
         print("No configuration found for the addon.")
