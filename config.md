@@ -68,7 +68,7 @@ You need to define
 
 - for cleaning/generating word meanings:
   1. `meaning_field`
-  2. `en_meaning_field`
+  2. `english_meaning_field`
   3. `word_field`
   4. `sentence_field`
 - for translating sentences

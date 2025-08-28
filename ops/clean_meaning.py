@@ -114,7 +114,7 @@ def clean_meaning_in_note(
 
     try:
         meaning_field = get_field_config(config, "meaning_field", note_type)
-        en_meaning_field = get_field_config(config, "en_meaning_field", note_type)
+        english_meaning_field = get_field_config(config, "english_meaning_field", note_type)
         word_field = get_field_config(config, "word_field", note_type)
         sentence_field = get_field_config(config, "sentence_field", note_type)
     except KeyError as e:
@@ -124,13 +124,13 @@ def clean_meaning_in_note(
     if DEBUG:
         print("cleaning meaning in note", note.id)
         print("meaning_field in note", meaning_field in note)
-        print("en_meaning_field in note", en_meaning_field in note)
+        print("english_meaning_field in note", english_meaning_field in note)
         print("word_field in note", word_field in note)
         print("sentence_field in note", sentence_field in note)
     # Check if the note has the required fields
     if (
         meaning_field in note
-        and en_meaning_field in note
+        and english_meaning_field in note
         and word_field in note
         and sentence_field in note
     ):
@@ -138,7 +138,7 @@ def clean_meaning_in_note(
             print("note has fields")
         # Get the values from fields
         jp_dict_entry = note[meaning_field]
-        en_dict_entry = note[en_meaning_field]
+        en_dict_entry = note[english_meaning_field]
         word = note[word_field]
         sentence = note[sentence_field]
         # Check if the value is non-empty
@@ -150,7 +150,7 @@ def clean_meaning_in_note(
 
             # Update the note with the new value
             note[meaning_field] = new_jp_meaning
-            note[en_meaning_field] = new_en_meaning
+            note[english_meaning_field] = new_en_meaning
             # Return success, if the we changed something
             if new_jp_meaning != jp_dict_entry or new_en_meaning != en_dict_entry:
                 return True
@@ -159,7 +159,7 @@ def clean_meaning_in_note(
             # If there's no dict_entry, we'll use chatGPT to generate one from scratch
             new_meaning, en_meaning = get_new_meaning_from_model(config, word, sentence)
             note[meaning_field] = new_meaning
-            note[en_meaning_field] = en_meaning
+            note[english_meaning_field] = en_meaning
             if new_meaning != "" or en_meaning != "":
                 return True
             return False
