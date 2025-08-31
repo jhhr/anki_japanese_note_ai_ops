@@ -285,9 +285,20 @@ def match_words_to_notes(
         if word.endswith("する") and reading.endswith("する") and not word.endswith("にする"):
             word = word[:-2]
             reading = reading[:-2]
+        # Entries for words starting with the honorific prefix may use the kanji or hiragana so
+        # query for both
+        go_word_query = ""
+        if word.startswith("御"):
+            o_word = "お" + word[1:]
+            go_word = "ご" + word[1:]
+            go_word_query = (
+                f' OR "{word_kanjified_field}:{o_word}" OR "{word_normal_field}:{o_word}" OR'
+                f' "{word_kanjified_field}:{go_word}" OR "{word_normal_field}:{go_word}"'
+            )
+
         word_query = (
             f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}" OR'
-            f' "{word_normal_field}:{reading}")'
+            f' "{word_normal_field}:{reading}"{go_word_query})'
         )
         word_query_suru = (
             f'("{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
