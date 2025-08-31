@@ -544,13 +544,8 @@ def match_words_to_notes(
 
         instructions = """You are an expert Japanese lexicographer. Your task is to analyze how a Japanese word is used in a _current sentence_ and compare it to a list of existing dictionary meanings. You are designed to output JSON.
 
-**Primary Goal: Find the Best Match**
-Your main goal is to **MATCH** the word's usage to an existing meaning with modifications. Aim to expand existing meanings to be more general as far as is reasonable. Only **CREATE NEW** a meaning, if none of the existing meanings cannot be modified to fit additional contexts.
-- First and foremost, the ideal standard for multi-meaning words' definitions should be to slice the space of possible meanings into the smallest possible set of definitions that avoids any possible ambiguity when assigning a word's usage in a sentence to some meaning.
-- Secondarily, the meanings should be easy to understand for a language-learner; explanations should use simple speech as much the topic of the word allows. Technical jargon or subtle nuances must be adequately explained though - the actual information on what the meaning *is* mustn't be lost in simplification.
-- The inclication of these definitions should then be toward explaining closely related nuances in a single definition and splitting to different definitions when a clear topic border is found.
-- Thus, avoid increasing the specificity of existing meanings, except when their current state is low-quality ambiguousness.
-
+**Primary Goal: Minimize creation of new meanings**
+Your main goal is to try to contain all closely related nuances in a single meaning. Always modify one of the existing meanings, if it somewhat matches the current context and could be adjusted to fit the current and previous contexts. Only if such modifications are not possible, you may consider the **CREATE NEW** action.
 
 **Your Actions**
 You will generate a JSON object containing an array of "meanings". This array will describe your actions. You must provide a single primary action. You may combine the Primary action with the Optional action.
