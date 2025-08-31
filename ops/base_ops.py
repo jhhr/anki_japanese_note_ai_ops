@@ -311,7 +311,7 @@ def get_response_from_openai(
         "response_format": {"type": "json_object"},
         "messages": messages,
     }
-    if any(model.startswith(m) for m in ["o3", "o1"]):
+    if any(model.startswith(m) for m in ["o3", "o1", "gpt-5"]):
         # This is total completion tokens, including both reasoning and output
         data["max_completion_tokens"] = max_output_tokens or MAX_TOKENS_VALUE
     else:
