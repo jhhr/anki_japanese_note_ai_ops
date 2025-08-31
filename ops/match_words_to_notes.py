@@ -282,7 +282,7 @@ def match_words_to_notes(
                 )
             processed_word_tuples[word_index] = None
         # Check for existing suru verbs words including する in either field, remove する in the word
-        if word.endswith("する") and reading.endswith("する"):
+        if word.endswith("する") and reading.endswith("する") and not word.endswith("にする"):
             word = word[:-2]
             reading = reading[:-2]
         word_query = (
