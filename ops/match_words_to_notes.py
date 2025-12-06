@@ -549,7 +549,7 @@ def match_words_to_notes(
         instructions = """You are an expert Japanese lexicographer. Your task is to analyze how a Japanese word is used in a _current sentence_ and compare it to a list of existing dictionary meanings. You are designed to output JSON.
 
 **Primary Goal: Minimize creation of new meanings**
-Your main goal is to try to contain all closely related nuances in a single meaning. Always modify one of the existing meanings, if it somewhat matches the current context and could be adjusted to fit the current and previous contexts. Only if such modifications are not possible, you may consider the **CREATE NEW** action.
+Your main goal is to try to contain all closely related nuances in a single meaning. Always modify one of the existing meanings, if it somewhat matches the current context and could be adjusted to fit the current and previous contexts. However, do not refer to specific phrases in a meaning, to avoid overfitting; to fit more contexts, try to explain the meaning in general terms using easy-to-understand language. Keep the meaning short, 3 sentences is already too long. Only if such modifications no longer make sense because the existings meanings are not close enough or further modification would make the meaning too long and/or complicated, you may consider the **CREATE NEW** action.
 
 **Your Actions**
 You will generate a JSON object containing an array of "meanings". This array will describe your actions. You must provide a single primary action. You may combine the Primary action with the Optional action.
