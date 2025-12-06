@@ -10,26 +10,26 @@ from aqt.qt import QAction, qconnect, QMenu
 
 from .utils import get_field_config
 
-from .ops.clean_meaning import (
+from .async_api_ops.clean_meaning import (
     clean_meaning_in_note,
     clean_selected_notes,
 )
-from .ops.translate_field import (
+from .async_api_ops.translate_field import (
     translate_selected_notes,
     translate_sentence_in_note,
 )
-from .ops.make_kanji_story import (
+from .async_api_ops.make_kanji_story import (
     make_stories_for_selected_notes,
     make_story_for_note,
 )
-from .ops.kanjify_sentence import (
+from .async_api_ops.kanjify_sentence import (
     kanjify_selected_notes,
 )
-from .ops.extract_words import (
+from .async_api_ops.extract_words import (
     extract_words_from_selected_notes,
     extract_words_in_note,
 )
-from .ops.match_words_to_notes import (
+from .async_api_ops.match_words_to_notes import (
     match_words_to_notes_from_selected,
 )
 
