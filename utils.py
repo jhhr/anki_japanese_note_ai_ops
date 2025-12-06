@@ -1,9 +1,9 @@
 import traceback
-from anki import notes_pb2
 from anki.notes import Note
+from anki.models import NotetypeDict
 
 
-def get_field_config(config: dict, field_name: str, note_type: dict) -> str:
+def get_field_config(config: dict, field_name: str, note_type: NotetypeDict) -> str:
     note_type_name = note_type["name"]
     try:
         model_config = config[note_type_name]
