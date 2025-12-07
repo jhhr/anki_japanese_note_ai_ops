@@ -55,6 +55,7 @@ class MDXDictionary:
         word: str,
         strip_html_tags: bool = False,
         preserve_structure: bool = False,
+        _visited: Optional[set[str]] = None,
     ) -> Union[str, None]:
         """
         Query a single word
@@ -63,10 +64,17 @@ class MDXDictionary:
             word: The word to look up
             strip_html_tags: If True, remove HTML tags from result
             preserve_structure: If True and strip_html_tags=True, preserve line breaks
+            _visited: Internal parameter to track visited links and prevent infinite recursion
 
         Returns:
             HTML or plain text definition string, or None if not found
         """
+
+        # Check for infinite recursion
+        if _visited is not None and word in _visited:
+            print(f"Warning: Circular reference detected for '{word}'")
+            return None
+
         # Try exact match first
         if word in self.index:
             result = self.index[word]
@@ -76,9 +84,12 @@ class MDXDictionary:
             return None
 
         if result.startswith("@@@LINK="):
+            if _visited is None:
+                _visited = set()
             # Handle cross-reference links
             link_key = result[len("@@@LINK=") :].strip()
-            return self.query(link_key, strip_html_tags, preserve_structure)
+            _visited.add(word)
+            return self.query(link_key, strip_html_tags, preserve_structure, _visited)
 
         if strip_html_tags:
             result = strip_html_advanced(result, preserve_structure)
