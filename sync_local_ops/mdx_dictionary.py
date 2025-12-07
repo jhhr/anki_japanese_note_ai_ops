@@ -225,6 +225,8 @@ class MultiDictionaryQuery:
             word: Word to look up
             strip_html_tags: If True, remove HTML tags from results
             preserve_structure: If True and strip_html_tags=True, preserve line breaks
+            pick_dictionary: Strategy for selecting results, one of "first", "all", "shortest",
+                "longest"
 
         Returns:
             List of dicts with 'dictionary' and 'definition' keys
@@ -261,6 +263,8 @@ class MultiDictionaryQuery:
             reading: Optional reading
             strip_html_tags: If True, remove HTML tags from results
             preserve_structure: If True and strip_html_tags=True, preserve line breaks
+            pick_dictionary: Strategy for selecting results, one of "first", "all", "shortest",
+                "longest"
 
         Returns:
             List of dicts with 'dictionary' and 'definition' keys
