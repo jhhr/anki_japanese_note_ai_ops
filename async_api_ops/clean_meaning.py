@@ -47,7 +47,7 @@ Omission rules:
 - Descriptions of animals and plants are often scientific. From these omit descriptions on their ecology and only describe their appearance and type of plant/animal with simple language.
 
 Simplification rules:
-- YOU MUST Shorten and simplify the meaning as much possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
+- YOU MUST Shorten and simplify the meaning as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
 
 Formatting rules:
 - Clean off meaning numberings and other notation leaving only a plain text description.
