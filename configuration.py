@@ -8,6 +8,8 @@ ADDON_USER_FILES_DIR = os.path.join(
     "user_files",
 )
 
+# Ensure the user_files directory exists
+os.makedirs(ADDON_USER_FILES_DIR, exist_ok=True)
 # Raw word, tuple of 1) word, 2) reading
 raw_one_meaning_word_type = tuple[str, str]
 # Raw word, tuple of 1) word, 2) reading and 3) meaning number
