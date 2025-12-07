@@ -14,10 +14,9 @@ from .base_ops import (
     selected_notes_op,
     AsyncTaskProgressUpdater,
 )
-from .write_kanji_component_words import KANJI_STORY_COMPONENT_WORDS_LOG
 from ..utils import get_field_config
 
-DEBUG = False
+KANJI_STORY_COMPONENT_WORDS_LOG = "_kanji_story_component_words.json"
 
 
 def get_kanji_story_from_model(
