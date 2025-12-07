@@ -1,5 +1,7 @@
 import os
 import sys
+import logging
+from datetime import datetime
 
 from anki import hooks
 from anki.notes import Note
@@ -16,6 +18,7 @@ if lib_path not in sys.path:
 
 # E402 - module level import not at top of file
 from .utils import get_field_config  # noqa: E402
+
 
 from .async_api_ops.clean_meaning import (  # noqa: E402
     clean_meaning_in_note,
@@ -41,8 +44,74 @@ from .async_api_ops.match_words_to_notes import (  # noqa: E402
 )
 
 
+# Initialize root logger for the addon at module load
+def setup_addon_logging():
+    """Set up the root logger for this addon"""
+    addon_logger = logging.getLogger(__name__.split(".")[0])  # Get root addon logger
+
+    # Set initial level (will be updated from config)
+    addon_logger.setLevel(logging.ERROR)
+
+    # Prevent propagation to Anki's loggers
+    addon_logger.propagate = False
+
+
+setup_addon_logging()
+
+
+def create_call_log_handler(function_name: str) -> logging.Handler:
+    """Create a new file handler for a specific function call"""
+    config = mw.addonManager.getConfig(__name__) or {}
+
+    # Get log level from config
+    log_level_str = config.get("log_level", "ERROR")
+    log_level = getattr(logging, log_level_str.upper(), logging.ERROR)
+
+    print(f"Creating log handler for {function_name} with level {log_level}")
+
+    # Update the root addon logger's level to match config
+    addon_logger = logging.getLogger(__name__.split(".")[0])
+    addon_logger.setLevel(log_level)
+
+    # Check if console logging is enabled
+    log_to_console = config.get("log_to_console", False)
+
+    if log_to_console:
+        # Create console handler
+        print("Creating console log handler")
+        handler: logging.Handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(log_level)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        return handler
+
+    # Create logs directory
+    print("Creating file log handler")
+    addon_dir = os.path.dirname(os.path.abspath(__file__))
+    logs_dir = os.path.join(addon_dir, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+
+    # Create unique log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(logs_dir, f"{function_name}_{timestamp}.log")
+
+    # Create handler
+    handler = logging.FileHandler(log_file, encoding="utf-8")
+    handler.setLevel(log_level)
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
+    return handler
+
+
 # Function to be executed when the browser menus are initialized
 def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
+    handler = create_call_log_handler("add_note")
+    logger = logging.getLogger(__name__)
+
+    if handler:
+        logger.addHandler(handler)
+
     # Create a new action for the context menu
     meaning_action = QAction("Clean dictionary meaning", mw)
     translation_action = QAction("Translate sentence", mw)
@@ -78,7 +147,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
 
     ai_menu = menu.addMenu("AI helper")
     if ai_menu is None:
-        print("Error: AI helper menu could not be created.")
+        logger.error("Error: AI helper menu could not be created.")
         return
     # Add the action to the browser's card context menu
     ai_menu.addAction(meaning_action)
@@ -90,13 +159,19 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
 
 
 def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
+    handler = create_call_log_handler("add_note")
+    logger = logging.getLogger(__name__)
+
+    if handler:
+        logger.addHandler(handler)
+
     note_type = note.note_type()
     if not note_type:
         return
     note_type_name = note_type["name"]
     config = mw.addonManager.getConfig(__name__)
     if not config:
-        print("Error: Missing addon configuration")
+        logger.error("Error: Missing addon configuration")
         return
 
     field_name = note_type["flds"][field_idx]["name"]
@@ -114,20 +189,26 @@ def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
 
 
 def run_op_on_add_note(note: Note):
+    handler = create_call_log_handler("add_note")
+    logger = logging.getLogger(__name__)
+
+    if handler:
+        logger.addHandler(handler)
+
     note_type = note.note_type()
     if not note_type:
         return
     note_type_name = note_type["name"]
     config = mw.addonManager.getConfig(__name__)
     if not config:
-        print("Error: Missing addon configuration")
+        logger.error("Error: Missing addon configuration")
         return
 
     if note_type_name == "Japanese vocab note":
         if note.has_tag("new_matched_jp_word"):
             # If the note has the tag, don't run the ops as this is happening within the
             # match_words_to_notes and causes some problems
-            print("Skipping ops for note with 'new_matched_jp_word' tag")
+            logger.info("Skipping ops for note with 'new_matched_jp_word' tag")
             return
         clean_meaning_in_note(config, note, {})
         extract_words_in_note(config, note, {})

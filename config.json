@@ -41,5 +41,7 @@
   },
   "request_timeout": 180,
   "mdx_filenames": [],
-  "mdx_pick_dictionary": "all"
+  "mdx_pick_dictionary": "all",
+  "log_level": "ERROR",
+  "log_to_console": true
 }

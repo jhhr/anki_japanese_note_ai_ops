@@ -1,5 +1,6 @@
 import json
 import asyncio
+import logging
 import time
 import requests  # type: ignore
 from concurrent.futures import ThreadPoolExecutor
@@ -18,8 +19,7 @@ from ..utils import get_field_config, print_error_traceback
 
 from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 
-DEBUG = False
-
+logger = logging.getLogger(__name__)
 
 MAX_TOKENS_VALUE = 8000
 
@@ -85,7 +85,7 @@ def get_response(
             json_result_corrector=json_result_corrector,
         )
     else:
-        print(f"Unsupported model: {model}")
+        logger.error(f"Unsupported model: {model}")
         return None
 
 
@@ -111,8 +111,7 @@ class CancellableRequest:
         if self.future and not self.future.done():
             # Cancel the future - this will interrupt the thread if it's not already sending data
             cancelled = self.future.cancel()
-            if DEBUG:
-                print(f"Request future cancelled: {cancelled}")
+            logger.debug(f"Request future cancelled: {cancelled}")
 
         # Close the underlying session anyway
         self.session.close()
@@ -124,25 +123,23 @@ active_requests: list[CancellableRequest] = []
 
 
 def decode_json_result(json_str: str):
-    if DEBUG:
-        print("json_result", json_str)
+    logging.debug("json_result", json_str)
     try:
         result = json.loads(json_str)
-        if DEBUG:
-            print("Parsed result from json", result)
+        logger.debug("Parsed result from json: %s", result)
         return result
     except json.JSONDecodeError:
-        print(f"Failed to parse JSON response, json_result: {json_str}")
+        logger.error(f"Failed to parse JSON response, json_result: {json_str}")
         return None
     except ValueError as ve:
-        print(f"Failed to parse JSON response - ValueError: {ve}")
+        logger.error(f"Failed to parse JSON response - ValueError: {ve}")
         if "integer string conversion" in str(ve):
-            print("Large integer detected in JSON response")
-        print(f"json_result: {json_str}")
+            logger.error("Large integer detected in JSON response")
+        logger.error(f"json_result: {json_str}")
         return None
     except Exception as e:
-        print(f"Unexpected error parsing JSON: {e}")
-        print(f"json_result: {json_str}")
+        logger.error(f"Unexpected error parsing JSON: {e}")
+        logger.error(f"json_result: {json_str}")
         return None
 
 
@@ -163,8 +160,7 @@ def get_response_from_gemini(
     Returns:
         A dict containing the parsed JSON response, or None if there was an error.
     """
-    if DEBUG:
-        print(f"Gemini call, model: {model}")
+    logger.debug(f"Gemini call, model: {model}")
 
     if cancel_state and cancel_state.is_cancelled():
         return None
@@ -201,13 +197,11 @@ def get_response_from_gemini(
             "thinkingConfig": {"thinkingBudget": 6000},
         },
     }
-    if max_output_tokens is not None and DEBUG:
-        if DEBUG:
-            print("Using max_output_tokens", max_output_tokens)
+    if max_output_tokens is not None:
+        logger.debug("Using max_output_tokens %d", max_output_tokens)
     if response_schema:
         data["generationConfig"]["responseSchema"] = response_schema
-        if DEBUG:
-            print("Using response schema", response_schema)
+        logger.debug("Using response schema %s", response_schema)
 
     headers = {
         "Content-Type": "application/json",
@@ -236,10 +230,10 @@ def get_response_from_gemini(
             timeout=request_timeout,
         )
     except requests.exceptions.Timeout:
-        print("Request timed out")
+        logger.error("Request timed out")
         return None
     except Exception as e:
-        print(f"Error making request: {e}")
+        logger.error(f"Error making request: {e}")
         return None
     finally:
         # Response completed, remove from active requests
@@ -247,7 +241,7 @@ def get_response_from_gemini(
             active_requests.remove(req)
 
     if response.status_code != 200:
-        print(f"Error: {response.status_code}, {response.text}")
+        logger.error(f"Error: {response.status_code}, {response.text}")
         return None
 
     try:
@@ -255,12 +249,12 @@ def get_response_from_gemini(
         # Extract content from Gemini response structure
         content_text = decoded_json["candidates"][0]["content"]["parts"][0]["text"]
     except json.JSONDecodeError as je:
-        print(f"Error decoding JSON: {je}")
-        print("response", response.text)
+        logger.error(f"Error decoding JSON: {je}")
+        logger.error("response %s", response.text)
         return None
     except KeyError as ke:
-        print(f"Error extracting content: {ke}")
-        print("response", response.text)
+        logger.error(f"Error extracting content: {ke}")
+        logger.error("response %s", response.text)
         return None
 
     # Extract the JSON from the response
@@ -282,8 +276,7 @@ def get_response_from_openai(
     max_output_tokens: Optional[int] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
-    if DEBUG:
-        print("OpenAI call, model", model)
+    logger.debug("OpenAI call, model %s", model)
 
     if cancel_state and cancel_state.is_cancelled():
         return None
@@ -307,7 +300,7 @@ def get_response_from_openai(
     ]
     config = mw.addonManager.getConfig(__name__)
     if config is None:
-        print("No configuration found for the addon.")
+        logger.error("No configuration found for the addon.")
         return None
     openai_api_key = config.get("openai_api_key", "")
     request_timeout = config.get("request_timeout", 300)
@@ -332,8 +325,7 @@ def get_response_from_openai(
             "type": "json_schema",
             "schema": response_schema,
         }
-        if DEBUG:
-            print("Using response schema", response_schema)
+        logger.debug("Using response schema %s", response_schema)
 
     # Make the API call
     req = CancellableRequest()
@@ -346,26 +338,26 @@ def get_response_from_openai(
             timeout=request_timeout,
         )
     except requests.exceptions.Timeout:
-        print("Request timed out")
+        logger.error("Request timed out")
         return None
     except Exception as e:
-        print(f"Error making request: {e}")
+        logger.error(f"Error making request: {e}")
         return None
 
     if response.status_code != 200:
-        print(f"Error: {response.status_code}, {response.text}")
+        logger.error(f"Error: {response.status_code}, {response.text}")
         return None
 
     try:
         decoded_json = json.loads(response.text)
         content_text = decoded_json["choices"][0]["message"]["content"]
     except json.JSONDecodeError as je:
-        print(f"Error decoding JSON: {je}")
-        print("response", response.text)
+        logger.error(f"Error decoding JSON: {je}")
+        logger.error("response %s", response.text)
         return None
     except KeyError as ke:
-        print(f"Error extracting content: {ke}")
-        print("response", response.text)
+        logger.error(f"Error extracting content: {ke}")
+        logger.error("response %s", response.text)
         return None
     finally:
         # Request completed, remove from active requests
@@ -399,8 +391,7 @@ def get_response_from_anthropic(
     Returns:
         A dict containing the parsed JSON response, or None if there was an error.
     """
-    if DEBUG:
-        print(f"Anthropic call, model: {model}")
+    logger.debug("Anthropic call, model %s", model)
 
     if cancel_state and cancel_state.is_cancelled():
         return None
@@ -429,12 +420,11 @@ def get_response_from_anthropic(
             "type": "json_schema",
             "schema": response_schema,
         }
-        if DEBUG:
-            print("Using response schema", response_schema)
+        logger.debug("Using response schema %s", response_schema)
 
     config = mw.addonManager.getConfig(__name__)
     if config is None:
-        print("No configuration found for the addon.")
+        logger.error("No configuration found for the addon.")
         return None
     anthropic_api_key = config.get("anthropic_api_key", "")
     request_timeout = config.get("request_timeout", 300)
@@ -457,10 +447,10 @@ def get_response_from_anthropic(
             timeout=request_timeout,
         )
     except requests.exceptions.Timeout:
-        print("Request timed out")
+        logger.error("Request timed out")
         return None
     except Exception as e:
-        print(f"Error making request: {e}")
+        logger.error(f"Error making request: {e}")
         return None
     finally:
         # Response completed, remove from active requests
@@ -468,19 +458,19 @@ def get_response_from_anthropic(
             active_requests.remove(req)
 
     if response.status_code != 200:
-        print(f"Error: {response.status_code}, {response.text}")
+        logger.error(f"Error: {response.status_code}, {response.text}")
         return None
 
     try:
         decoded_json = json.loads(response.text)
         content_text = decoded_json["content"][0]["text"]
     except json.JSONDecodeError as je:
-        print(f"Error decoding JSON: {je}")
-        print("response", response.text)
+        logger.error(f"Error decoding JSON: {je}")
+        logger.error("response %s", response.text)
         return None
     except KeyError as ke:
-        print(f"Error extracting content: {ke}")
-        print("response", response.text)
+        logger.error(f"Error extracting content: {ke}")
+        logger.error("response %s", response.text)
         return None
     finally:
         # Request completed, remove from active requests
@@ -530,13 +520,11 @@ class CancelManager:
     def request_cancel(self):
         """Request cancellation of all tasks managed by this instance."""
         self.cancel_requested = True
-        if DEBUG:
-            print("Cancellation requested, updating UI")
+        logger.debug("Cancellation requested, updating UI")
 
         # Immediately end all in-flight requests
         for req in list(active_requests):
-            if DEBUG:
-                print("Cancelling active request", req)
+            logger.debug("Cancelling active request %s", req)
             req.cancel()
 
         # Set the shared cancel state
@@ -562,11 +550,9 @@ class CancelManager:
         return self.cancel_requested
 
     def check_for_cancellation(self):
-        if DEBUG:
-            print("Checking for cancellation")
+        logger.debug("Checking for cancellation")
         if mw.progress.want_cancel() and not self.cancel_requested:
-            if DEBUG:
-                print("Cancellation requested, setting cancel_requested to True")
+            logger.debug("Cancellation requested, setting cancel_requested to True")
             self.cancel_requested = True
             # Cancel all running tasks
             for t in self.tasks:
@@ -580,23 +566,20 @@ class CancelManager:
             while not self.cancel_requested:
                 # Check for cancellation request from Anki
                 if mw.progress.want_cancel():
-                    if DEBUG:
-                        print("Cancellation requested, setting cancel_requested to True")
+                    logger.debug("Cancellation requested, setting cancel_requested to True")
                     self.request_cancel()
                     break
 
                 # Check if all tasks are completed naturally
                 if all(task.done() for task in self.tasks):
-                    if DEBUG:
-                        print("All tasks completed naturally, exiting monitor")
+                    logger.debug("All tasks completed naturally, exiting monitor")
                     break
 
                 # Check frequently but don't hog the CPU
                 await asyncio.sleep(0.1)
 
         except asyncio.CancelledError:
-            if DEBUG:
-                print("Cancellation monitor task cancelled")
+            logger.debug("Cancellation monitor task cancelled")
             # Just exit the task when cancelled
 
 
@@ -704,7 +687,7 @@ class AsyncTaskProgressUpdater:
             if failed > 0:
                 task_progress_msg += f""" | <strong style="color: red;">{failed} failed</strong>"""
         except Exception as e:
-            print(f"Error updating note adding progress: {e}")
+            logger.error("Error updating note adding progress: %s", e)
             return
         mw.taskman.run_on_main(
             lambda: mw.progress.update(
@@ -797,14 +780,14 @@ def make_inner_bulk_op(
             try:
                 await asyncio.sleep(target_time - current_time)
             except asyncio.CancelledError:
-                print("Inner bulk operation CancelledError encountered")
+                logger.debug("Inner bulk operation CancelledError encountered")
                 return False
         try:
             # Acquire semaphore to limit concurrent operations
             async with semaphore:
                 # Check for cancel request before starting the operation
                 if mw.progress.want_cancel():
-                    print("Inner bulk operation mw.progress.want_cancel()")
+                    logger.debug("Inner bulk operation mw.progress.want_cancel()")
                     return False
 
                 # Use ThreadPoolExecutor for CPU-bound operations
@@ -818,13 +801,13 @@ def make_inner_bulk_op(
                         progress_updater.update_progress()
                         try:
                             if mw.progress.want_cancel() or cancel_state.is_cancelled():
-                                if DEBUG:
-                                    print("Inner process op: cancellation requested")
+                                logger.debug("Inner process op: cancellation requested")
                                 return False
                             return op(config, notes_to_add_dict=notes_to_add_dict, **op_args)
                         except Exception as e:
-                            if DEBUG:
-                                print("Inner process op error, passing to handle_op_error")
+                            logger.error(
+                                "Inner process op error, passing to handle_op_error: %s", e
+                            )
                             handle_op_error(e)
                             return False
                         finally:
@@ -887,7 +870,7 @@ async def bulk_nested_notes_op(
     """
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     if not model:
-        print("Model arg missing in bulk_nested_notes_op, aborting")
+        logger.error("Model arg missing in bulk_nested_notes_op, aborting")
         return [], pos, {}
     config["rate_limits"] = config.get("rate_limits", {})
     rate_limit = config["rate_limits"].get(model, None)
@@ -896,7 +879,7 @@ async def bulk_nested_notes_op(
     progress_updater.set_total_notes(len(notes))
 
     if not rate_limit:
-        print("No rate limit set for model, can't run nested async op")
+        logger.error("No rate limit set for model, can't run nested async op")
         return [], pos, {}
     else:
         tasks: list[asyncio.Task] = []
@@ -925,27 +908,27 @@ async def bulk_nested_notes_op(
 
             # Then cancel the monitor task if it's still running
             if not cancel_manager.monitor_task.done():
-                print("Cancelling monitor task first check")
+                logger.debug("Cancelling monitor task first check")
                 cancel_manager.monitor_task.cancel()
 
             # Wait for it to finish cancellation
             try:
-                print("Waiting for monitor task to finish cancellation")
+                logger.debug("Waiting for monitor task to finish cancellation")
                 await asyncio.wait_for(cancel_manager.monitor_task, timeout=0.5)
-                print("Monitor task finished cancellation")
+                logger.debug("Monitor task finished cancellation")
             except (asyncio.TimeoutError, asyncio.CancelledError):
-                print("Monitor task CancelledError encountered")
+                logger.debug("Monitor task CancelledError encountered")
                 pass
         except asyncio.CancelledError:
-            print("Cancelling bulk operation")
+            logger.debug("Cancelling bulk operation")
             pass
         finally:
             if not cancel_manager.monitor_task.done():
-                print("Cancelling monitor task second check")
+                logger.debug("Cancelling monitor task second check")
                 cancel_manager.monitor_task.cancel()
 
         if cancel_manager.is_cancel_requested():
-            print("Bulk operation was cancelled, returning results so far")
+            logger.debug("Bulk operation was cancelled, returning results so far")
             updated_notes = list(updated_notes_dict.values())
             return updated_notes, pos, notes_to_add_dict
 
@@ -985,7 +968,7 @@ def sync_bulk_notes_op(
         try:
             note_was_edited = op(note, config)
         except Exception as e:
-            print("Sync bulk notes op: Error processing note", note.id, e)
+            logger.error("Sync bulk notes op: Error processing note %s: %s", note.id, e)
             note_was_edited = False
         note_cnt += 1
 
@@ -1002,8 +985,7 @@ def sync_bulk_notes_op(
             updated_notes.append(note)
             edited_nids.append(note.id)
 
-    if DEBUG:
-        print("Sync bulk notes op finished. editedNids", edited_nids)
+    logger.debug("Sync bulk notes op finished. editedNids %s", edited_nids)
 
     mw.taskman.run_on_main(lambda: mw.progress.finish())
 
@@ -1044,8 +1026,7 @@ async def bulk_notes_op(
     rate_limit = config["rate_limits"].get(model, None)
 
     if not rate_limit:
-        if DEBUG:
-            print(f"No rate limit set for model {model}, running sync op")
+        logger.debug(f"No rate limit set for model {model}, running sync op")
         return sync_bulk_notes_op(
             pos=pos,
             col=col,
@@ -1070,15 +1051,14 @@ async def bulk_notes_op(
         if was_success and edited_nids is not None:
             updated_notes.append(note)
             edited_nids.append(note.id)
-        if DEBUG:
-            print(f"Bulk notes op success for note {note.id}, was_success: {was_success}")
+        logger.debug(f"Bulk notes op success for note {note.id}, was_success: {was_success}")
 
     cancel_state = CancelState()
     # Start all tasks
     for i, note in enumerate(notes):
         # adding the same note to
         def handle_error(current_note, e):
-            print(f"Error during operation with note {current_note.id}: {e}")
+            logger.error(f"Error during operation with note {current_note.id}: {e}")
             print_error_traceback(e)
 
         handle_op_error = partial(
@@ -1099,8 +1079,7 @@ async def bulk_notes_op(
             cancel_state=cancel_state,
         )
         if mw.progress.want_cancel():
-            if DEBUG:
-                print("Bulk notes op cancelled before starting tasks")
+            logger.debug("Bulk notes op cancelled before starting tasks")
             break
         task: asyncio.Task = asyncio.create_task(
             process_note(
@@ -1115,15 +1094,13 @@ async def bulk_notes_op(
             # Update the progress dialog every 5 tasks gathered
             progress_updater.update_progress()
         tasks.append(task)
-    if DEBUG:
-        print(f"Async bulk notes op started with {len(tasks)} tasks, rate limit: {rate_limit}")
+    logger.debug(f"Async bulk notes op started with {len(tasks)} tasks, rate limit: {rate_limit}")
 
     cancel_manager = CancelManager(tasks, cancel_state)
 
     # Wait for all tasks to complete
     try:
-        if DEBUG:
-            print("Bulk notes op awaiting tasks")
+        logger.debug("Bulk notes op awaiting tasks")
 
         # First, wait only for the operation tasks to complete
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -1138,28 +1115,23 @@ async def bulk_notes_op(
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
 
-        if DEBUG:
-            print("Bulk notes op completed successfully, all tasks finished")
+        logger.debug("Bulk notes op completed successfully, all tasks finished")
     except asyncio.CancelledError:
-        if DEBUG:
-            print("Bulk notes op asyncio.CancelledError caught")
+        logger.debug("Bulk notes op asyncio.CancelledError caught")
         cancel_manager.request_cancel()
     finally:
-        if DEBUG:
-            print("Bulk notes op finally block reached, cleaning up tasks")
+        logger.debug("Bulk notes op finally block reached, cleaning up tasks")
         if not cancel_manager.monitor_task.done():
             cancel_manager.monitor_task.cancel()
 
     # Check if cancellation was requested and handle accordingly
     if cancel_manager.is_cancel_requested():
-        if DEBUG:
-            print("Bulk notes op cancellation requested, returning early")
+        logger.debug("Bulk notes op cancellation requested, returning early")
         if not cancel_manager.monitor_task.done():
             cancel_manager.monitor_task.cancel()
         return updated_notes, pos, notes_to_add_dict
 
-    if DEBUG:
-        print("Bulk notes op completed successfully, updating notes")
+    logger.debug("Bulk notes op completed successfully, updating notes")
 
     return updated_notes, pos, notes_to_add_dict
 
@@ -1256,21 +1228,18 @@ def selected_notes_op(
                 for note_list in notes_to_add_dict.values():
                     notes_to_add.extend(note_list)
             if notes_to_add:
-                if DEBUG:
-                    print(
-                        f"Adding {len(notes_to_add)} new notes to note_will_be_added hooks will"
-                        " be run"
-                    )
+                logger.debug(
+                    f"Adding {len(notes_to_add)} new notes to note_will_be_added hooks will be run"
+                )
                 total_notes = len(notes_to_add)
                 failed_cnt = 0
                 added_cnt = 0
                 for index, note in enumerate(notes_to_add):
                     note_type = note.note_type()
                     if note_type is None:
-                        if DEBUG:
-                            print(
-                                f"Error: Note type for note {note.id} is None, skipping note adding"
-                            )
+                        logger.debug(
+                            f"Error: Note type for note {note.id} is None, skipping note adding"
+                        )
                         continue
                     insert_deck = get_field_config(config, "insert_deck", note_type)
                     insert_deck_id = None
@@ -1278,23 +1247,20 @@ def selected_notes_op(
                         insert_deck_id = mw.col.decks.id_for_name(insert_deck)
                     else:
                         insert_deck_id = mw.col.decks.id_for_name("Default")
-                        if DEBUG:
-                            print("No insert deck set, setting deck_id to Default")
+                        logger.debug("No insert deck set, setting deck_id to Default")
                     if insert_deck_id is None:
-                        if DEBUG:
-                            print("Default deck not found, skipping note adding")
+                        logger.debug("Default deck not found, skipping note adding")
                         continue
                     if mw.progress.want_cancel():
-                        if DEBUG:
-                            print("Bulk notes op cancelled during note adding")
+                        logger.debug("Bulk notes op cancelled during note adding")
                         break
                     try:
-                        print(f"Adding note {index} to deck {insert_deck_id}")
+                        logger.debug(f"Adding note {index} to deck {insert_deck_id}")
                         mw.col.add_note(note, insert_deck_id)
                         added_cnt += 1
                         op_changes = mw.col.merge_undo_entries(pos)
                     except Exception as e:
-                        print(f"Error adding note {index}: {e}")
+                        logger.error(f"Error adding note {index}: {e}")
                         print_error_traceback(e)
                         failed_cnt += 1
 
@@ -1321,8 +1287,7 @@ def selected_notes_op(
                             else:
                                 valid_notes.append(note)
                         if invalid_notes:
-                            if DEBUG:
-                                print(f"Invalid notes found after adding: {len(invalid_notes)}")
+                            logger.debug(f"Invalid notes found after adding: {len(invalid_notes)}")
                             new_notes_tsv_str = make_tsv_from_notes(
                                 notes=invalid_notes,
                                 config=mw.addonManager.getConfig(__name__) or {},
@@ -1337,7 +1302,7 @@ def selected_notes_op(
                         try:
                             mw.col.update_notes(valid_notes)
                         except Exception as e:
-                            print(f"Error updating valid notes after new_notes_op: {e}")
+                            logger.error(f"Error updating valid notes after new_notes_op: {e}")
                             print_error_traceback(e)
                         op_changes = mw.col.merge_undo_entries(pos)
                         edited_nids.extend(

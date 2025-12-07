@@ -1,3 +1,4 @@
+import logging
 from typing import Union, Dict
 from anki.notes import Note, NoteId
 from anki.collection import Collection
@@ -14,7 +15,7 @@ from .base_ops import (
 )
 from ..utils import get_field_config
 
-DEBUG = False
+logger = logging.getLogger(__name__)
 
 
 def get_translated_field_from_model(config: dict[str, str], sentence: str) -> Union[str, None]:
@@ -43,40 +44,36 @@ def translate_sentence_in_note(
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
-        print("Error: note_type() call failed for note", note.id)
+        logger.error(f"note_type() call failed for note {note.id}")
         return False
     try:
         sentence_field = get_field_config(config, "sentence_field", note_type)
         translated_sentence_field = get_field_config(config, "translated_sentence_field", note_type)
     except Exception as e:
-        print(e)
+        logger.error(str(e))
         return False
 
-    if DEBUG:
-        print("sentence_field in note", sentence_field in note)
-        print("translated_sentence_field in note", translated_sentence_field in note)
+    logger.debug(f"sentence_field in note: {sentence_field in note}")
+    logger.debug(f"translated_sentence_field in note: {translated_sentence_field in note}")
     # Check if the note has the required fields
     if sentence_field in note and translated_sentence_field in note:
-        if DEBUG:
-            print("note has fields")
+        logger.debug("note has fields")
         # Get the values from fields
         sentence = note[sentence_field]
-        if DEBUG:
-            print("sentence", sentence)
+        logger.debug(f"sentence: {sentence}")
         # Check if the value is non-empty
         if sentence:
             # Call API to get translation
             translated_sentence = get_translated_field_from_model(config, sentence)
-            if DEBUG:
-                print("translated_sentence", translated_sentence)
+            logger.debug(f"translated_sentence: {translated_sentence}")
             if translated_sentence is not None:
                 # Update the note with the new value
                 note[translated_sentence_field] = translated_sentence
                 return True
             return False
         return False
-    elif DEBUG:
-        print("note is missing fields")
+    else:
+        logger.error("note is missing fields")
     return False
 
 

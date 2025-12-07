@@ -1,4 +1,5 @@
 import re
+import logging
 from typing import Union
 from anki.notes import Note, NoteId
 from anki.collection import Collection
@@ -15,7 +16,7 @@ from .base_ops import (
 )
 from ..utils import get_field_config
 
-DEBUG = False
+logger = logging.getLogger(__name__)
 
 
 K_WORD_REC = re.compile(r"<k>([^<]*)</k>")
@@ -200,15 +201,13 @@ The sentence to process: {sentence}
     model = config.get("kanjify_sentence_model", "")
     result = get_response(model, prompt)
     if result is None:
-        if DEBUG:
-            print("Failed to get a response from the API.")
+        logger.error("Failed to get a response from the API.")
         # If the prompt failed, return nothing
         return None
     try:
         return [result[kanjified_sentence_return_field]]
     except KeyError:
-        if DEBUG:
-            print(f"Key '{kanjified_sentence_return_field}' not found in the result.")
+        logger.error(f"Key '{kanjified_sentence_return_field}' not found in the result.")
         return None
 
 
@@ -223,43 +222,33 @@ def kanjify_sentence_in_note(
 ) -> bool:
     model = note.note_type()
     if not model:
-        if DEBUG:
-            print("Missing note type for note", note.id)
+        logger.error("Missing note type for note %s", note.id)
         return False
     try:
         furigana_sentence_field = get_field_config(config, "furigana_sentence_field", model)
         kanjified_sentence_field = get_field_config(config, "kanjified_sentence_field", model)
     except Exception as e:
-        print(e)
+        logger.error("Error getting field config: %s", e)
         return False
 
-    if DEBUG:
-        print("furigana_sentence_field in note", furigana_sentence_field in note)
-        print("kanjified_sentence_field in note", kanjified_sentence_field in note)
+    logger.debug("furigana_sentence_field in note: %s", furigana_sentence_field in note)
+    logger.debug("kanjified_sentence_field in note: %s", kanjified_sentence_field in note)
     # Check if the note has the required fields
     if furigana_sentence_field in note and kanjified_sentence_field in note:
-        if DEBUG:
-            print("note has fields")
         # Get the values from fields
         sentence = note[furigana_sentence_field]
-        if DEBUG:
-            print("sentence", sentence)
+        logger.debug("sentence: %s", sentence)
         # Check if the value is non-empty
         if sentence:
             # Clean any <b> tags from the sentence
             # sentence = sentence.replace("<b>", "").replace("</b>", "")
-            if DEBUG:
-                print("cleaned sentence", sentence)
+            logger.debug("cleaned sentence: %s", sentence)
             # Call API to get translation
             result = get_kanjified_sentence_from_model(config, sentence)
-            if DEBUG:
-                print("result from API", result)
-
+            logger.debug("result from API: %s", result)
             if result is not None:
                 [kanjified_sentence] = result
-                if DEBUG:
-                    print("kanjified_sentence", kanjified_sentence)
-
+                logger.debug("kanjified_sentence: %s", kanjified_sentence)
                 # Clean up common mistakes by the AI
                 # Sometimes kanjifying する results in 為[し]る
                 kanjified_sentence = kanjified_sentence.replace(
@@ -307,11 +296,11 @@ def kanjify_sentence_in_note(
                         f"{cleaned_sentence}"
                     )
                     if attempt < MAX_ATTEMPTS:
-                        if DEBUG:
-                            print(
-                                f"Reversed sentence does not match original. Attempt {attempt} of"
-                                f" {MAX_ATTEMPTS}"
-                            )
+                        logger.debug(
+                            "Reversed sentence does not match original. Attempt %d of %d",
+                            attempt,
+                            MAX_ATTEMPTS,
+                        )
                         return kanjify_sentence_in_note(
                             config, note, notes_to_add_dict, attempt + 1
                         )
@@ -320,8 +309,8 @@ def kanjify_sentence_in_note(
                 return True
             return False
         return False
-    elif DEBUG:
-        print("note is missing fields")
+    else:
+        logger.error("note is missing fields")
     return False
 
 

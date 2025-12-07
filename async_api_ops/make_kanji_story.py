@@ -1,4 +1,5 @@
 import json
+import logging
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -17,6 +18,8 @@ from .base_ops import (
 from ..utils import get_field_config
 
 KANJI_STORY_COMPONENT_WORDS_LOG = "_kanji_story_component_words.json"
+
+logger = logging.getLogger(__name__)
 
 
 def get_kanji_story_from_model(
@@ -137,8 +140,7 @@ def make_story_for_note(
 ) -> bool:
     model = note.note_type()
     if not model:
-        if DEBUG:
-            print("Missing note type for note", note.id)
+        logger.error("Missing note type for note", note.id)
         return False
 
     try:
@@ -149,15 +151,13 @@ def make_story_for_note(
         print(e)
         return False
 
-    if DEBUG:
-        print("making story in note", note.id)
-        print("components_field in note", components_field in note)
-        print("kanji_field in note", kanji_field in note)
-        print("story_field in note", story_field in note)
+    logger.debug(f"making story in note {note.id}")
+    logger.debug(f"components_field in note {components_field in note}")
+    logger.debug(f"kanji_field in note {kanji_field in note}")
+    logger.debug(f"story_field in note {story_field in note}")
     # Check if the note has the required fields
     if components_field in note and kanji_field in note and story_field in note:
-        if DEBUG:
-            print("note has fields")
+        logger.debug("note has fields")
         # Get the values from fields
         components = note[components_field]
         kanji = note[kanji_field]
@@ -174,8 +174,8 @@ def make_story_for_note(
             return False
         return False
 
-    elif DEBUG:
-        print("note is missing fields")
+    else:
+        logger.error("note is missing fields")
     return False
 
 

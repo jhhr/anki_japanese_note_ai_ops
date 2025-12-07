@@ -1,5 +1,10 @@
 # Config
 
+## General
+
+- `log_level`: Default is "ERROR". Possible values from less logging to more: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+- `log_to_console` Default is `true`. If false, logs to files in the logs/ dir in the addon folder
+
 ## models
 
 Needs to be one of the models that supports structured output
@@ -72,6 +77,9 @@ You need to define
   3. `word_field`
   4. `word_reading_field`
   5. `sentence_field`
+  - `mdx_filenames`: array of filenames (with `.mdx` extension) for dictionary files in the addon's `user_files/` folder.
+    - The `user_files/` folder is created automatically if it does not exist. Example: `["dict1.mdx", "dict2.mdx"]`
+  - `mdx_pick_dictionary`: one of "all", "first", "shortest", "longest"
 - for translating sentences
   1. `sentence_field`
   2. `translated_sentence_field`
@@ -120,7 +128,3 @@ You need to define
     - `yojijukugo`: default = yes
 
 - `replace_existing_matched_words`: (default: false) overwrite previously processed matched words?
-- `mdx_filenames`: array of filenames (with `.mdx` extension) for dictionary files in the addon's `user_files/` folder.
-  - The `user_files/` folder is created automatically if it does not exist.
-  - Example: `["dict1.mdx", "dict2.mdx"]`
-- `mdx_pick_dictionary`: one of "all", "first", "shortest", "longest"

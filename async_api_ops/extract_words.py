@@ -1,5 +1,6 @@
 import json
 import re
+import logging
 from collections.abc import Sequence
 from typing import Union
 from anki.notes import Note, NoteId
@@ -21,7 +22,7 @@ from ..configuration import (
     matched_word_type,
 )
 
-DEBUG = False
+logger = logging.getLogger(__name__)
 
 
 def word_tuple_sort_key(
@@ -57,8 +58,7 @@ def word_tuple_sort_key(
         try:
             note_id = int(str(note_id).strip())
         except ValueError:
-            if DEBUG:
-                print(f"Invalid note_id {note_id} for word {word}, setting to 0")
+            logger.warning(f"Invalid note_id {note_id} for word {word}, setting to 0")
             note_id = 0
     if meaning_number is None:
         meaning_number = 0
@@ -67,8 +67,7 @@ def word_tuple_sort_key(
         try:
             meaning_number = int(str(meaning_number).strip())
         except ValueError:
-            if DEBUG:
-                print(f"Invalid meaning_number {meaning_number} for word {word}, setting to 0")
+            logger.warning(f"Invalid meaning_number {meaning_number} for word {word}, setting to 0")
             meaning_number = 0
     # Return a tuple that can be used for sorting
     return (word, reading, sort_word, note_id, meaning_number)
@@ -103,8 +102,7 @@ def compared_word_lists(
         elif len(word_tuple) == 4:
             word, reading, sort_word, note_id = word_tuple
         else:
-            if DEBUG:
-                print(f"Word tuple with invalid length {word_tuple} in added_set, skipping")
+            logger.warning(f"Word tuple with invalid length {word_tuple} in added_set, skipping")
             continue
 
         # at least word and reading must be present
@@ -115,11 +113,10 @@ def compared_word_lists(
             # the prompt's instructions should be adjusted as the model should be returning
             # existing words sort sort_word and note_id as-is
             if sort_word is not None or note_id is not None:
-                if DEBUG:
-                    print(
-                        f"Invalid new word tuple with sort_word/note_id preset {word_tuple} in"
-                        " added_set, skipping"
-                    )
+                logger.warning(
+                    f"Invalid new word tuple with sort_word/note_id preset {word_tuple} in"
+                    " added_set, skipping"
+                )
                 continue
             elif meaning_number is not None:
                 added_list.append((word, reading, meaning_number))
@@ -127,11 +124,10 @@ def compared_word_lists(
                 # if meaning_number is not present, this is allowed
                 added_list.append((word, reading))
         else:
-            if DEBUG:
-                print(
-                    f"Invalid new word tuple with missing word/reading {word_tuple} in added_set,"
-                    " skipping"
-                )
+            logger.warning(
+                f"Invalid new word tuple with missing word/reading {word_tuple} in added_set,"
+                " skipping"
+            )
             continue
     # Return the sorted combined list of current words and new words
     # Ensure all elements are tuples
@@ -603,8 +599,7 @@ The sentence to process: {sentence}
     model = config.get("extract_words_model", "")
     result = get_response(model, prompt, max_output_tokens=6000)
     if result is None:
-        if DEBUG:
-            print("Failed to get a response from the API.")
+        logger.error("Failed to get a response from the API.")
         # If the prompt failed, return nothing
         return None
     return result
@@ -617,8 +612,7 @@ def extract_words_in_note(
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
-        if DEBUG:
-            print("Missing note type for note", note.id)
+        logger.error(f"Missing note type for note {note.id}")
         return False
     try:
         word_extraction_sentence_field = get_field_config(
@@ -626,22 +620,21 @@ def extract_words_in_note(
         )
         word_list_field = get_field_config(config, "word_list_field", note_type)
     except Exception as e:
-        print(e)
+        logger.error(str(e))
         return False
 
     ignore_current_word_lists = config.get("ignore_current_word_lists", False)
 
-    if DEBUG:
-        print("word_extraction_sentence_field in note", word_extraction_sentence_field in note)
-        print("word_list_field in note", word_list_field in note)
+    logger.debug(
+        f"word_extraction_sentence_field in note: {word_extraction_sentence_field in note}"
+    )
+    logger.debug(f"word_list_field in note: {word_list_field in note}")
     # Check if the note has the required fields
     if word_extraction_sentence_field in note and word_list_field in note:
-        if DEBUG:
-            print("note has fields")
+        logger.debug("note has fields")
         # Get the values from fields
         sentence = note[word_extraction_sentence_field]
-        if DEBUG:
-            print("sentence", sentence)
+        logger.debug(f"sentence: {sentence}")
         # Check if the value is non-empty
         if sentence:
             # Remove text within <i> tags, as it is not relevant for word extraction
@@ -654,29 +647,23 @@ def extract_words_in_note(
                 try:
                     current_word_lists = word_lists_str_format(json.loads(current_word_lists_raw))
                 except json.JSONDecodeError as e:
-                    print("Error decoding JSON from current word lists:", e)
+                    logger.error(f"Error decoding JSON from current word lists: {e}")
                     return False
-                if DEBUG:
-                    print("Calling API with sentence")
+                logger.debug("Calling API with sentence")
             else:
-                if DEBUG:
-                    print("Calling API with sentence and no current word lists")
+                logger.debug("Calling API with sentence and no current word lists")
 
             word_lists = get_extracted_words_from_model(sentence, current_word_lists, config)
-            if DEBUG:
-                print("result from API", word_lists)
+            logger.debug(f"result from API: {word_lists}")
 
             if word_lists is not None:
-                if DEBUG:
-                    print("word_list_json", word_lists)
+                logger.debug("word_list_json", word_lists)
 
                 # Update the note with the new values
                 if not isinstance(word_lists, dict):
-                    if DEBUG:
-                        print("API response is not a dictionary, resetting to empty")
+                    logger.warning("API response is not a dictionary, resetting to empty")
                     word_lists = {}
-                if DEBUG:
-                    print("new_list", word_lists)
+                logger.debug(f"new_list: {word_lists}")
                 # compare and add the new words to the current word list
                 try:
                     cur_word_lists = json.loads(note[word_list_field])
@@ -684,24 +671,20 @@ def extract_words_in_note(
                     cur_word_lists = {}
                 if not isinstance(cur_word_lists, dict):
                     cur_word_lists = {}
-                if DEBUG:
-                    print("cur_word_lists", cur_word_lists)
+                logger.debug(f"cur_word_lists: {cur_word_lists}")
                 # Compare each matching key in the new and current word lists
                 for key in word_lists:
                     if key in cur_word_lists:
-                        if DEBUG:
-                            print(f"Comparing word lists for key {key}")
+                        logger.debug(f"Comparing word lists for key {key}")
                         # Compare the current and new word lists
                         cur_word_list = cur_word_lists[key]
                         new_word_list = word_lists[key]
                         combined_list = compared_word_lists(cur_word_list, new_word_list)
-                        if DEBUG:
-                            print(f"Combined list for key {key}: {combined_list}")
+                        logger.debug(f"Combined list for key {key}: {combined_list}")
                         # Update the current word list with the combined list
                         cur_word_lists[key] = combined_list
                     else:
-                        if DEBUG:
-                            print(f"Adding new key {key} to word lists")
+                        logger.debug(f"Adding new key {key} to word lists")
                         # If the key is not present in the current word list, add it
                         # Use the compare func to validate the new list elements
                         cur_word_lists[key] = compared_word_lists([], word_lists[key])
@@ -710,8 +693,8 @@ def extract_words_in_note(
                 return True
             return False
         return False
-    elif DEBUG:
-        print("note is missing fields")
+    else:
+        logger.error("note is missing fields")
     return False
 
 

@@ -1,3 +1,4 @@
+import logging
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -15,7 +16,7 @@ from .base_ops import (
 from ..sync_local_ops.mdx_dictionary import AnkiMDXHelper
 from ..utils import get_field_config
 
-DEBUG = False
+logger = logging.getLogger(__name__)
 
 mdx_helper = AnkiMDXHelper()
 
@@ -66,8 +67,7 @@ Japanese dictionary entry: {jp_dict_entry}
 """
     if en_dict_entry:
         prompt += f"---\nEnglish dictionary entry: {en_dict_entry}\n"
-    if DEBUG:
-        print("Prompt for cleaning meaning:", prompt)
+    logger.debug(f"Prompt for cleaning meaning: {prompt}")
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
@@ -136,7 +136,7 @@ def clean_meaning_in_note(
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
-        print("Error: note_type() call failed for note", note.id)
+        logger.error(f"note_type() call failed for note {note.id}")
         return False
 
     try:
@@ -147,16 +147,15 @@ def clean_meaning_in_note(
         sentence_field = get_field_config(config, "sentence_field", note_type)
         word_list_field = get_field_config(config, "word_list_field", note_type)
     except KeyError as e:
-        print(e)
+        logger.error(str(e))
         return False
 
-    if DEBUG:
-        print("cleaning meaning in note", note.id)
-        print("meaning_field in note", meaning_field in note)
-        print("english_meaning_field in note", english_meaning_field in note)
-        print("word_field in note", word_field in note)
-        print("word_reading_field in note", word_reading_field in note)
-        print("sentence_field in note", sentence_field in note)
+    logger.debug(f"cleaning meaning in note {note.id}")
+    logger.debug(f"meaning_field in note: {meaning_field in note}")
+    logger.debug(f"english_meaning_field in note: {english_meaning_field in note}")
+    logger.debug(f"word_field in note: {word_field in note}")
+    logger.debug(f"word_reading_field in note: {word_reading_field in note}")
+    logger.debug(f"sentence_field in note: {sentence_field in note}")
 
     # Find other notes with the same word
     other_note_ids = mw.col.find_notes(f'"{word_list_field}:*{note.id}*" -nid:{note.id}')
@@ -173,8 +172,6 @@ def clean_meaning_in_note(
         and word_reading_field in note
         and sentence_field in note
     ):
-        if DEBUG:
-            print("note has fields")
 
         mdx_helper.load_mdx_dictionaries_if_needed(config)
 
@@ -212,8 +209,8 @@ def clean_meaning_in_note(
                 return True
             return False
 
-    elif DEBUG:
-        print("note is missing fields")
+    else:
+        logger.error("note is missing fields")
     return False
 
 

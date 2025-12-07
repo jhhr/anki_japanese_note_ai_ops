@@ -1,10 +1,13 @@
-from mdict_utils.base.readmdict import MDX  # type: ignore
+import logging
 from typing import Any, Literal, Optional, TypedDict, Union
+from mdict_utils.base.readmdict import MDX  # type: ignore
 import os
 import time
 
 from ..html_stripping import strip_html_advanced
 from ..configuration import ADDON_USER_FILES_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class MDXDictionary:
@@ -77,15 +80,14 @@ class MDXDictionary:
 
         # Check for infinite recursion
         if _visited is not None and word in _visited:
-            print(f"Warning: Circular reference detected for '{word}'")
+            logger.warning(f"Circular reference detected for '{word}'")
             return None
 
         # Try exact match first
         if word in self.index:
             result = self.index[word]
-        elif word.lower() in self.index:
-            result = self.index[word.lower()]
         else:
+            logger.debug(f"Word '{word}' not found in index for {os.path.basename(self.mdx_path)}")
             return None
 
         if result.startswith("@@@LINK="):
