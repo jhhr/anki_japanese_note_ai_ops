@@ -53,8 +53,8 @@ class MDXDictionary:
     def query(
         self,
         word: str,
-        strip_html_tags: Optional[bool] = False,
-        preserve_structure: Optional[bool] = False,
+        strip_html_tags: bool = False,
+        preserve_structure: bool = False,
     ) -> Union[str, None]:
         """
         Query a single word
@@ -89,8 +89,8 @@ class MDXDictionary:
         self,
         word: str,
         reading: Optional[str] = None,
-        strip_html_tags: Optional[bool] = False,
-        preserve_structure: Optional[bool] = False,
+        strip_html_tags: bool = False,
+        preserve_structure: bool = False,
     ) -> Union[str, None]:
         """
         Query Japanese word with multiple fallback strategies
@@ -153,8 +153,8 @@ class MDXDictionary:
     def query_multiple(
         self,
         words: list[str],
-        strip_html_tags: Optional[bool] = False,
-        preserve_structure: Optional[bool] = False,
+        strip_html_tags: bool = False,
+        preserve_structure: bool = False,
     ) -> dict[str, Union[str, None]]:
         """
         Query multiple words efficiently
@@ -214,9 +214,9 @@ class MultiDictionaryQuery:
     def query(
         self,
         word: str,
-        strip_html_tags: Optional[bool] = False,
-        preserve_structure: Optional[bool] = False,
-        pick_dictionary: Optional[PickDictionaryResult] = "all",
+        strip_html_tags: bool = False,
+        preserve_structure: bool = False,
+        pick_dictionary: PickDictionaryResult = "all",
     ) -> list[dict[str, str]]:
         """
         Query word in all dictionaries
@@ -249,9 +249,9 @@ class MultiDictionaryQuery:
         self,
         word: str,
         reading: Union[str, None] = None,
-        strip_html_tags: Optional[bool] = False,
-        preserve_structure: Optional[bool] = False,
-        pick_dictionary: Optional[PickDictionaryResult] = "all",
+        strip_html_tags: bool = False,
+        preserve_structure: bool = False,
+        pick_dictionary: PickDictionaryResult = "all",
     ) -> list[dict[str, str]]:
         """
         Query Japanese word in all dictionaries with fallback strategies
@@ -300,7 +300,7 @@ class AnkiMDXHelper:
         self.multi_dict = MultiDictionaryQuery(mdx_paths)
 
     def get_definition_text(
-        self, word: str, reading: Union[str, None] = None, max_length: Union[int, None] = None
+        self, word: str, reading: Optional[str] = None, max_length: Optional[int] = None
     ) -> Union[str, None]:
         """
         Get plain text definition
@@ -350,7 +350,7 @@ class AnkiMDXHelper:
 
         return "\n".join(lines)
 
-    def get_definition_html(self, word: str, reading: Union[str, None] = None) -> str:
+    def get_definition_html(self, word: str, reading: Optional[str] = None) -> str:
         """
         Get formatted HTML definition for word (for UI display)
 
