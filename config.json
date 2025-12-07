@@ -39,7 +39,7 @@
     "o3-mini": 10,
     "o1-mini": 10
   },
-  "request_timetout": 180,
+  "request_timeout": 180,
   "mdx_filenames": [],
   "mdx_pick_dictionary": "all"
 }
