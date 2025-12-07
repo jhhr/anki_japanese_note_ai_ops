@@ -178,10 +178,13 @@ def clean_meaning_in_note(
 
         mdx_helper.load_mdx_dictionaries_if_needed(config)
 
+        pick_dictionary = config.get("mdx_pick_dictionary", "all")
+
         # Get dictionary entry from mdx helper
         jp_dict_entry = mdx_helper.get_definition_text(
             word=note[word_field],
             reading=note[word_reading_field],
+            pick_dictionary=pick_dictionary,
         )
         prev_en_meaning = note[english_meaning_field]
         word = note[word_field]

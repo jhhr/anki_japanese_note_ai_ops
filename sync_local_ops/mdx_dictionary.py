@@ -3,8 +3,6 @@ from typing import Any, Literal, Optional, TypedDict, Union
 import os
 import time
 
-from aqt import mw
-
 from ..html_stripping import strip_html_advanced
 from ..configuration import ADDON_USER_FILES_DIR
 
@@ -180,7 +178,7 @@ MDXDictionaryEntry = TypedDict(
     },
 )
 
-PickDictionaryResult = Literal["first", "all", "shortest", "longest"]
+PickDictionaryResult = Union[Literal["first", "all", "shortest", "longest"], str]
 
 
 class MultiDictionaryQuery:
@@ -297,7 +295,9 @@ class AnkiMDXHelper:
         self.multi_dict: Union[MultiDictionaryQuery, None] = None
         self._init_failed = False
 
-    def load_mdx_dictionaries_if_needed(self, config) -> Union["AnkiMDXHelper", None]:
+    def load_mdx_dictionaries_if_needed(
+        self, config: dict[str, Any]
+    ) -> Union["AnkiMDXHelper", None]:
         """
         Initialize with Anki addon config and load MDX dictionaries.
         Returns self if successful, None if initialization fails.
@@ -339,7 +339,11 @@ class AnkiMDXHelper:
             return None
 
     def get_definition_text(
-        self, word: str, reading: Optional[str] = None, max_length: Optional[int] = None
+        self,
+        word: str,
+        reading: Optional[str] = None,
+        pick_dictionary: PickDictionaryResult = "all",
+        max_length: Optional[int] = None,
     ) -> Union[str, None]:
         """
         Get plain text definition
@@ -355,8 +359,6 @@ class AnkiMDXHelper:
         if self.multi_dict is None:
             return None
 
-        cur_config: dict[str, Any] = mw.addonManager.getConfig(__name__) or {}
-        pick_dictionary: PickDictionaryResult = cur_config.get("mdx_pick_dictionary", "all")
         if reading:
             results = self.multi_dict.query_all_japanese(
                 word,
@@ -392,7 +394,12 @@ class AnkiMDXHelper:
 
         return "\n".join(lines)
 
-    def get_definition_html(self, word: str, reading: Optional[str] = None) -> Union[str, None]:
+    def get_definition_html(
+        self,
+        word: str,
+        reading: Optional[str] = None,
+        pick_dictionary: PickDictionaryResult = "all",
+    ) -> Union[str, None]:
         """
         Get formatted HTML definition for word (for UI display)
 
@@ -406,8 +413,6 @@ class AnkiMDXHelper:
         if self.multi_dict is None:
             return None
 
-        cur_config: dict[str, Any] = mw.addonManager.getConfig(__name__) or {}
-        pick_dictionary: PickDictionaryResult = cur_config.get("mdx_pick_dictionary", "all")
         if reading:
             results = self.multi_dict.query_all_japanese(
                 word, reading, pick_dictionary=pick_dictionary
