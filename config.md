@@ -120,5 +120,7 @@ You need to define
     - `yojijukugo`: default = yes
 
 - `replace_existing_matched_words`: (default: false) overwrite previously processed matched words?
-- `mdx_filenames`: array of filenames for dicts in the addon user_files/ folder. Copy your mdx files in this folder and then include the file names here.
+- `mdx_filenames`: array of filenames (with `.mdx` extension) for dictionary files in the addon's `user_files/` folder.
+  - The `user_files/` folder must exist; create it if it does not.
+  - Example: `["dict1.mdx", "dict2.mdx"]`
 - `mdx_pick_dictionary`: one of "all", "first", "shortest", "longest"
