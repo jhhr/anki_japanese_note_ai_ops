@@ -133,26 +133,6 @@ class MDXDictionary:
             if result:
                 return result
 
-        # Strategy 3: Try katakana conversion (requires pykakasi)
-        try:
-            import pykakasi
-
-            kks = pykakasi.kakasi()
-            converted = kks.convert(word)
-            for item in converted:
-                # Try hiragana version
-                if "hira" in item and item["hira"] != word:
-                    result = self.query(item["hira"], strip_html_tags, preserve_structure)
-                    if result:
-                        return result
-                # Try katakana version
-                if "kana" in item and item["kana"] != word:
-                    result = self.query(item["kana"], strip_html_tags, preserve_structure)
-                    if result:
-                        return result
-        except ImportError:
-            pass  # pykakasi not available
-
         return None
 
     def get_keys_by_prefix(self, prefix: str) -> list[str]:
