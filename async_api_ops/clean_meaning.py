@@ -4,7 +4,7 @@ from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
 from collections.abc import Sequence
-from typing import Dict, Union
+from typing import Dict
 
 from .base_ops import (
     get_response,
@@ -17,7 +17,7 @@ from ..utils import get_field_config
 
 DEBUG = False
 
-mdx_helper: Union[AnkiMDXHelper, None] = None
+mdx_helper = AnkiMDXHelper()
 
 
 def get_single_meaning_from_model(
@@ -167,9 +167,9 @@ def clean_meaning_in_note(
     ):
         if DEBUG:
             print("note has fields")
-        global mdx_helper
-        if mdx_helper is None:
-            mdx_helper = AnkiMDXHelper(config=mw.addonManager.getConfig(__name__))
+
+        mdx_helper.load_mdx_dictionaries_if_needed(config)
+
         # Get dictionary entry from mdx helper
         jp_dict_entry = mdx_helper.get_definition_text(
             word=note[word_field],

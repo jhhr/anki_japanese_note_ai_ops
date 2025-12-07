@@ -292,16 +292,53 @@ class MultiDictionaryQuery:
 class AnkiMDXHelper:
     """Helper class for using MDX dictionaries in Anki addons"""
 
-    def __init__(self, config):
+    def __init__(self):
         """
-        Initialize with Anki addon config
+        Initialize empty helper. Call init_helper(config) to load dictionaries.
+        """
+        self.multi_dict: Union[MultiDictionaryQuery, None] = None
+        self._init_failed = False
+
+    def load_mdx_dictionaries_if_needed(self, config) -> Union["AnkiMDXHelper", None]:
+        """
+        Initialize with Anki addon config and load MDX dictionaries.
+        Returns self if successful, None if initialization fails.
 
         Args:
-            config: Anki addon config dict with 'mdx_paths' key
+            config: Anki addon config dict with 'mdx_filenames' key
+
+        Returns:
+            Self if successful, None if all dictionaries fail to load
         """
-        mdx_filenames = config.get("mdx_filenames", [])
-        mdx_paths = [os.path.join(ADDON_USER_FILES_DIR, fn) for fn in mdx_filenames]
-        self.multi_dict = MultiDictionaryQuery(mdx_paths)
+        if self._init_failed:
+            return None
+
+        if self.multi_dict is not None:
+            return self  # Already initialized
+
+        try:
+            mdx_filenames = config.get("mdx_filenames", [])
+            if not mdx_filenames:
+                print("No MDX filenames configured")
+                self._init_failed = True
+                return None
+
+            mdx_paths = [os.path.join(ADDON_USER_FILES_DIR, fn) for fn in mdx_filenames]
+            self.multi_dict = MultiDictionaryQuery(mdx_paths)
+
+            # Check if any dictionaries were actually loaded
+            if not self.multi_dict.dictionaries:
+                print("No MDX dictionaries were successfully loaded")
+                self._init_failed = True
+                self.multi_dict = None
+                return None
+
+            return self
+        except Exception as e:
+            print(f"Failed to initialize MDX helper: {e}")
+            self._init_failed = True
+            self.multi_dict = None
+            return None
 
     def get_definition_text(
         self, word: str, reading: Optional[str] = None, max_length: Optional[int] = None
@@ -317,6 +354,9 @@ class AnkiMDXHelper:
         Returns:
             Plain text string with definitions from all dictionaries
         """
+        if self.multi_dict is None:
+            return None
+
         cur_config: dict[str, Any] = mw.addonManager.getConfig(__name__) or {}
         pick_dictionary: PickDictionaryResult = cur_config.get("mdx_pick_dictionary", "all")
         if reading:
@@ -354,7 +394,7 @@ class AnkiMDXHelper:
 
         return "\n".join(lines)
 
-    def get_definition_html(self, word: str, reading: Optional[str] = None) -> str:
+    def get_definition_html(self, word: str, reading: Optional[str] = None) -> Union[str, None]:
         """
         Get formatted HTML definition for word (for UI display)
 
@@ -365,6 +405,9 @@ class AnkiMDXHelper:
         Returns:
             HTML string with definitions from all dictionaries
         """
+        if self.multi_dict is None:
+            return None
+
         cur_config: dict[str, Any] = mw.addonManager.getConfig(__name__) or {}
         pick_dictionary: PickDictionaryResult = cur_config.get("mdx_pick_dictionary", "all")
         if reading:
