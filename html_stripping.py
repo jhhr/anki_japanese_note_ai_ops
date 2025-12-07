@@ -85,7 +85,7 @@ def strip_html_advanced(html_content, preserve_structure=False):
     # Clean up whitespace
     if preserve_structure:
         text = re.sub(r" +", " ", text)  # Multiple spaces to single
-        text = re.sub(r"\n\n\n+", "\n\n", text)  # Limit to double newlines
+        text = re.sub(r"\n\n+", "\n\n", text)  # Limit to double newlines
     else:
         text = re.sub(r"\s+", " ", text)
 
