@@ -40,12 +40,7 @@ class MDXDictionary:
             if isinstance(value, bytes):
                 value = value.decode("utf-8")
 
-            # Store both the key and its lowercase version for case-insensitive lookup
             self.index[key] = value
-            # Only add lowercase version if it's actually different
-            key_lower = key.lower()
-            if key_lower != key:
-                self.index[key_lower] = value
             entry_count += 1
         elapsed = time.time() - start_time
         print(f"    indexed {entry_count} entries in {elapsed:.2f}s")
