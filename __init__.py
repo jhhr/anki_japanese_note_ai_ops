@@ -10,7 +10,9 @@ from aqt.qt import QAction, qconnect, QMenu
 
 # Add the 'lib' directory to sys.path for module imports, modules will import from there
 # so this needs to be done before any other imports
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+if lib_path not in sys.path:
+    sys.path.append(lib_path)
 
 # E402 - module level import not at top of file
 from .utils import get_field_config  # noqa: E402
