@@ -121,6 +121,6 @@ You need to define
 
 - `replace_existing_matched_words`: (default: false) overwrite previously processed matched words?
 - `mdx_filenames`: array of filenames (with `.mdx` extension) for dictionary files in the addon's `user_files/` folder.
-  - The `user_files/` folder must exist; create it if it does not.
+  - The `user_files/` folder is created automatically if it does not exist.
   - Example: `["dict1.mdx", "dict2.mdx"]`
 - `mdx_pick_dictionary`: one of "all", "first", "shortest", "longest"
