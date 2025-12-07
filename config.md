@@ -70,7 +70,8 @@ You need to define
   1. `meaning_field`
   2. `english_meaning_field`
   3. `word_field`
-  4. `sentence_field`
+  4. `word_reading_field`
+  5. `sentence_field`
 - for translating sentences
   1. `sentence_field`
   2. `translated_sentence_field`
@@ -119,3 +120,5 @@ You need to define
     - `yojijukugo`: default = yes
 
 - `replace_existing_matched_words`: (default: false) overwrite previously processed matched words?
+- `mdx_filenames`: array of filenames for dicts in the addon user_files/ folder. Copy your mdx files in this folder and then include the file names here.
+- `mdx_pick_dictionary`: one of "all", "first", "shortest", "longest"

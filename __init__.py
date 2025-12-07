@@ -8,32 +8,35 @@ from aqt import mw
 from aqt.browser import Browser
 from aqt.qt import QAction, qconnect, QMenu
 
-from .utils import get_field_config
+# Add the 'lib' directory to sys.path for module imports, modules will import from there
+# so this needs to be done before any other imports
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-from .async_api_ops.clean_meaning import (
+# E402 - module level import not at top of file
+from .utils import get_field_config  # noqa: E402
+
+from .async_api_ops.clean_meaning import (  # noqa: E402
     clean_meaning_in_note,
     clean_selected_notes,
 )
-from .async_api_ops.translate_field import (
+from .async_api_ops.translate_field import (  # noqa: E402
     translate_selected_notes,
     translate_sentence_in_note,
 )
-from .async_api_ops.make_kanji_story import (
+from .async_api_ops.make_kanji_story import (  # noqa: E402
     make_stories_for_selected_notes,
     make_story_for_note,
 )
-from .async_api_ops.kanjify_sentence import (
+from .async_api_ops.kanjify_sentence import (  # noqa: E402
     kanjify_selected_notes,
 )
-from .async_api_ops.extract_words import (
+from .async_api_ops.extract_words import (  # noqa: E402
     extract_words_from_selected_notes,
     extract_words_in_note,
 )
-from .async_api_ops.match_words_to_notes import (
+from .async_api_ops.match_words_to_notes import (  # noqa: E402
     match_words_to_notes_from_selected,
 )
-
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
 
 # Function to be executed when the browser menus are initialized

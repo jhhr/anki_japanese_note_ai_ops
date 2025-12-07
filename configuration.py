@@ -1,5 +1,12 @@
+import os
 from typing import Union
 from anki.notes import NoteId
+
+ADDON_DIR = os.path.dirname(os.path.abspath(__file__))
+ADDON_USER_FILES_DIR = os.path.join(
+    ADDON_DIR,
+    "user_files",
+)
 
 # Raw word, tuple of 1) word, 2) reading
 raw_one_meaning_word_type = tuple[str, str]
