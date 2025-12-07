@@ -74,6 +74,16 @@ def get_response(
             max_output_tokens=max_output_tokens,
             json_result_corrector=json_result_corrector,
         )
+    elif model.startswith("claude") or model.startswith("anthropic"):
+        return get_response_from_anthropic(
+            model,
+            prompt,
+            cancel_state=cancel_state,
+            instructions=instructions,
+            response_schema=response_schema,
+            max_output_tokens=max_output_tokens,
+            json_result_corrector=json_result_corrector,
+        )
     else:
         print(f"Unsupported model: {model}")
         return None
@@ -349,6 +359,121 @@ def get_response_from_openai(
     try:
         decoded_json = json.loads(response.text)
         content_text = decoded_json["choices"][0]["message"]["content"]
+    except json.JSONDecodeError as je:
+        print(f"Error decoding JSON: {je}")
+        print("response", response.text)
+        return None
+    except KeyError as ke:
+        print(f"Error extracting content: {ke}")
+        print("response", response.text)
+        return None
+    finally:
+        # Request completed, remove from active requests
+        if req in active_requests:
+            active_requests.remove(req)
+
+    # Extract the cleaned meaning from the response
+    json_result = extract_json_string(content_text)
+
+    result = decode_json_result(json_result)
+    if not result and json_result_corrector:
+        json_result = json_result_corrector(json_result)
+        result = decode_json_result(json_result)
+    return result
+
+
+def get_response_from_anthropic(
+    model: str,
+    prompt: str,
+    cancel_state: Optional[CancelState] = None,
+    instructions: Optional[str] = None,
+    response_schema: Optional[dict] = None,
+    max_output_tokens: Optional[int] = None,
+    json_result_corrector: Optional[Callable[[str], str]] = None,
+) -> Union[dict, None]:
+    """Get a response from Anthropic's Claude API.
+
+    Args:
+        prompt: The prompt to send to the API.
+
+    Returns:
+        A dict containing the parsed JSON response, or None if there was an error.
+    """
+    if DEBUG:
+        print(f"Anthropic call, model: {model}")
+
+    if cancel_state and cancel_state.is_cancelled():
+        return None
+
+    messages = [
+        {"role": "user", "content": prompt},
+    ]
+    # Create the request body
+    data: dict[str, Any] = {
+        "model": model,
+        "system": (
+            instructions
+            if instructions
+            else (
+                "You are a helpful assistant for processing Japanese text. You are a"
+                " superlative expert in the Japanese language and its writing system. You are"
+                " designed to output JSON."
+            )
+        ),
+        "max_tokens": max_output_tokens or MAX_TOKENS_VALUE,
+        "messages": messages,
+    }
+
+    if response_schema:
+        data["output_format"] = {
+            "type": "json_schema",
+            "schema": response_schema,
+        }
+        if DEBUG:
+            print("Using response schema", response_schema)
+
+    config = mw.addonManager.getConfig(__name__)
+    if config is None:
+        print("No configuration found for the addon.")
+        return None
+    anthropic_api_key = config.get("anthropic_api_key", "")
+    request_timeout = config.get("request_timeout", 300)
+
+    headers = {
+        "x-api-key": anthropic_api_key,
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+    }
+
+    # Make the API call
+    req = CancellableRequest()
+    active_requests.append(req)
+    url = "https://api.anthropic.com/v1/messages"
+    try:
+        response = req.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=request_timeout,
+        )
+    except requests.exceptions.Timeout:
+        print("Request timed out")
+        return None
+    except Exception as e:
+        print(f"Error making request: {e}")
+        return None
+    finally:
+        # Response completed, remove from active requests
+        if req in active_requests:
+            active_requests.remove(req)
+
+    if response.status_code != 200:
+        print(f"Error: {response.status_code}, {response.text}")
+        return None
+
+    try:
+        decoded_json = json.loads(response.text)
+        content_text = decoded_json["content"][0]["text"]
     except json.JSONDecodeError as je:
         print(f"Error decoding JSON: {je}")
         print("response", response.text)
