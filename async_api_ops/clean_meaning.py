@@ -36,12 +36,20 @@ def get_single_meaning_from_model(
     else:
         sentences_formatted = sentences[0]
     prompt = f"""Below, the dictionary entry for the word or phrase may contain multiple meanings. Your task is to either 1) extract the one meaning 2) or combine and rephrase meanings matching the usage of the word in the sentence{'s' if len(sentences) > 1 else ''}.
-- YOU MUST Shorten and simplify the meaning as much possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
-- DO NOT overfit the definition to the sentence{'s' if len(sentences) > 1 else ''}, but rather aim for a short general definition that fits the usage in {'each sentence' if len(sentences) > 1 else 'the sentence'}.
+
+Selection criteria:
 - If there are only two meanings for this word or phrase, one literal and one figurative, pick both and shorten their respective descriptions. Do this even if the sentence{'s' if len(sentences) > 1 else ''} only uses one of the meanings.
+- In case there is only a single meaning, return that.
+- DO NOT overfit the definition to the sentence{'s' if len(sentences) > 1 else ''}, but rather aim for a short general definition that fits the usage in {'each sentence' if len(sentences) > 1 else 'the sentence'}.
+
+Omission rules:
 - Omit any example sentences the matching meaning(s) included (often included within 「」 brackets).
 - Descriptions of animals and plants are often scientific. From these omit descriptions on their ecology and only describe their appearance and type of plant/animal with simple language.
-- In case there is only a single meaning, return that.
+
+Simplification rules:
+- YOU MUST Shorten and simplify the meaning as much possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
+
+Formatting rules:
 - Clean off meaning numberings and other notation leaving only a plain text description.
 
 Additionally, but only if it seems necessary, reword the English dictionary definition to fit the Japanese one. The English definition should ideally simply list equivalent words, if there are some, and only explain in sentences when it's necessary.
