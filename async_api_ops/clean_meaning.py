@@ -15,7 +15,7 @@ from .base_ops import (
 from ..sync_local_ops.mdx_dictionary import AnkiMDXHelper
 from ..utils import get_field_config
 
-DEBUG = True
+DEBUG = False
 
 mdx_helper: Union[AnkiMDXHelper, None] = None
 
