@@ -233,7 +233,7 @@ class MultiDictionaryQuery:
         for d in self.dictionaries:
             definition = d["dict"].query(word, strip_html_tags, preserve_structure)
             if definition:
-                results.append({"dictionary": str(d["name"]), "definition": definition})
+                results.append({"dictionary": d["name"], "definition": definition})
                 if pick_dictionary == "first":
                     return results
         if pick_dictionary == "shortest" and results:
