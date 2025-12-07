@@ -36,9 +36,21 @@ class MDXDictionary:
         for key, value in self.mdx.items():
             # Decode bytes to strings if necessary
             if isinstance(key, bytes):
-                key = key.decode("utf-8")
+                try:
+                    key = key.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        key = key.decode("latin-1")
+                    except Exception:
+                        key = key.decode("utf-8", errors="replace")
             if isinstance(value, bytes):
-                value = value.decode("utf-8")
+                try:
+                    value = value.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        value = value.decode("latin-1")
+                    except Exception:
+                        value = value.decode("utf-8", errors="replace")
 
             self.index[key] = value
             entry_count += 1
