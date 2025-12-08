@@ -2,6 +2,7 @@ import random
 import json
 import re
 import asyncio
+import logging
 from typing import Union, Sequence, Callable, Any, Coroutine, cast
 from aqt import mw
 
@@ -27,7 +28,7 @@ from ..configuration import (
     matched_word_type,
 )
 
-DEBUG = False
+logger = logging.getLogger(__name__)
 
 WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
     "nouns": "Noun",
@@ -90,7 +91,7 @@ def update_fake_note_ids(
     if not new_notes:
         return updated_notes_dict
     if not config:
-        print("Error: Missing addon configuration")
+        logger.error("Error: Missing addon configuration")
         return updated_notes_dict
     total_notes = len(new_notes)
     progress_updater.update_new_note_processing_progress(
@@ -99,12 +100,12 @@ def update_fake_note_ids(
     for index, new_note in enumerate(new_notes):
         note_type = new_note.note_type()
         if not note_type:
-            print(f"Error: Note {new_note.id} has no note type")
+            logger.error(f"Error: Note {new_note.id} has no note type")
             continue
         new_note_id_field = get_field_config(config, "new_note_id_field", note_type)
         word_list_field = get_field_config(config, "word_list_field", note_type)
         if not new_note_id_field or not word_list_field:
-            print("Error: Missing required fields in config")
+            logger.error("Error: Missing required fields in config")
             return updated_notes_dict
         if new_note_id_field in new_note and word_list_field in new_note:
             # Find other notes whose word_list_field contains the fake note ID
@@ -195,19 +196,18 @@ def match_words_to_notes(
             returned as is.
     """
     if not word_tuples:
-        if DEBUG:
-            print("No words to match against notes")
+        logger.debug("No words to match against notes")
         return word_tuples
     if not sentence:
-        print("Error: No sentence provided for matching words")
+        logger.error("Error: No sentence provided for matching words")
         return word_tuples
     if not config:
-        print("Error: Missing addon configuration")
+        logger.error("Error: Missing addon configuration")
         return word_tuples
     # Get the model name from the config
     model = config.get("match_words_model", "")
     if not model:
-        print("Error: Missing match words model in config")
+        logger.error("Error: Missing match words model in config")
         return word_tuples
 
     config["rate_limits"] = config.get("rate_limits", {})
@@ -242,13 +242,12 @@ def match_words_to_notes(
         if not field_name:
             missing_fields.append(field_name)
     if missing_fields:
-        print(f"Error: Missing fields in config: {', '.join(missing_fields)}")
+        logger.error(f"Error: Missing fields in config: {', '.join(missing_fields)}")
         return word_tuples
 
     processed_word_tuples = cast(list[ProcessedWordTuple], word_tuples.copy())
 
-    if DEBUG:
-        print(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
+    logger.debug(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
 
     def match_op(
         _,
@@ -269,17 +268,15 @@ def match_words_to_notes(
         Returns:
             bool: True if the word tuple was processed successfully, False otherwise.
         """
-        if DEBUG:
-            print(f"match_op, notes_to_add_dict before: {notes_to_add_dict}")
-            print(f"Processing word tuple at index {word_index}: {word}, reading: {reading}")
+        logger.debug(f"match_op, notes_to_add_dict before: {notes_to_add_dict}")
+        logger.debug(f"Processing word tuple at index {word_index}: {word}, reading: {reading}")
         nonlocal processed_word_tuples, updated_notes_dict
         # If the word contains only non-japanese characters, skip it
         if not re.search(r"[ぁ-んァ-ン一-龯]", word):
-            if DEBUG:
-                print(
-                    f"Skipping word '{word}' at index {word_index} as it contains no Japanese"
-                    " characters"
-                )
+            logger.debug(
+                f"Skipping word '{word}' at index {word_index} as it contains no Japanese"
+                " characters"
+            )
             processed_word_tuples[word_index] = None
         # Check for existing suru verbs words including する in either field, remove する in the word
         if (
@@ -309,8 +306,7 @@ def match_words_to_notes(
         )
         no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
         query = f"({word_query} OR {word_query_suru}) {no_x_in_sort_field}"
-        if DEBUG:
-            print(f"Searching for notes with query: {query}")
+        logger.debug(f"Searching for notes with query: {query}")
         note_ids: Sequence[NoteId] = mw.col.find_notes(query)
         # Filter by reading matches, we don't do this in the query since it's not easy to check
         # for a reading where some parts are in katakana
@@ -322,16 +318,14 @@ def match_words_to_notes(
             note = mw.col.get_note(note_id)
             if note and word_reading_field in note:
                 note_reading = to_hiragana(note[word_reading_field])
-                if DEBUG:
-                    print(
-                        f"Comparing note reading: {note_reading} with {hiragana_reading} and"
-                        f" {hiragana_reading_suru}"
-                    )
+                logger.debug(
+                    f"Comparing note reading: {note_reading} with {hiragana_reading} and"
+                    f" {hiragana_reading_suru}"
+                )
                 if note_reading in [hiragana_reading, hiragana_reading_suru]:
                     matching_notes.append(note)
 
-        if DEBUG:
-            print(f"Found matching notes: {[note[word_sort_field] for note in matching_notes]}")
+        logger.debug(f"Found matching notes: {[note[word_sort_field] for note in matching_notes]}")
 
         matching_new_notes = notes_to_add_dict.get(word, [])
 
@@ -481,11 +475,10 @@ def match_words_to_notes(
         largest_meaning_index = 0
         note_to_copy = None
         for note in matching_notes:
-            if DEBUG:
-                print(
-                    f"Processing note {note.id} for word {word} with reading {reading}, sort field"
-                    f" {note[word_sort_field]}"
-                )
+            logger.debug(
+                f"Processing note {note.id} for word {word} with reading {reading}, sort field"
+                f" {note[word_sort_field]}"
+            )
             if meaning_field in note:
                 meaning = note[meaning_field]
                 other_sentence = (
@@ -517,14 +510,11 @@ def match_words_to_notes(
                         match_word,
                     ))
                 else:
-                    if DEBUG:
-                        print(f"Note {note.id} has empty meaning field")
+                    logger.debug(f"Note {note.id} has empty meaning field")
             else:
-                if DEBUG:
-                    print(f"Note {note.id} is missing meaning field")
+                logger.debug(f"Note {note.id} is missing meaning field")
         if not meanings:
-            if DEBUG:
-                print(f"No meanings found for word {word} with reading {reading}")
+            logger.debug(f"No meanings found for word {word} with reading {reading}")
             # We found notes but all were missing meanings, have to skip this word as it can't
             # processed properly
             return False
@@ -681,8 +671,7 @@ _Current sentence_: {sentence}"""
         # However the thinking tokens are also counted towards the limit so the total token count
         # of thinking + response must be considered. Thinking can take a several thousand tokens
         max_output_tokens = 8000
-        if DEBUG:
-            print(f"\n\nmeanings_str: {meanings_str}")
+        logger.debug(f"\n\nmeanings_str: {meanings_str}")
 
         raw_result = get_response(
             model,
@@ -695,11 +684,9 @@ _Current sentence_: {sentence}"""
             max_output_tokens=max_output_tokens,
             json_result_corrector=json_result_corrector,
         )
-        if DEBUG:
-            print(f"Raw result: {raw_result}")
+        logger.debug(f"Raw result: {raw_result}")
         if raw_result is None:
-            if DEBUG:
-                print("Failed to get a response from the API.")
+            logger.debug("Failed to get a response from the API.")
             # If the prompt failed, return nothing
             return False
         meaning_list = None
@@ -710,31 +697,27 @@ _Current sentence_: {sentence}"""
             # If the result is a list, assume it's the meanings directly
             meaning_list = raw_result
         else:
-            if DEBUG:
-                print(
-                    f"Error: Expected a list or dict, got {type(raw_result)} instead. Result:"
-                    f" {raw_result}"
-                )
+            logger.debug(
+                f"Error: Expected a list or dict, got {type(raw_result)} instead. Result:"
+                f" {raw_result}"
+            )
             return False
         # Check the list of meanings is the right type
         if isinstance(meaning_list, dict):
             # this may be a case where the AI decided to return a single object instead of a list
             # we'll try to handle it like that then
-            if DEBUG:
-                print(f"Warning: Expected a list, got a dict instead. Result: {raw_result}")
+            logger.debug(f"Warning: Expected a list, got a dict instead. Result: {raw_result}")
             meaning_list = [
                 meaning_list
             ]  # Wrap it in a list to handle it uniformly, if it's garbage, we'll
             # catch it in the processing below
         elif not isinstance(meaning_list, list):
-            if DEBUG:
-                print(
-                    f"Error: Expected a list, got {type(raw_result)} instead. Result: {raw_result}"
-                )
+            logger.debug(
+                f"Error: Expected a list, got {type(raw_result)} instead. Result: {raw_result}"
+            )
             return False
         elif not meaning_list:
-            if DEBUG:
-                print("Error: Result is an empty list, should have at least one object.")
+            logger.debug("Error: Result is an empty list, should have at least one object.")
             return False
         # All validity checks passed, meaning_list should be a list now, now to check what it
         # contains though...
@@ -743,62 +726,53 @@ _Current sentence_: {sentence}"""
         # If there's an invalid number of meanings, reject the result, the AI got confused and we
         # can't trust this result
         if len(meaning_list) > len(meanings) + 1:
-            if DEBUG:
-                print(
-                    f"Error: Invalid number of meanings. Expected at most {len(meanings) + 1}, got"
-                    f" {len(meaning_list)}."
-                )
+            logger.debug(
+                f"Error: Invalid number of meanings. Expected at most {len(meanings) + 1}, got"
+                f" {len(meaning_list)}."
+            )
             return False
         for i, res in enumerate(meaning_list):
             if not isinstance(res, dict):
-                if DEBUG:
-                    print(
-                        f"Error: Expected a dict, got {type(res)} instead at index {i}. Result:"
-                        f" {res}"
-                    )
+                logger.debug(
+                    f"Error: Expected a dict, got {type(res)} instead at index {i}. Result: {res}"
+                )
                 continue
             if "meaning_number" in res and not isinstance(res["meaning_number"], (int, type(None))):
-                if DEBUG:
-                    print(
-                        f"Error: invalid object at index {i}, 'meaning_number' is not an int or"
-                        f" None. Result: {res}"
-                    )
+                logger.debug(
+                    f"Error: invalid object at index {i}, 'meaning_number' is not an int or"
+                    f" None. Result: {res}"
+                )
                 continue
             if "is_matched_meaning" in res and not isinstance(res["is_matched_meaning"], bool):
-                if DEBUG:
-                    print(
-                        f"Error: invalid object at index {i}, 'is_matched_meaning' is not a bool."
-                        f" Result: {res}"
-                    )
+                logger.debug(
+                    f"Error: invalid object at index {i}, 'is_matched_meaning' is not a bool."
+                    f" Result: {res}"
+                )
                 continue
             if "jp_meaning" in res and not isinstance(res["jp_meaning"], (str, type(None))):
-                if DEBUG:
-                    print(
-                        f"Error: invalid object at index {i}, 'jp_meaning' is not a str or None."
-                        f" Result: {res}"
-                    )
+                logger.debug(
+                    f"Error: invalid object at index {i}, 'jp_meaning' is not a str or None."
+                    f" Result: {res}"
+                )
                 continue
             if "en_meaning" in res and not isinstance(res["en_meaning"], (str, type(None))):
-                if DEBUG:
-                    print(
-                        f"Error: invalid object at index {i}, 'en_meaning' is not a str or None."
-                        f" Result: {res}"
-                    )
+                logger.debug(
+                    f"Error: invalid object at index {i}, 'en_meaning' is not a str or None."
+                    f" Result: {res}"
+                )
                 continue
             if "is_matched_meaning" in res and "meaning_number" not in res:
-                if DEBUG:
-                    print(
-                        f"Error: invalid object at index {i}, 'is_matched_meaning' is set but"
-                        f" 'meaning_number' is not. Result: {res}"
-                    )
+                logger.debug(
+                    f"Error: invalid object at index {i}, 'is_matched_meaning' is set but"
+                    f" 'meaning_number' is not. Result: {res}"
+                )
                 continue
             if "meaning_number" in res and res["meaning_number"] is not None:
                 if res["meaning_number"] < 1 or res["meaning_number"] > len(meanings) + 1:
-                    if DEBUG:
-                        print(
-                            f"Error: invalid object at index {i}, 'meaning_number' is out of range."
-                            f" Result: {res}"
-                        )
+                    logger.debug(
+                        f"Error: invalid object at index {i}, 'meaning_number' is out of range."
+                        f" Result: {res}"
+                    )
                     continue
             is_matched_meaning = res.get("is_matched_meaning", False)
             meaning_number = res.get("meaning_number", None)
@@ -806,26 +780,25 @@ _Current sentence_: {sentence}"""
             en_meaning = res.get("en_meaning", None)
             # If meaning_number is too big, the AI got confused, skip this
             if meaning_number is not None and meaning_number > len(meanings):
-                if DEBUG:
-                    print(f"Error: invalid 'meaning_number' at index {i}, too large. Result: {res}")
+                logger.debug(
+                    f"Error: invalid 'meaning_number' at index {i}, too large. Result: {res}"
+                )
                 continue
             if is_matched_meaning and meaning_number is not None:
                 meaning_number = meaning_number - 1  # Convert to 0-based index
                 try:
                     meanings[meaning_number]
                 except IndexError:
-                    if DEBUG:
-                        print(
-                            f"Error: Matched meaning number {meaning_number} is out of range for"
-                            f" word {word} with reading {reading}"
-                        )
+                    logger.debug(
+                        f"Error: Matched meaning number {meaning_number} is out of range for"
+                        f" word {word} with reading {reading}"
+                    )
                     continue
                 if valid_matched_meaning_found:
-                    if DEBUG:
-                        print(
-                            f"Error: More than one matched meaning found for word {word} with"
-                            f" reading {reading}"
-                        )
+                    logger.debug(
+                        f"Error: More than one matched meaning found for word {word} with"
+                        f" reading {reading}"
+                    )
                     continue
                 valid_matched_meaning_found = True
             # Valid action 1
@@ -836,11 +809,10 @@ _Current sentence_: {sentence}"""
                 "en_meaning": en_meaning,
             })
             if not is_matched_meaning and not jp_meaning and not en_meaning:
-                if DEBUG:
-                    print(
-                        f"Error: Meaning object at index {i} is hot a match and is not modifying"
-                        f" either meaning. Result: {res}"
-                    )
+                logger.debug(
+                    f"Error: Meaning object at index {i} is hot a match and is not modifying"
+                    f" either meaning. Result: {res}"
+                )
                 continue
             if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
                 # If either jp_meaning or en_meaning is set, we should treat this as a new meaning
@@ -862,25 +834,21 @@ _Current sentence_: {sentence}"""
                     "en_meaning": en_meaning,
                 })
         if not valid_meaning_objects:
-            if DEBUG:
-                print(
-                    f"Error: No valid meaning objects found for word {word} with reading {reading}"
-                )
+            logger.debug(
+                f"Error: No valid meaning objects found for word {word} with reading {reading}"
+            )
             return False
         if not valid_matched_meaning_found and len(valid_meaning_objects) == 1:
             # If we have only one meaning object and it is not a matched meaning, not sure what
             # the AI was thinking, so treat is it as invalid
-            if DEBUG:
-                print(
-                    f"Error: Only one meaning object found for word {word} with reading {reading},"
-                    " but it is not a matched meaning"
-                )
-            return False
-        if DEBUG:
-            print(
-                f"Valid meaning objects for word {word} with reading {reading}:"
-                f" {valid_meaning_objects}"
+            logger.debug(
+                f"Error: Only one meaning object found for word {word} with reading {reading},"
+                " but it is not a matched meaning"
             )
+            return False
+        logger.debug(
+            f"Valid meaning objects for word {word} with reading {reading}: {valid_meaning_objects}"
+        )
         # Now we have a list of valid meaning objects, we can process them
         # Process actions 1 and 2 first, since there should be only one or the other
         for meaning_object in valid_meaning_objects:
@@ -888,8 +856,7 @@ _Current sentence_: {sentence}"""
             is_matched_meaning = meaning_object.get("is_matched_meaning", False)
             jp_meaning = meaning_object.get("jp_meaning", None)
             en_meaning = meaning_object.get("en_meaning", None)
-            if DEBUG:
-                print(f"Processing meaning object: {meaning_object}")
+            logger.debug(f"Processing meaning object: {meaning_object}")
             if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
                 # Action 2. duplicate the note with the biggest meaning number, incrementing it by 1
                 if meanings:
@@ -968,16 +935,14 @@ _Current sentence_: {sentence}"""
                     )
                     return True
                 else:
-                    if DEBUG:
-                        print(f"Error: No note to copy for word {word} with reading {reading}")
+                    logger.debug(f"Error: No note to copy for word {word} with reading {reading}")
                     return False
             elif is_matched_meaning and meaning_number is not None:
                 # Action 1. update the meaning in the note with the matched meaning
-                if DEBUG:
-                    print(
-                        f"Matched meaning JP:'{jp_meaning}'/EN:'{en_meaning}' for word {word} with"
-                        f" reading {reading}"
-                    )
+                logger.debug(
+                    f"Matched meaning JP:'{jp_meaning}'/EN:'{en_meaning}' for word {word} with"
+                    f" reading {reading}"
+                )
                 # We have a match, so we can update the note with the matched meaning
                 matched_note = None
                 matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number]
@@ -989,19 +954,17 @@ _Current sentence_: {sentence}"""
                 if not matched_note:
                     # This shouldn't happen as the meaning came from one of the notes in the list
                     # and indicates the matched_meaning somehow isn't in the matching_notes
-                    if DEBUG:
-                        print(
-                            f"Error: Matched note with ID {matched_note_id} not found for word"
-                            f" {word} with reading {reading}"
-                        )
+                    logger.debug(
+                        f"Error: Matched note with ID {matched_note_id} not found for word"
+                        f" {word} with reading {reading}"
+                    )
                     return False
                 # Add the matched note to processed_word_tuples
                 new_word_tuple = (word, reading, matched_note[word_sort_field], matched_note.id)
-                if DEBUG:
-                    print(
-                        f"Setting processed word tuple at index {word_index}, with tuple"
-                        f" {new_word_tuple}"
-                    )
+                logger.debug(
+                    f"Setting processed word tuple at index {word_index}, with tuple"
+                    f" {new_word_tuple}"
+                )
                 processed_word_tuples[word_index] = new_word_tuple
                 # Now we need to update the meaning in the note
                 if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
@@ -1011,21 +974,19 @@ _Current sentence_: {sentence}"""
                 if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
                     matched_note[english_meaning_field] = en_meaning.strip()
                     updated_notes_dict[matched_note.id] = matched_note
-                if DEBUG:
-                    print(
-                        f"Updated note {matched_note.id} with new meaning '{jp_meaning}' and"
-                        f" english meaning '{en_meaning}'"
-                    )
+                logger.debug(
+                    f"Updated note {matched_note.id} with new meaning '{jp_meaning}' and"
+                    f" english meaning '{en_meaning}'"
+                )
                 return True
             elif not is_matched_meaning and meaning_number is not None:
                 # Action 3. update the meaning in the note with the new meaning
                 matched_note = None
                 matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number - 1]
-                if DEBUG:
-                    print(
-                        f"Matched meaning {matched_meaning} and new meaning"
-                        f" JP:'{jp_meaning}'/EN:{en_meaning} for word {word} with reading {reading}"
-                    )
+                logger.debug(
+                    f"Matched meaning {matched_meaning} and new meaning"
+                    f" JP:'{jp_meaning}'/EN:{en_meaning} for word {word} with reading {reading}"
+                )
                 for note in matching_notes:
                     if note.id == matched_note_id and matched_meaning == note[meaning_field]:
                         # Ensure the matched meaning is the same as in the note to account for id=0
@@ -1033,19 +994,17 @@ _Current sentence_: {sentence}"""
                         break
                 if not matched_note:
                     # This shoudln't happen as the meaning came from one of the notes in the list
-                    if DEBUG:
-                        print(
-                            f"Error: Matched note with ID {matched_note_id} not found for word"
-                            f" {word} with reading {reading}"
-                        )
+                    logger.debug(
+                        f"Error: Matched note with ID {matched_note_id} not found for word"
+                        f" {word} with reading {reading}"
+                    )
                     return False
                 # Add the matched note to processed_word_tuples
                 new_word_tuple = (word, reading, matched_note[word_sort_field], matched_note.id)
-                if DEBUG:
-                    print(
-                        f"Setting processed word tuple at index {word_index}, with tuple"
-                        f" {new_word_tuple}"
-                    )
+                logger.debug(
+                    f"Setting processed word tuple at index {word_index}, with tuple"
+                    f" {new_word_tuple}"
+                )
                 processed_word_tuples[word_index] = new_word_tuple
                 # Now we need to update the meaning in the note
                 if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
@@ -1057,25 +1016,22 @@ _Current sentence_: {sentence}"""
                     updated_notes_dict[matched_note.id] = matched_note
                 return True
             else:
-                if DEBUG:
-                    print(
-                        f"Error: Unexpected invalid meaning object for word {word} with reading"
-                        f" {reading}: {meaning_object}"
-                    )
+                logger.debug(
+                    f"Error: Unexpected invalid meaning object for word {word} with reading"
+                    f" {reading}: {meaning_object}"
+                )
                 return False
         # End of match_op function
-        if DEBUG:
-            print(
-                f"Error: No valid meaning objects processed for word {word} with reading {reading}"
-            )
+        logger.debug(
+            f"Error: No valid meaning objects processed for word {word} with reading {reading}"
+        )
         return False
 
     new_tasks_count = 0
 
     def handle_return_word_tuples():
         nonlocal processed_word_tuples
-        if DEBUG:
-            print(f"Returning processed word tuples: {processed_word_tuples}")
+        logger.debug(f"Returning processed word tuples: {processed_word_tuples}")
         # filter out any None values from processed_word_tuples
         update_word_list_in_dict(processed_word_tuples)
 
@@ -1083,8 +1039,7 @@ _Current sentence_: {sentence}"""
 
     def create_result_handler(word_index, word):
         def handle_result(_: bool):
-            if DEBUG:
-                print(f"Task completed for word {word} (index {word_index})")
+            logger.debug(f"Task completed for word {word} (index {word_index})")
             # At this point, processed_word_tuples[word_index] should have the final result for
             # this word. Only update the word list after all tasks complete
             # Don't call update_word_list_in_dict here
@@ -1097,8 +1052,7 @@ _Current sentence_: {sentence}"""
         if mw.progress.want_cancel():
             break
         if not isinstance(word_tuple, (tuple, list)):
-            if DEBUG:
-                print(f"Error: Invalid word tuple at index {i}: {word_tuple}")
+            logger.debug(f"Error: Invalid word tuple at index {i}: {word_tuple}")
             continue
         word = ""
         reading = ""
@@ -1108,25 +1062,22 @@ _Current sentence_: {sentence}"""
             try:
                 fake_note_id = int(word_tuple[3])
             except Exception as e:
-                if DEBUG:
-                    print(f"Error: Invalid third value in word tuple: {word_tuple}, {e}")
+                logger.debug(f"Error: Invalid third value in word tuple: {word_tuple}, {e}")
                 continue
             if fake_note_id < 0:
-                if DEBUG:
-                    print(
-                        f"Trying to set new note ID found in word tuple at index {i}:"
-                        f" {word_tuple} to actual note.id"
-                    )
+                logger.debug(
+                    f"Trying to set new note ID found in word tuple at index {i}:"
+                    f" {word_tuple} to actual note.id"
+                )
                 # Is the current note the holder of this fake Id?
                 unfake_note = None
                 if current_note[new_note_id_field] == str(fake_note_id):
                     # Yes, so we can use the current note's ID
                     unfake_note = current_note
-                    if DEBUG:
-                        print(
-                            f"Current note ID {current_note.id} matches fake note ID"
-                            f" {fake_note_id}, updating word tuple at index {i}"
-                        )
+                    logger.debug(
+                        f"Current note ID {current_note.id} matches fake note ID"
+                        f" {fake_note_id}, updating word tuple at index {i}"
+                    )
 
                 else:
                     # Try to find a note with this in its 'new_note_id_field' field
@@ -1136,36 +1087,32 @@ _Current sentence_: {sentence}"""
                     if len(nids) == 1:
                         note_id = nids[0]
                         # Found a note, set the note_id into the word_tuple
-                        if DEBUG:
-                            print(
-                                f"Found note with ID {note_id} for new note ID {fake_note_id},"
-                                f" updating word tuple at index {i}"
-                            )
+                        logger.debug(
+                            f"Found note with ID {note_id} for new note ID {fake_note_id},"
+                            f" updating word tuple at index {i}"
+                        )
                         unfake_note = mw.col.get_note(note_id)
                     elif len(nids) > 1:
-                        if DEBUG:
-                            print(
-                                f"Error: Found multiple notes with new note ID {fake_note_id},"
-                                " can't determine which one to use"
-                            )
+                        logger.debug(
+                            f"Error: Found multiple notes with new note ID {fake_note_id},"
+                            " can't determine which one to use"
+                        )
                         continue
                     else:
-                        if DEBUG:
-                            print(
-                                f"Error: No note found with new note ID {fake_note_id}, this note"
-                                " was never added doesn't exist"
-                            )
+                        logger.debug(
+                            f"Error: No note found with new note ID {fake_note_id}, this note"
+                            " was never added doesn't exist"
+                        )
                         continue
                 if unfake_note is not None:
                     # Set the new note ID to the actual note ID
                     word_tuple = (word_tuple[0], word_tuple[1], word_tuple[2], unfake_note.id)
                     # Update the processed word tuples with the new note ID
                     processed_word_tuples[i] = word_tuple
-                    if DEBUG:
-                        print(
-                            f"Setting new note ID to {unfake_note.id} for word tuple at index {i}:"
-                            f" {word_tuple}"
-                        )
+                    logger.debug(
+                        f"Setting new note ID to {unfake_note.id} for word tuple at index {i}:"
+                        f" {word_tuple}"
+                    )
                     # Also remove the fake id from the note now, so we don't try doing this again
                     if unfake_note.id in updated_notes_dict:
                         # If the note was already updated, update the note in the dict
@@ -1175,11 +1122,10 @@ _Current sentence_: {sentence}"""
                         updated_notes_dict[unfake_note.id] = unfake_note
                     need_update_note = True
                 else:
-                    if DEBUG:
-                        print(
-                            f"Error: No note found to un-fake the new note ID {fake_note_id} for"
-                            f" word tuple at index {i}"
-                        )
+                    logger.debug(
+                        f"Error: No note found to un-fake the new note ID {fake_note_id} for"
+                        f" word tuple at index {i}"
+                    )
                     continue
             if not replace_existing:
                 # Not replacing existing word links
@@ -1189,21 +1135,18 @@ _Current sentence_: {sentence}"""
         elif len(word_tuple) == 2:
             word, reading = word_tuple
         else:
-            if DEBUG:
-                print(f"Error: Invalid word tuple length at index {i}: {word_tuple}")
+            logger.debug(f"Error: Invalid word tuple length at index {i}: {word_tuple}")
             continue
         if not word or not reading:
-            if DEBUG:
-                print(f"Error: Empty word or reading at index {i}: {word_tuple}")
+            logger.debug(f"Error: Empty word or reading at index {i}: {word_tuple}")
             continue
 
-        if DEBUG:
-            print(f"Processing word tuple {word_tuple} at index {i}")
+        logger.debug(f"Processing word tuple {word_tuple} at index {i}")
 
         new_tasks_count += 1
 
         def handle_op_error(e: Exception):
-            print(f"Error processing word tuple {word_tuple} at index {i}: {e}")
+            logger.error(f"Error processing word tuple {word_tuple} at index {i}: {e}")
             print_error_traceback(e)
 
         handle_op_result = create_result_handler(i, word)
@@ -1243,29 +1186,25 @@ _Current sentence_: {sentence}"""
 
     # After all tasks are created, add one final task
     if word_list_task_count > 0 or need_update_note:
-        if DEBUG:
-            print(f"Adding final update task after processing {len(note_tasks)} word tasks")
+        logger.debug(f"Adding final update task after processing {len(note_tasks)} word tasks")
 
         async def final_update_task():
             # Wait for all word-specific tasks to complete
             await asyncio.gather(*note_tasks)
-            if DEBUG:
-                print(
-                    "All word tasks completed, updating word list with final"
-                    f" processed_word_tuples: {processed_word_tuples}"
-                )
+            logger.debug(
+                "All word tasks completed, updating word list with final"
+                f" processed_word_tuples: {processed_word_tuples}"
+            )
             update_word_list_in_dict(processed_word_tuples)
 
         # Add this task, but don't add it to note_tasks to avoid circular waiting
         tasks.append(asyncio.create_task(final_update_task()))
 
-    if DEBUG:
-        print(f"Final processed word tuples: {processed_word_tuples}")
+    logger.debug(f"Final processed word tuples: {processed_word_tuples}")
     if not note_tasks and need_update_note:
-        if DEBUG:
-            print(
-                "No word tasks were created, but we need to update the note with final_word_tuples"
-            )
+        logger.debug(
+            "No word tasks were created, but we need to update the note with final_word_tuples"
+        )
 
         # If we ended up skipping all word tuples, we still may need to update the note
         # Create a dummy task that'll trigger calling handle_return_word_tuples
@@ -1307,38 +1246,38 @@ def match_words_to_notes_for_note(
         get_progress (Callable[..., str]): Used for progress dialog updating
     """
     if not note:
-        print("Error: No note provided for matching words")
+        logger.error("Error: No note provided for matching words")
         return
 
     if not config:
-        print("Error: Missing addon configuration")
+        logger.error("Error: Missing addon configuration")
         return
 
     replace_existing = config.get("replace_existing_matched_words", False)
 
     note_type = note.note_type()
     if not note_type:
-        print(f"Error: Note {note.id} is missing note type")
+        logger.error(f"Error: Note {note.id} is missing note type")
         return
 
     furigana_sentence_field = get_field_config(config, "furigana_sentence_field", note_type)
     if not furigana_sentence_field:
-        print("Error: Missing sentence field in config")
+        logger.error("Error: Missing sentence field in config")
         return
 
     if furigana_sentence_field not in note:
-        print(f"Error: Note is missing the sentence field '{furigana_sentence_field}'")
+        logger.error(f"Error: Note is missing the sentence field '{furigana_sentence_field}'")
         return
     sentence = note[furigana_sentence_field]
     if not sentence:
-        print(f"Error: Note's sentence field '{furigana_sentence_field}' is empty")
+        logger.error(f"Error: Note's sentence field '{furigana_sentence_field}' is empty")
         return
 
     word_lists_to_process = config.get("word_lists_to_process", {})
     if not word_lists_to_process:
-        print("Error: No word lists to process in the config")
+        logger.error("Error: No word lists to process in the config")
     if not isinstance(word_lists_to_process, dict):
-        print("Error: Invalid word lists format in the config, expected a dictionary")
+        logger.error("Error: Invalid word lists format in the config, expected a dictionary")
         return
     # Filter the WORD_LISTS based on the config
     word_list_keys = [wl for wl in WORD_LISTS if word_lists_to_process.get(wl, False)]
@@ -1351,13 +1290,13 @@ def match_words_to_notes_for_note(
         try:
             word_list_dict = json.loads(note[word_list_field])
         except json.JSONDecodeError as e:
-            print(f"Error decoding JSON from word list field: {e}")
+            logger.error(f"Error decoding JSON from word list field: {e}")
             # tag note
             note.add_tag("invalid_word_list_json")
             updated_notes_dict[note.id] = note
             word_list_dict = {}
         if not isinstance(word_list_dict, dict):
-            print("Error: Invalid word list format in the note, expected a dictionary")
+            logger.error("Error: Invalid word list format in the note, expected a dictionary")
             return
 
         # Make a task for waiting for until all tasks for a single note are done before
@@ -1369,15 +1308,13 @@ def match_words_to_notes_for_note(
         ):
             await asyncio.gather(*all_note_tasks)
             if current_note.id in updated_notes_dict:
-                if DEBUG:
-                    print(f"Updating note {note.id} with new word list")
+                logger.debug(f"Updating note {note.id} with new word list")
                 current_note = updated_notes_dict[current_note.id]
                 edited_nids.append(current_note.id)
-            if DEBUG:
-                print(
-                    f"Updating note {note.id} with word list field '{word_list_field}'"
-                    f"with dict: {updated_word_list_dict}"
-                )
+            logger.debug(
+                f"Updating note {note.id} with word list field '{word_list_field}'"
+                f"with dict: {updated_word_list_dict}"
+            )
             current_note = updated_notes_dict.get(current_note.id, current_note)
             new_word_list = word_lists_str_format(updated_word_list_dict)
             if new_word_list is not None:
@@ -1389,10 +1326,9 @@ def match_words_to_notes_for_note(
 
         def make_word_list_updater(current_key):
             def update_function(updated_tuples: list[ProcessedWordTuple]):
-                if DEBUG:
-                    print(
-                        f"Updating word list for key '{current_key}' with tuples: {updated_tuples}"
-                    )
+                logger.debug(
+                    f"Updating word list for key '{current_key}' with tuples: {updated_tuples}"
+                )
                 word_list_dict[current_key] = [wt for wt in updated_tuples if wt is not None]
 
             return update_function
@@ -1410,7 +1346,9 @@ def match_words_to_notes_for_note(
                 else:
                     encountered_words.add(word)
             if not isinstance(word_tuples, list):
-                print(f"Error: Invalid word list format for key '{word_list_key}' in the note")
+                logger.error(
+                    f"Error: Invalid word list format for key '{word_list_key}' in the note"
+                )
                 continue
             update_word_list_in_dict = make_word_list_updater(word_list_key)
             match_words_to_notes(
@@ -1442,7 +1380,7 @@ def match_words_to_notes_for_note(
             )
         return
     else:
-        print(f"Error: Note is missing the word list field '{word_list_field}'")
+        logger.error(f"Error: Note is missing the word list field '{word_list_field}'")
         return
 
 
@@ -1467,7 +1405,7 @@ def bulk_match_words_to_notes(
     """
     config = mw.addonManager.getConfig(__name__)
     if not config:
-        print("Error: Missing addon configuration")
+        logger.error("Error: Missing addon configuration")
         return
     model = config.get("match_words_model", "")
     message = "Matching words"
