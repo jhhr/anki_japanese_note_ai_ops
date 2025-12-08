@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Union
+from typing import Union, Optional
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -217,7 +217,8 @@ MAX_ATTEMPTS = 5
 def kanjify_sentence_in_note(
     config: dict[str, str],
     note: Note,
-    notes_to_add_dict: dict[str, list[Note]] = {},
+    notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
+    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
     attempt: int = 1,
 ) -> bool:
     model = note.note_type()
@@ -302,7 +303,7 @@ def kanjify_sentence_in_note(
                             MAX_ATTEMPTS,
                         )
                         return kanjify_sentence_in_note(
-                            config, note, notes_to_add_dict, attempt + 1
+                            config, note, notes_to_add_dict, notes_to_update_dict, attempt + 1
                         )
                 elif note.has_tag("kanjify_sentence_mismatch"):
                     note.remove_tag("kanjify_sentence_mismatch")
@@ -320,6 +321,7 @@ def bulk_kanjify_notes_op(
     edited_nids: list[NoteId],
     progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: dict[str, list[Note]] = {},
+    notes_to_update_dict: dict[NoteId, Note] = {},
 ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
@@ -329,7 +331,16 @@ def bulk_kanjify_notes_op(
     message = "Kanjifying sentences"
     op = kanjify_sentence_in_note
     return bulk_notes_op(
-        message, config, op, col, notes, edited_nids, progress_updater, notes_to_add_dict, model
+        message,
+        config,
+        op,
+        col,
+        notes,
+        edited_nids,
+        progress_updater,
+        notes_to_add_dict,
+        notes_to_update_dict,
+        model,
     )
 
 

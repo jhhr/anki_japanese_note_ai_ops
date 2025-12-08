@@ -1,11 +1,11 @@
 import logging
+from typing import Optional, TypedDict
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
 from collections.abc import Sequence
-from typing import Dict
 
 from .base_ops import (
     get_response,
@@ -21,8 +21,163 @@ logger = logging.getLogger(__name__)
 mdx_helper = AnkiMDXHelper()
 
 
+def get_sentences_for_note(
+    config: dict[str, str],
+    note: Note,
+    exclude_self: bool = False,
+) -> list[str]:
+    note_type = note.note_type()
+    if not note_type:
+        logger.error(f"note_type() call failed for note {note.id}")
+        return []
+    word_list_field = get_field_config(config, "word_list_field", note_type)
+    sentence_field = get_field_config(config, "sentence_field", note_type)
+    other_sentence_note_ids = mw.col.find_notes(f'"{word_list_field}:*{note.id}*" -nid:{note.id}')
+    other_sentences = [] if exclude_self else [note[sentence_field]]
+    for onid in other_sentence_note_ids:
+        onote = mw.col.get_note(onid)
+        if sentence_field in onote and onote[sentence_field] not in other_sentences:
+            other_sentences.append(onote[sentence_field])
+    return other_sentences
+
+
+WordAndSentences = TypedDict(
+    "WordAndSentences",
+    {
+        "jp_meaning": str,
+        "en_meaning": str,
+        "sentences": list[str],
+    },
+)
+
+
+def update_all_meanings_for_word(
+    config: dict[str, str], word: str, reading: str, meanings_dict: dict[NoteId, WordAndSentences]
+) -> dict[NoteId, tuple[str, str]]:
+    """
+    Receive a list of current meanings and sentences for a word, and have an AI model rework the
+    meanings to better fit the sentences, using the dictionary definitions as reference.
+
+    param config: Addon configuration dictionary.
+    param word: The word or phrase being defined.
+    param reading: The reading of the word or phrase.
+    param meanings_dict: A dictionary mapping note IDs to their meanings and example sentences.
+    return: A dictionary mapping note IDs to tuples of (new_japanese_meaning, new_english_meaning).
+    """
+    if not meanings_dict:
+        return {}
+    mdx_helper.load_mdx_dictionaries_if_needed(config)
+    pick_dictionary = config.get("mdx_pick_dictionary", "all")
+
+    # We won't necessarily have a dictionary entry for the word so the prompt will differ slightly
+    # depending on whether we have one or not
+    dict_meaning_for_word = mdx_helper.get_definition_text(
+        word=word,
+        reading=reading,
+        pick_dictionary=pick_dictionary,
+    )
+    # Format current meanings and sentences for the prompt
+    meanings_and_sentences = ""
+    # Sorty by note id, smallest to largest, to have a consistent order
+    meanings_dict_items = list(meanings_dict.items())
+    meanings_dict_items.sort(key=lambda x: x[0])
+    meaning_index_to_note_id = {}
+    for i, (note_id, ws) in enumerate(meanings_dict_items):
+        meaning_index_to_note_id[i] = note_id
+        sentences_formatted = ""
+        if len(ws["sentences"]) > 0:
+            for sen in ws["sentences"]:
+                sentences_formatted += f"- {sen}\n"
+        else:
+            sentences_formatted = ""
+        meanings_and_sentences += f"""Meaning {i+1}:
+Japanese meaning: {ws['jp_meaning']}
+English meaning: {ws['en_meaning']}
+---
+Sentences:
+{sentences_formatted}
+"""
+    meaning_index_field = "meaning_index"
+    jp_meaning_return_field = "jp_meaning"
+    en_meaning_return_field = "en_meaning"
+
+    prompt = f"""{f'''Below is the dictionary entry for a word or phrase, along with currently used meanings for groups of sentences containing that word or phrase. Your task is to rework the meanings to better fit the usage in the sentences, using the dictionary entry as reference.
+For each meaning, either extract the relevant part from the dictionary entry, or rephrase it to better fit the sentences. Follow these rules:
+- Do not overfit the definitions to the sentences, but rather aim for general definitions that fit the usage in each sentence.
+- If the diciontary entry describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
+- If there are more than two usage patterns for this word or phrase, describe the one used in the sentences.
+- Omit any example sentences included in the dictionary entry (often included within 「」 brackets).
+- Shorten and simplify the meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
+''' if dict_meaning_for_word else f'''Below are currently used meanings for groups of sentences containing a certain word or phrase. Your task is to rework the meanings to better fit the usage in the sentences.
+Follow these rules:
+- Do not overfit the definitions to the sentences, but rather aim for general definitions that fit the usage in each sentence.
+- If there are two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
+- If there are more than two usage patterns for this word or phrase, describe the one used in the sentences.
+- Shorten and simplify the meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
+'''}
+
+Return a JSON array array of objects. Each object corresponds to a meaning and has the following fields:
+- "{meaning_index_field}": The index of the meaning (starting from 1).
+- "{jp_meaning_return_field}": The reworked Japanese meaning.
+- "{en_meaning_return_field}": The reworked English meaning.
+
+You do not need to rework all meanings, only those that seem not to fit well with the sentences; the array can be of any length, including empty if all meanings are fine.
+
+Example output format:
+[
+    {{"{meaning_index_field}": 1, "{jp_meaning_return_field}": "最初の意味の短い説明。", "{en_meaning_return_field}": "A short English translation of the first meaning."}},
+    {{"{meaning_index_field}": 3, "{jp_meaning_return_field}": "三番目の意味の短い説明。", "{en_meaning_return_field}": "A short English translation of the third meaning."}}
+]
+
+Word or phrase:
+{word}
+---{'''
+Dictionary entry:
+{dict_meaning_for_word}
+---
+''' if dict_meaning_for_word else ''}
+Current meanings and sentences:
+{meanings_and_sentences}"""
+    logger.debug(f"Prompt for updating meanings: {prompt}")
+
+    model = config.get("word_meaning_model", "")
+    result = get_response(model, prompt)
+    if result is None:
+        # Return nothing if the call failed
+        return {}
+    updated_meanings: dict[NoteId, tuple[str, str]] = {}
+    if isinstance(result, list):
+        for meaning_obj in result:
+            try:
+                assert (
+                    isinstance(meaning_obj, dict)
+                    and meaning_index_field in meaning_obj
+                    and isinstance(meaning_obj[meaning_index_field], int)
+                    and jp_meaning_return_field in meaning_obj
+                    and isinstance(meaning_obj[jp_meaning_return_field], str)
+                    and meaning_obj[jp_meaning_return_field].strip() != ""
+                    and en_meaning_return_field in meaning_obj
+                    and isinstance(meaning_obj[en_meaning_return_field], str)
+                    and meaning_obj[en_meaning_return_field].strip() != ""
+                )
+            except AssertionError:
+                logger.warning(f"Invalid meaning object in result: {meaning_obj}")
+                continue
+            meaning_index = meaning_obj[meaning_index_field] - 1
+            note_id = meaning_index_to_note_id.get(meaning_index)
+            if note_id is not None:
+                updated_meanings[note_id] = (
+                    meaning_obj[jp_meaning_return_field],
+                    meaning_obj[en_meaning_return_field],
+                )
+            else:
+                logger.warning(f"Meaning index {meaning_index+1} has no corresponding note ID")
+    logger.debug(f"Updated meanings: {updated_meanings}")
+    return updated_meanings
+
+
 def get_single_meaning_from_model(
-    config: Dict[str, str],
+    config: dict[str, str],
     vocab: str,
     sentences: list[str],
     jp_dict_entry: str,
@@ -59,14 +214,17 @@ Return a JSON object with two fields:
 Return the extracted and possibly modified Japanese meaning as the value of the key "{jp_meaning_return_field}".
 Return the possibly modified English meaning as the value of the key "{en_meaning_return_field}".
 
-Word or phrase: {vocab}
+Word or phrase:
+{vocab}
 ---
-Sentence{'s' if len(sentences) > 1 else ''}: {sentences_formatted}
+Sentence{'s' if len(sentences) > 1 else ''}:
+{sentences_formatted}
 ---
-Japanese dictionary entry: {jp_dict_entry}
+Japanese dictionary entry:
+{jp_dict_entry}
 """
     if en_dict_entry:
-        prompt += f"---\nEnglish dictionary entry: {en_dict_entry}\n"
+        prompt += f"---\nEnglish dictionary entry:\n{en_dict_entry}\n"
     logger.debug(f"Prompt for cleaning meaning: {prompt}")
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
@@ -80,7 +238,7 @@ Japanese dictionary entry: {jp_dict_entry}
 
 
 def get_new_meaning_from_model(
-    config: Dict[str, str],
+    config: dict[str, str],
     vocab: str,
     sentences: list[str],
 ) -> tuple[str, str]:
@@ -103,7 +261,7 @@ def get_new_meaning_from_model(
 The definition should be in the same language as the sentence. Also, generate a very short English translation of the meaning, ideally a list of equivalent words or phrases but explaining further, if necessary.
 
 Return a JSON object with two fields:
-Return the meaning ias the value of the key "{jp_meaning_return_field}".
+Return the meaning as the value of the key "{jp_meaning_return_field}".
 Return the English translation as the value of the key "{en_meaning_return_field}".
 
 Word or phrase: {vocab}
@@ -130,9 +288,10 @@ Sentence{'s' if len(sentences) > 1 else ''}: {sentences_formatted}
 
 
 def clean_meaning_in_note(
-    config: Dict[str, str],
+    config: dict[str, str],
     note: Note,
-    notes_to_add_dict: Dict[str, list[Note]],
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
@@ -143,9 +302,10 @@ def clean_meaning_in_note(
         meaning_field = get_field_config(config, "meaning_field", note_type)
         english_meaning_field = get_field_config(config, "english_meaning_field", note_type)
         word_field = get_field_config(config, "word_field", note_type)
+        word_sort_field = get_field_config(config, "word_sort_field", note_type)
+        word_normal_field = get_field_config(config, "word_normal_field", note_type)
         word_reading_field = get_field_config(config, "word_reading_field", note_type)
         sentence_field = get_field_config(config, "sentence_field", note_type)
-        word_list_field = get_field_config(config, "word_list_field", note_type)
     except KeyError as e:
         logger.error(str(e))
         return False
@@ -157,13 +317,6 @@ def clean_meaning_in_note(
     logger.debug(f"word_reading_field in note: {word_reading_field in note}")
     logger.debug(f"sentence_field in note: {sentence_field in note}")
 
-    # Find other notes with the same word
-    other_note_ids = mw.col.find_notes(f'"{word_list_field}:*{note.id}*" -nid:{note.id}')
-    other_sentences = []
-    for onid in other_note_ids:
-        onote = mw.col.get_note(onid)
-        if sentence_field in onote and onote[sentence_field] not in other_sentences:
-            other_sentences.append(onote[sentence_field])
     # Check if the note has the required fields
     if (
         meaning_field in note
@@ -172,11 +325,56 @@ def clean_meaning_in_note(
         and word_reading_field in note
         and sentence_field in note
     ):
+        logger.debug(f"notes_to_update_dict: {notes_to_update_dict is not None}")
+        if notes_to_update_dict is not None:
+            if note.id in notes_to_update_dict:
+                logger.debug(
+                    f"Skipping note {note.id} as it's already marked for update by a previous op"
+                )
+                return False
+            meaning_notes_query = (
+                f"{word_sort_field}:re:m\\d+ -{word_sort_field}:re:x\\d+"
+                f' -nid:{note.id} "{word_reading_field}:{note[word_reading_field]}"'
+                f' ("{word_normal_field}:{note[word_normal_field]}" OR'
+                f' "{word_field}:{note[word_field]}")'
+            )
+            other_meaning_note_ids = mw.col.find_notes(meaning_notes_query)
+            all_meaning_notes = [mw.col.get_note(onid) for onid in other_meaning_note_ids]
+            all_meaning_notes.append(note)
+
+            logger.debug(
+                f"All meaning notes count: {len(all_meaning_notes)}, query: {meaning_notes_query}"
+            )
+
+            if len(all_meaning_notes) > 1:
+                meaning_sentences_dict = {}
+                for n in all_meaning_notes:
+                    meaning_sentences_dict[n.id] = WordAndSentences(
+                        jp_meaning=n[meaning_field],
+                        en_meaning=n[english_meaning_field],
+                        sentences=get_sentences_for_note(config, n),
+                    )
+                updated_meanings_dict = update_all_meanings_for_word(
+                    config,
+                    note[word_field],
+                    note[word_reading_field],
+                    meaning_sentences_dict,
+                )
+                any_changed = False
+                for n in all_meaning_notes:
+                    if n.id in updated_meanings_dict:
+                        new_jp_meaning, new_en_meaning = updated_meanings_dict[n.id]
+                        prev_en_meaning = n[english_meaning_field]
+                        prev_jp_meaning = n[meaning_field]
+                        n[meaning_field] = new_jp_meaning
+                        n[english_meaning_field] = new_en_meaning
+                        if new_jp_meaning != prev_jp_meaning or new_en_meaning != prev_en_meaning:
+                            any_changed = True
+                            notes_to_update_dict[n.id] = n
+                return any_changed
 
         mdx_helper.load_mdx_dictionaries_if_needed(config)
-
         pick_dictionary = config.get("mdx_pick_dictionary", "all")
-
         # Get dictionary entry from mdx helper
         jp_dict_entry = mdx_helper.get_definition_text(
             word=note[word_field],
@@ -185,7 +383,7 @@ def clean_meaning_in_note(
         )
         prev_en_meaning = note[english_meaning_field]
         word = note[word_field]
-        sentences = [note[sentence_field]] + other_sentences
+        sentences = get_sentences_for_note(config, note)
         # Check if the value is non-empty
         if jp_dict_entry:
             # Call API to get single meaning from the raw dictionary entry
@@ -219,7 +417,8 @@ def bulk_clean_notes_op(
     notes: Sequence[Note],
     edited_nids: list,
     progress_updater: AsyncTaskProgressUpdater,
-    notes_to_add_dict: Dict[str, list[Note]] = {},
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
 ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
@@ -229,7 +428,16 @@ def bulk_clean_notes_op(
     message = "Cleaning meaning"
     op = clean_meaning_in_note
     return bulk_notes_op(
-        message, config, op, col, notes, edited_nids, progress_updater, notes_to_add_dict, model
+        message,
+        config,
+        op,
+        col,
+        notes,
+        edited_nids,
+        progress_updater,
+        notes_to_add_dict=notes_to_add_dict,
+        notes_to_update_dict=notes_to_update_dict,
+        model=model,
     )
 
 
