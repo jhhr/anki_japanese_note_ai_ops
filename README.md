@@ -12,4 +12,38 @@ Prompts:
 
 ## Installing dependencies
 
-Run `pip3 install --upgrade -t lib --no-cache-dir --python-version 3.9 --only-binary=:all: -r requirements.txt`
+First install mdict-query manually from GitHub (repo has no setup.py):
+
+**Windows (PowerShell):**
+
+```powershell
+cd lib
+New-Item -ItemType Directory -Force -Path mdict_query
+cd mdict_query
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mmjang/mdict-query/master/mdict_query.py" -OutFile "__init__.py"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mmjang/mdict-query/master/readmdict.py" -OutFile "readmdict.py"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mmjang/mdict-query/master/ripemd128.py" -OutFile "ripemd128.py"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mmjang/mdict-query/master/pureSalsa20.py" -OutFile "pureSalsa20.py"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mmjang/mdict-query/master/lzo.py" -OutFile "lzo.py"
+cd ..\..
+```
+
+**Linux/macOS:**
+
+```bash
+cd lib
+mkdir -p mdict_query
+cd mdict_query
+curl -o __init__.py https://raw.githubusercontent.com/mmjang/mdict-query/master/mdict_query.py
+curl -O https://raw.githubusercontent.com/mmjang/mdict-query/master/readmdict.py
+curl -O https://raw.githubusercontent.com/mmjang/mdict-query/master/ripemd128.py
+curl -O https://raw.githubusercontent.com/mmjang/mdict-query/master/pureSalsa20.py
+curl -O https://raw.githubusercontent.com/mmjang/mdict-query/master/lzo.py
+cd ../..
+```
+
+Then install other dependencies:
+
+```bash
+pip3 install --upgrade -t lib --no-cache-dir --python-version 3.9 --only-binary=:all: -r requirements.txt
+```
