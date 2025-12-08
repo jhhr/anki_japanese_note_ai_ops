@@ -861,8 +861,9 @@ async def bulk_nested_notes_op(
     edited_nids: list[NoteId],
     progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
     model: str = "",
-) -> tuple[list[Note], int, dict[str, list[Note]]]:
+) -> tuple[list[Note], int, dict[str, list[Note]], dict[NoteId, Note]]:
     """
     Perform a bulk operation on a sequence of notes, with multiple nested async operations occurring
     per note instead of just one. Otherwise similar to `bulk_notes_op` except this cannot be
@@ -881,16 +882,15 @@ async def bulk_nested_notes_op(
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     if not model:
         logger.error("Model arg missing in bulk_nested_notes_op, aborting")
-        return [], pos, {}
+        return [], pos, {}, {}
     config["rate_limits"] = config.get("rate_limits", {})
     rate_limit = config["rate_limits"].get(model, None)
-    updated_notes_dict: dict[NoteId, Note] = {}
 
     progress_updater.set_total_notes(len(notes))
 
     if not rate_limit:
         logger.error("No rate limit set for model, can't run nested async op")
-        return [], pos, {}
+        return [], pos, {}, {}
     else:
         tasks: list[asyncio.Task] = []
 
@@ -906,7 +906,7 @@ async def bulk_nested_notes_op(
                 tasks,
                 edited_nids=edited_nids,
                 notes_to_add_dict=notes_to_add_dict,
-                updated_notes_dict=updated_notes_dict,
+                notes_to_update_dict=notes_to_update_dict,
                 progress_updater=progress_updater,
                 cancel_state=cancel_state,
             )
@@ -939,11 +939,11 @@ async def bulk_nested_notes_op(
 
         if cancel_manager.is_cancel_requested():
             logger.debug("Bulk operation was cancelled, returning results so far")
-            updated_notes = list(updated_notes_dict.values())
-            return updated_notes, pos, notes_to_add_dict
+            updated_notes = list(notes_to_update_dict.values())
+            return updated_notes, pos, notes_to_add_dict, notes_to_update_dict
 
-    updated_notes = list(updated_notes_dict.values())
-    return updated_notes, pos, notes_to_add_dict
+    updated_notes = list(notes_to_update_dict.values())
+    return updated_notes, pos, notes_to_add_dict, notes_to_update_dict
 
 
 def sync_bulk_notes_op(

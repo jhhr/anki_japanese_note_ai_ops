@@ -368,6 +368,7 @@ def clean_meaning_in_note(
                         prev_jp_meaning = n[meaning_field]
                         n[meaning_field] = new_jp_meaning
                         n[english_meaning_field] = new_en_meaning
+                        n.add_tag("updated_jp_meaning")
                         if new_jp_meaning != prev_jp_meaning or new_en_meaning != prev_en_meaning:
                             any_changed = True
                             notes_to_update_dict[n.id] = n
