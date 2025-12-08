@@ -1,4 +1,7 @@
 import traceback
+import logging
+from typing import Optional
+
 from anki.notes import Note
 from anki.models import NotetypeDict
 
@@ -31,9 +34,14 @@ def copy_into_new_note(note: Note) -> Note:
     return new_copy
 
 
-def print_error_traceback(e: Exception):
+def print_error_traceback(e: Exception, logger_instance: Optional[logging.Logger] = None):
     """Print the traceback of an exception without triggering Anki to display an error dialog."""
     tb_lines = traceback.format_tb(e.__traceback__)
-    print("Traceback:")
-    for line in tb_lines:
-        print(line.rstrip())
+    if logger_instance:
+        logger_instance.error("Traceback:")
+        for line in tb_lines:
+            logger_instance.error(line.rstrip())
+    else:
+        print("Traceback:")
+        for line in tb_lines:
+            print(line.rstrip())

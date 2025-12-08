@@ -1147,7 +1147,7 @@ _Current sentence_: {sentence}"""
 
         def handle_op_error(e: Exception):
             logger.error(f"Error processing word tuple {word_tuple} at index {i}: {e}")
-            print_error_traceback(e)
+            print_error_traceback(e, logger)
 
         handle_op_result = create_result_handler(i, word)
 

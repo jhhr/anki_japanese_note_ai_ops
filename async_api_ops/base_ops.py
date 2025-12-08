@@ -1021,7 +1021,7 @@ async def bulk_notes_op(
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     config["rate_limits"] = config.get("rate_limits", {})
     if not model:
-        print("Model arg missing in bulk_notes_op, aborting")
+        logger.error("Model arg missing in bulk_notes_op, aborting")
         return None
     rate_limit = config["rate_limits"].get(model, None)
 
@@ -1059,7 +1059,7 @@ async def bulk_notes_op(
         # adding the same note to
         def handle_error(current_note, e):
             logger.error(f"Error during operation with note {current_note.id}: {e}")
-            print_error_traceback(e)
+            print_error_traceback(e, logger)
 
         handle_op_error = partial(
             lambda current_note, e: handle_error(current_note, e),
@@ -1220,8 +1220,8 @@ def selected_notes_op(
             try:
                 mw.col.update_notes(updated_notes)
             except Exception as e:
-                print(f"Error updating notes: {e}")
-                print_error_traceback(e)
+                logger.error(f"Error updating notes: {e}")
+                print_error_traceback(e, logger)
             op_changes = mw.col.merge_undo_entries(pos)
             notes_to_add = []
             if notes_to_add_dict:
@@ -1261,7 +1261,7 @@ def selected_notes_op(
                         op_changes = mw.col.merge_undo_entries(pos)
                     except Exception as e:
                         logger.error(f"Error adding note {index}: {e}")
-                        print_error_traceback(e)
+                        print_error_traceback(e, logger)
                         failed_cnt += 1
 
                     progress_updater.update_note_adding_progress(
@@ -1303,7 +1303,7 @@ def selected_notes_op(
                             mw.col.update_notes(valid_notes)
                         except Exception as e:
                             logger.error(f"Error updating valid notes after new_notes_op: {e}")
-                            print_error_traceback(e)
+                            print_error_traceback(e, logger)
                         op_changes = mw.col.merge_undo_entries(pos)
                         edited_nids.extend(
                             [note.id for note in valid_notes if note.id not in edited_nids]
