@@ -1,7 +1,7 @@
-Simple Anki addon for some custom AI prompts I use.
+A rather complicated Anki addon for some custom AI prompts I use.
 
-- Provides a framework of functions to use for adding new prompts.
-- Prompts are available in right-click menu of notes in Anki's card browser
+- Provides a framework of functions to use for adding new prompts. API calls are done asynchronously in parallel so hundreds of prompts can be run as fast the model's rate limit allows.
+- Prompts are available in right-click menu of notes in Anki's card browser and some run automatically when editing a field or adding a note.
 
 Prompts:
 
