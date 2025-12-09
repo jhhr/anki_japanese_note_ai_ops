@@ -207,8 +207,11 @@ def run_op_on_add_note(note: Note):
             logger.info("Skipping ops for note with 'new_matched_jp_word' tag")
             return
         notes_to_update_dict: dict[NoteId, Note] = {}
-        clean_meaning_in_note(config, note, {})
-        extract_words_in_note(config, note, {})
+        try:
+            clean_meaning_in_note(config, note, {})
+            extract_words_in_note(config, note, {})
+        except Exception as e:
+            logger.error(f"Error in clean_meaning_in_note or extract_words_in_note: {e}", exc_info=True)
         if notes_to_update_dict:
             updated_notes = list(notes_to_update_dict.values())
             # Filter out the added note itself from the updated notes
