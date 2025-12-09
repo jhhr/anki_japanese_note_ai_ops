@@ -576,7 +576,7 @@ The first meaning is a good match, but its English and Japanese are modified to 
 }
 ```
 
-**Example 2: CREATE NEW
+**Example 2: CREATE NEW**
 None of the meanings fit, so you create a new one.
 ```json
 {
