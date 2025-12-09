@@ -194,6 +194,7 @@ More details on the categorization
 - A word occuring twice or more with the same kanji form and reading needs to considered for homonymity. If it is a used in the same meaning, the word should be listed just once. If the meanings differ, the word listed once for each different meaning, with a 1-based index number included to differentiate them. For example, 行く as "physically move to a place" vs "participate in an activity" vs "reach a point (in an activity, not physical place)".
 - Note, homonym listing of individual can only be done, if a word actually occurs more than once.
 - Additionally, a word occuring twice with the same meaning but, for some reason in kanji form and in hiragana, should result in one entry using the kanji form.
+- Ensure that you use the correct base reading for words, not a rendaku or otherwise altered reading. For example, 中 used as a suffix can often be じゅう but the base reading is ちゅう.
 
 
 Example sentence 1: 私[わたし]も<b> 連[つ]れて 行[い]って</b><k> 下[くだ]さい</k>。
@@ -591,6 +592,28 @@ Example results 19:
   "conjunctions": [],
   "prefixes": []
 }}
+
+Example sentence 20:  世界中[せかいじゅう]の 言語[げんご]は<k> 幾[いく]つ</k>かの<b> 類型[るいけい]</b>に 分類[ぶんるい]<k> 為[さ]れる</k>。
+Example results 20:
+{{
+  "nouns": [["世界", "せかい"], ["分類", "ぶんるい"], ["言語", "げんご"], ["類型", "るいけい"]],
+  "proper_nouns": [],
+  "verbs": [],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["に", "に"], ["の", "の"], ["は", "は"]],
+  "pronouns": [],
+  "suffixes": [["中", "ちゅう"]],
+  "expressions": [],
+  "yojijukugo": [],
+  "numbers": [],
+  "counters": [],
+  "conjunctions": [],
+  "prefixes": []
+}}
+    
 
 Return only the JSON formatted result containing all properties with at least empty arrays. Values inside the arrays must be arrays of two strings, or two strings and one number for multi-meaning words.
 
