@@ -78,7 +78,7 @@ def update_all_meanings_for_word(
     )
     # Format current meanings and sentences for the prompt
     meanings_and_sentences = ""
-    # Sorty by note id, smallest to largest, to have a consistent order
+    # Sort by note id, smallest to largest, to have a consistent order
     meanings_dict_items = list(meanings_dict.items())
     meanings_dict_items.sort(key=lambda x: x[0])
     meaning_index_to_note_id = {}
@@ -104,7 +104,7 @@ Sentences:
     prompt = f"""{f'''Below is the dictionary entry for a word or phrase, along with currently used meanings for groups of sentences containing that word or phrase. Your task is to rework the meanings to better fit the usage in the sentences, using the dictionary entry as reference.
 For each meaning, either extract the relevant part from the dictionary entry, or rephrase it to better fit the sentences. Follow these rules:
 - Do not overfit the definitions to the sentences, but rather aim for general definitions that fit the usage in each sentence.
-- If the diciontary entry describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
+- If the dictionary entry describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
 - If there are more than two usage patterns for this word or phrase, describe the one used in the sentences.
 - Omit any example sentences included in the dictionary entry (often included within 「」 brackets).
 - Shorten and simplify the meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.

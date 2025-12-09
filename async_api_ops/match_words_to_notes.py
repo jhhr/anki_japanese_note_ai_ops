@@ -740,7 +740,7 @@ _Current sentence_: {sentence}"""
 
         if not is_matched_meaning and not jp_meaning and not en_meaning:
             logger.debug(
-                "Error: Meaning meaning action is not a match and is not modifying"
+                "Error: Meaning action is not a match and is not modifying"
                 f" either meaning. Result: {meaning_action}"
             )
             return False
