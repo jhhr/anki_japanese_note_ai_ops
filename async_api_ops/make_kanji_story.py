@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import Optional
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -7,7 +8,6 @@ from aqt.browser import Browser
 from aqt.utils import showWarning
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict
 
 from .base_ops import (
     get_response,
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_kanji_story_from_model(
-    config: Dict[str, str],
+    config: dict[str, str],
     kanji: str,
     components: str,
     current_story: str,
@@ -134,9 +134,10 @@ def get_kanji_story_from_model(
 
 
 def make_story_for_note(
-    config: Dict[str, str],
+    config: dict[str, str],
     note: Note,
-    notes_to_add_dict: Dict[str, list[Note]] = {},
+    notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
+    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
 ) -> bool:
     model = note.note_type()
     if not model:
@@ -184,7 +185,8 @@ def bulk_make_stories_op(
     notes: Sequence[Note],
     edited_nids: list[NoteId],
     progress_updater: AsyncTaskProgressUpdater,
-    notes_to_add_dict: Dict[str, list[Note]] = {},
+    notes_to_add_dict: dict[str, list[Note]] = {},
+    notes_to_update_dict: dict[NoteId, Note] = {},
 ):
     config = mw.addonManager.getConfig(__name__)
     if not config:
@@ -194,7 +196,16 @@ def bulk_make_stories_op(
     message = "Updated stories"
     op = make_story_for_note
     return bulk_notes_op(
-        message, config, op, col, notes, edited_nids, progress_updater, notes_to_add_dict, model
+        message,
+        config,
+        op,
+        col,
+        notes,
+        edited_nids,
+        progress_updater,
+        notes_to_add_dict,
+        notes_to_update_dict,
+        model,
     )
 
 

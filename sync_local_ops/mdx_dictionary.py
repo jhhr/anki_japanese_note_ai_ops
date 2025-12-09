@@ -1,8 +1,14 @@
 import logging
 from typing import Any, Literal, Optional, TypedDict, Union
-from mdict_utils.base.readmdict import MDX  # type: ignore
 import os
 import time
+import sqlite3
+
+try:
+    from mdict_query import IndexBuilder  # type: ignore
+except ImportError:
+    IndexBuilder = None
+    print("mdict-query library not available, see README for installation instructions")
 
 from ..html_stripping import strip_html_advanced
 from ..configuration import ADDON_USER_FILES_DIR
@@ -11,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class MDXDictionary:
-    """Efficient MDX dictionary querying using mdict-utils"""
+    """Efficient MDX dictionary querying using mdict-query's IndexBuilder"""
 
     def __init__(self, mdx_path: str):
         """
@@ -20,88 +26,94 @@ class MDXDictionary:
         Args:
             mdx_path: Path to .mdx file
         """
+        if IndexBuilder is None:
+            raise ImportError(
+                "mdict-query library not available, see README for installation instructions"
+            )
+
         self.mdx_path = mdx_path
         start_time = time.time()
         print(f"Loading MDX file: {os.path.basename(mdx_path)}...")
-        self.mdx: MDX = MDX(mdx_path)
+
+        # IndexBuilder automatically creates a SQLite index for fast lookups
+        # It will reuse existing .mdx.db file if available
+        self.builder = IndexBuilder(mdx_path, sql_index=True, check=False)
+
         elapsed = time.time() - start_time
         print(f"Loaded MDX file: {os.path.basename(mdx_path)} in {elapsed:.2f}s")
-        self._build_index()
-
-    def _build_index(self):
-        """Build an in-memory index for fast lookups"""
-        start_time = time.time()
-        print(f"Building index for {os.path.basename(self.mdx_path)}...")
-        self.index: dict[str, str] = {}
-        entry_count = 0
-        for key, value in self.mdx.items():
-            # Decode bytes to strings if necessary
-            if isinstance(key, bytes):
-                try:
-                    key = key.decode("utf-8")
-                except UnicodeDecodeError:
-                    try:
-                        key = key.decode("latin-1")
-                    except Exception:
-                        key = key.decode("utf-8", errors="replace")
-            if isinstance(value, bytes):
-                try:
-                    value = value.decode("utf-8")
-                except UnicodeDecodeError:
-                    try:
-                        value = value.decode("latin-1")
-                    except Exception:
-                        value = value.decode("utf-8", errors="replace")
-
-            self.index[key] = value
-            entry_count += 1
-        elapsed = time.time() - start_time
-        print(f"    indexed {entry_count} entries in {elapsed:.2f}s")
+        print(f"    Dictionary: {self.builder._title}")
+        print(
+            "    Description:"
+            f" {self.builder._description[:100] if self.builder._description else 'N/A'}"
+        )
 
     def query(
         self,
-        word: str,
+        query: Union[str, list[str]],
         strip_html_tags: bool = False,
         preserve_structure: bool = False,
-        _visited: Optional[set[str]] = None,
+        ignorecase: bool = True,
+        match_whole_word: bool = False,
     ) -> Union[str, None]:
         """
-        Query a single word
+        Query a single word using mdict-query's smart lookup
 
         Args:
-            word: The word to look up
+            query: The word or list of words to look up. If a list is provided, will perform
+                   a lookup for keys containing all words (using SQL LIKE for partial matching).
             strip_html_tags: If True, remove HTML tags from result
             preserve_structure: If True and strip_html_tags=True, preserve line breaks
-            _visited: Internal parameter to track visited links and prevent infinite recursion
+            ignorecase: If True, perform case-insensitive lookup (default: True)
+            match_whole_word: If True and query is a list, only match keys where each word
+                             appears as a complete unit (not as part of a longer word)
 
         Returns:
             HTML or plain text definition string, or None if not found
         """
+        logger.debug(f"Querying MDX dictionary {os.path.basename(self.mdx_path)} for: {query}")
+        try:
+            # If query is a list, find keys containing all the words
+            if isinstance(query, list):
+                matching_keys = self._find_keys_containing_all_words(query, match_whole_word)
+                if not matching_keys:
+                    logger.debug(
+                        f"No keys found containing all words: {query} in"
+                        f" {os.path.basename(self.mdx_path)}"
+                    )
+                    return None
 
-        # Check for infinite recursion
-        if _visited is not None and word in _visited:
-            logger.warning(f"Circular reference detected for '{word}'")
+                # Collect all matching entries
+                all_results = []
+                for key in matching_keys:
+                    entry_result = self.builder.mdx_lookup(key, ignorecase=False)
+                    if entry_result:
+                        all_results.extend(entry_result)
+
+                if not all_results:
+                    return None
+
+                result = "\n\n".join(result for result in all_results if result)
+            else:
+                # Single word lookup using mdict-query's built-in method
+                # mdx_lookup returns a list of matching results
+                # With ignorecase=True, it will find matches regardless of case
+                results = self.builder.mdx_lookup(query, ignorecase=ignorecase)
+
+                if not results:
+                    logger.debug(f"Word '{query}' not found in {os.path.basename(self.mdx_path)}")
+                    return None
+
+                # Take all results and join them
+                result = "\n".join(result for result in results if result)
+
+            if strip_html_tags:
+                result = strip_html_advanced(result, preserve_structure)
+
+            logger.debug(f"Query result for '{query}': {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Error querying '{query}': {e}")
             return None
-
-        # Try exact match first
-        if word in self.index:
-            result = self.index[word]
-        else:
-            logger.debug(f"Word '{word}' not found in index for {os.path.basename(self.mdx_path)}")
-            return None
-
-        if result.startswith("@@@LINK="):
-            if _visited is None:
-                _visited = set()
-            # Handle cross-reference links
-            link_key = result[len("@@@LINK=") :].strip()
-            _visited.add(word)
-            return self.query(link_key, strip_html_tags, preserve_structure, _visited)
-
-        if strip_html_tags:
-            result = strip_html_advanced(result, preserve_structure)
-
-        return result
 
     def query_japanese(
         self,
@@ -122,31 +134,140 @@ class MDXDictionary:
         Returns:
             HTML or plain text definition string, or None if not found
         """
-        # Strategy 1: Try the word as-is
-        result = self.query(word, strip_html_tags, preserve_structure)
-        if result:
-            return result
-
-        # Strategy 2: If a reading was provided, try it
+        # Strategy 1: If both word and reading provided, search for entries containing both
+        # This handles formats like "reading【kanji】" common in Japanese dictionaries
         if reading and reading != word:
-            result = self.query(reading, strip_html_tags, preserve_structure)
+            result = self.query(
+                [word, reading],
+                strip_html_tags,
+                preserve_structure,
+                ignorecase=False,
+                match_whole_word=True,
+            )
             if result:
                 return result
 
+            # Strategy 2: Try to find partial matches using wildcard search
+            # This helps with Japanese dictionaries that have compound entries
+            try:
+                keys = self.get_keys_by_prefix(reading)
+                if keys:
+                    # Filter keys that contain the word
+                    filtered_keys = [k for k in keys if word in k]
+                    if filtered_keys:
+                        all_results = []
+                        for key in filtered_keys:
+                            entry_result = self.query(
+                                key, strip_html_tags, preserve_structure, ignorecase=False
+                            )
+                            if entry_result:
+                                all_results.append(entry_result)
+
+                        if all_results:
+                            return "\n\n".join(all_results)
+            except Exception as e:
+                logger.debug(f"Wildcard search failed for '{word}': {e}")
+
+        # Strategy 3: Try just the word
+        result = self.query(word, strip_html_tags, preserve_structure, ignorecase=True)
+        if result:
+            return result
+
+        # Strategy 4: If no result yet, try just the reading
+        if reading and reading != word:
+            result = self.query(reading, strip_html_tags, preserve_structure, ignorecase=True)
+            if result:
+                return result
+
+        # Nothing worked
         return None
 
-    def get_keys_by_prefix(self, prefix: str) -> list[str]:
+    def _find_keys_containing_all_words(
+        self, words: list[str], match_whole_word: bool = False
+    ) -> list[str]:
         """
-        Get all dictionary keys starting with prefix
+        Find dictionary keys that contain all specified words
 
         Args:
-            prefix: Prefix to search for
+            words: List of words/strings that must all appear in the key
+            match_whole_word: If True, only match keys where each word appears as a complete
+                             unit (not as part of a longer word). Uses regex-like word boundary
+                             logic where word characters are separated by non-word characters.
 
         Returns:
             List of matching keys
         """
-        prefix_lower = prefix.lower()
-        return [key for key in self.index.keys() if key.lower().startswith(prefix_lower)]
+        try:
+            # Query the SQLite index for keys containing all words
+            db_path = self.builder._mdx_db
+            if not os.path.exists(db_path):
+                return []
+
+            with sqlite3.connect(db_path) as conn:
+                if match_whole_word:
+                    # Get candidate keys using LIKE for initial filtering
+                    conditions = " AND ".join(["key_text LIKE ?"] * len(words))
+                    sql = f"SELECT key_text FROM MDX_INDEX WHERE {conditions}"
+                    params = tuple(f"%{word}%" for word in words)
+
+                    cursor = conn.execute(sql, params)
+                    candidate_keys = [row[0] for row in cursor.fetchall()]
+
+                    # Filter to only keys where each word appears as a complete unit
+                    # A word is complete if it's not preceded or followed by other word characters
+                    import re
+
+                    filtered_keys = []
+                    for key in candidate_keys:
+                        all_words_match = True
+                        for word in words:
+                            # Create pattern that matches word with word boundaries
+                            # Word boundary = start/end of string or non-alphanumeric character
+                            # Escape special regex characters in the word
+                            escaped_word = re.escape(word)
+                            # Match word that is either at boundaries or surrounded by non-word chars
+                            # Using lookahead/lookbehind for zero-width boundary assertions
+                            pattern = f"(?<![a-zA-Z0-9ぁ-ゟァ-ヿ一-龯]){escaped_word}(?![a-zA-Z0-9ぁ-ゟァ-ヿ一-龯])"
+                            if not re.search(pattern, key):
+                                all_words_match = False
+                                break
+
+                        if all_words_match:
+                            filtered_keys.append(key)
+
+                    return filtered_keys
+                else:
+                    # Standard partial matching with LIKE
+                    conditions = " AND ".join(["key_text LIKE ?"] * len(words))
+                    sql = f"SELECT key_text FROM MDX_INDEX WHERE {conditions}"
+                    params = tuple(f"%{word}%" for word in words)
+
+                    cursor = conn.execute(sql, params)
+                    keys = [row[0] for row in cursor.fetchall()]
+                    return keys
+        except Exception as e:
+            logger.error(f"Error searching for keys containing all words {words}: {e}")
+            return []
+
+    def get_keys_by_prefix(self, prefix: str, max_results: int = 10) -> list[str]:
+        """
+        Get all dictionary keys starting with prefix using SQL LIKE query
+
+        Args:
+            prefix: Prefix to search for
+            max_results: Maximum number of results to return
+
+        Returns:
+            List of matching keys
+        """
+        try:
+            # Use wildcard pattern for prefix search
+            pattern = f"{prefix}*"
+            keys = self.builder.get_mdx_keys(pattern)
+            return keys[:max_results] if keys else []
+        except Exception as e:
+            logger.error(f"Error getting keys by prefix '{prefix}': {e}")
+            return []
 
     def query_multiple(
         self,
@@ -199,9 +320,13 @@ class MultiDictionaryQuery:
         for path in mdx_paths:
             if os.path.exists(path):
                 try:
-                    self.dictionaries.append(
-                        {"path": path, "name": os.path.basename(path), "dict": MDXDictionary(path)}
-                    )
+                    mdx_dict = MDXDictionary(path)
+                    dict_entry: MDXDictionaryEntry = {
+                        "path": path,
+                        "name": mdx_dict.builder._title or os.path.basename(path),
+                        "dict": mdx_dict,
+                    }
+                    self.dictionaries.append(dict_entry)
                 except Exception as e:
                     print(f"Failed to load MDX file {path}: {e}")
             else:
@@ -248,7 +373,7 @@ class MultiDictionaryQuery:
     def query_all_japanese(
         self,
         word: str,
-        reading: Union[str, None] = None,
+        reading: Optional[str] = None,
         strip_html_tags: bool = False,
         preserve_structure: bool = False,
         pick_dictionary: PickDictionaryResult = "all",

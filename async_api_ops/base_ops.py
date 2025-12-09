@@ -760,11 +760,16 @@ def make_inner_bulk_op(
 
     # Wrapper function to process a single note
     async def process_op(
-        task_index: int, notes_to_add_dict: dict[str, list[Note]], **op_args
+        task_index: int,
+        notes_to_add_dict: dict[str, list[Note]],
+        notes_to_update_dict: dict[NoteId, Note],
+        **op_args,
     ) -> bool:
         """Process a single operation with rate limiting and progress tracking.
         Args:
             task_index (int): The index of the task being processed.
+            notes_to_add_dict (dict[str, list[Note]]): Dictionary of notes to add.
+            notes_to_update_dict (dict[NoteId, Note]): Dictionary of notes to update.
             **op_args: Additional keyword arguments to pass to the operation function.
         Returns:
             bool: The result of the operation, True if successful, False otherwise.
@@ -803,7 +808,12 @@ def make_inner_bulk_op(
                             if mw.progress.want_cancel() or cancel_state.is_cancelled():
                                 logger.debug("Inner process op: cancellation requested")
                                 return False
-                            return op(config, notes_to_add_dict=notes_to_add_dict, **op_args)
+                            return op(
+                                config,
+                                notes_to_add_dict=notes_to_add_dict,
+                                notes_to_update_dict=notes_to_update_dict,
+                                **op_args,
+                            )
                         except Exception as e:
                             logger.error(
                                 "Inner process op error, passing to handle_op_error: %s", e
@@ -851,8 +861,9 @@ async def bulk_nested_notes_op(
     edited_nids: list[NoteId],
     progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
     model: str = "",
-) -> tuple[list[Note], int, dict[str, list[Note]]]:
+) -> tuple[list[Note], int, dict[str, list[Note]], dict[NoteId, Note]]:
     """
     Perform a bulk operation on a sequence of notes, with multiple nested async operations occurring
     per note instead of just one. Otherwise similar to `bulk_notes_op` except this cannot be
@@ -871,16 +882,15 @@ async def bulk_nested_notes_op(
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     if not model:
         logger.error("Model arg missing in bulk_nested_notes_op, aborting")
-        return [], pos, {}
+        return [], pos, {}, {}
     config["rate_limits"] = config.get("rate_limits", {})
     rate_limit = config["rate_limits"].get(model, None)
-    updated_notes_dict: dict[NoteId, Note] = {}
 
     progress_updater.set_total_notes(len(notes))
 
     if not rate_limit:
         logger.error("No rate limit set for model, can't run nested async op")
-        return [], pos, {}
+        return [], pos, {}, {}
     else:
         tasks: list[asyncio.Task] = []
 
@@ -896,7 +906,7 @@ async def bulk_nested_notes_op(
                 tasks,
                 edited_nids=edited_nids,
                 notes_to_add_dict=notes_to_add_dict,
-                updated_notes_dict=updated_notes_dict,
+                notes_to_update_dict=notes_to_update_dict,
                 progress_updater=progress_updater,
                 cancel_state=cancel_state,
             )
@@ -929,11 +939,11 @@ async def bulk_nested_notes_op(
 
         if cancel_manager.is_cancel_requested():
             logger.debug("Bulk operation was cancelled, returning results so far")
-            updated_notes = list(updated_notes_dict.values())
-            return updated_notes, pos, notes_to_add_dict
+            updated_notes = list(notes_to_update_dict.values())
+            return updated_notes, pos, notes_to_add_dict, notes_to_update_dict
 
-    updated_notes = list(updated_notes_dict.values())
-    return updated_notes, pos, notes_to_add_dict
+    updated_notes = list(notes_to_update_dict.values())
+    return updated_notes, pos, notes_to_add_dict, notes_to_update_dict
 
 
 def sync_bulk_notes_op(
@@ -944,6 +954,7 @@ def sync_bulk_notes_op(
     notes: Sequence[Note],
     edited_nids: list[NoteId],
     notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
+    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
 ):
     """
     Perform a simple sync bulk operation on a sequence of notes. Will run the operation
@@ -966,7 +977,12 @@ def sync_bulk_notes_op(
     updated_notes: list[Note] = []
     for note in notes:
         try:
-            note_was_edited = op(note, config)
+            note_was_edited = op(
+                config=config,
+                note=note,
+                notes_to_add_dict=notes_to_add_dict,
+                notes_to_update_dict=notes_to_update_dict,
+            )
         except Exception as e:
             logger.error("Sync bulk notes op: Error processing note %s: %s", note.id, e)
             note_was_edited = False
@@ -982,14 +998,15 @@ def sync_bulk_notes_op(
         if mw.progress.want_cancel():
             break
         if note_was_edited and edited_nids is not None:
-            updated_notes.append(note)
-            edited_nids.append(note.id)
+            if notes_to_update_dict and note.id in notes_to_update_dict:
+                updated_notes.append(note)
+                edited_nids.append(note.id)
 
     logger.debug("Sync bulk notes op finished. editedNids %s", edited_nids)
 
     mw.taskman.run_on_main(lambda: mw.progress.finish())
 
-    return updated_notes, pos, notes_to_add_dict
+    return updated_notes, pos, notes_to_add_dict, notes_to_update_dict
 
 
 async def bulk_notes_op(
@@ -1001,6 +1018,7 @@ async def bulk_notes_op(
     edited_nids: list[NoteId],
     progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: dict[str, list[Note]] = {},
+    notes_to_update_dict: dict[NoteId, Note] = {},
     model: str = "",
 ):
     """
@@ -1021,7 +1039,7 @@ async def bulk_notes_op(
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     config["rate_limits"] = config.get("rate_limits", {})
     if not model:
-        print("Model arg missing in bulk_notes_op, aborting")
+        logger.error("Model arg missing in bulk_notes_op, aborting")
         return None
     rate_limit = config["rate_limits"].get(model, None)
 
@@ -1035,6 +1053,7 @@ async def bulk_notes_op(
             notes=notes,
             edited_nids=edited_nids,
             notes_to_add_dict=notes_to_add_dict,
+            notes_to_update_dict=notes_to_update_dict,
         )
 
     updated_notes: list[Note] = []
@@ -1059,7 +1078,7 @@ async def bulk_notes_op(
         # adding the same note to
         def handle_error(current_note, e):
             logger.error(f"Error during operation with note {current_note.id}: {e}")
-            print_error_traceback(e)
+            print_error_traceback(e, logger)
 
         handle_op_error = partial(
             lambda current_note, e: handle_error(current_note, e),
@@ -1086,6 +1105,7 @@ async def bulk_notes_op(
                 # task_index for process_op in make_inner_bulk_op
                 task_index=i,
                 notes_to_add_dict=notes_to_add_dict,
+                notes_to_update_dict=notes_to_update_dict,
                 # note is passed to the op function, along with config in make_inner_bulk_op
                 note=note,
             )
@@ -1129,11 +1149,11 @@ async def bulk_notes_op(
         logger.debug("Bulk notes op cancellation requested, returning early")
         if not cancel_manager.monitor_task.done():
             cancel_manager.monitor_task.cancel()
-        return updated_notes, pos, notes_to_add_dict
+        return updated_notes, pos, notes_to_add_dict, notes_to_update_dict
 
     logger.debug("Bulk notes op completed successfully, updating notes")
 
-    return updated_notes, pos, notes_to_add_dict
+    return updated_notes, pos, notes_to_add_dict, notes_to_update_dict
 
 
 def on_bulk_success(
@@ -1193,6 +1213,7 @@ def selected_notes_op(
     edited_nids: list[NoteId] = []
     edited_other_nids: list[NoteId] = []
     notes_to_add_dict: dict[str, list[Note]] = {}
+    notes_to_update_dict: dict[NoteId, Note] = {}
     config = mw.addonManager.getConfig(__name__) or {}
 
     # Create a wrapper function that handles the async operation
@@ -1205,23 +1226,42 @@ def selected_notes_op(
                 edited_nids=edited_nids,
                 progress_updater=progress_updater,
                 notes_to_add_dict=notes_to_add_dict,
+                notes_to_update_dict=notes_to_update_dict,
             )
-            updated_notes, pos, res_notes_to_add_dict = result
+            updated_notes, pos, res_notes_to_add_dict, res_notes_to_update_dict = result
             notes_to_add_dict.update(res_notes_to_add_dict)
+            notes_to_update_dict.update(res_notes_to_update_dict)
             edited_nids_set = set(edited_nids)
-            edited_other_nids = [n.id for n in updated_notes if n.id not in edited_nids_set]
+            for n in updated_notes:
+                if n.id not in edited_nids_set:
+                    edited_other_nids.append(n.id)
+            for nid in res_notes_to_update_dict.keys():
+                if nid not in edited_nids_set:
+                    edited_other_nids.append(nid)
             edited_nids = list(edited_nids)
 
             # Remove note.id=0 notes from updated_notes
-            for note in updated_notes:
+            all_updated_notes_dict: dict[NoteId, Note] = {}
+            all_updated_notes = updated_notes + list(res_notes_to_update_dict.values())
+
+            for note in all_updated_notes:
                 if note.id == 0:
-                    print(f"Found note.id=0, fields: {note.fields}")
-            updated_notes = [n for n in updated_notes if n.id != 0]
+                    logger.error(f"Found note.id=0, fields: {note.fields}")
+                elif note.id not in notes_to_update_dict:
+                    all_updated_notes_dict[note.id] = note
+                else:
+                    # If the note is already in notes_to_update_dict, this might be a problem in the
+                    # logic of the bulk op
+                    logger.warning(
+                        f"Note {note.id} already in notes_to_update_dict during bulk op final"
+                        " update"
+                    )
+            all_updated_notes = [n for n in all_updated_notes_dict.values() if n.id != 0]
             try:
-                mw.col.update_notes(updated_notes)
+                mw.col.update_notes(all_updated_notes)
             except Exception as e:
-                print(f"Error updating notes: {e}")
-                print_error_traceback(e)
+                logger.error(f"Error updating notes: {e}")
+                print_error_traceback(e, logger)
             op_changes = mw.col.merge_undo_entries(pos)
             notes_to_add = []
             if notes_to_add_dict:
@@ -1261,7 +1301,7 @@ def selected_notes_op(
                         op_changes = mw.col.merge_undo_entries(pos)
                     except Exception as e:
                         logger.error(f"Error adding note {index}: {e}")
-                        print_error_traceback(e)
+                        print_error_traceback(e, logger)
                         failed_cnt += 1
 
                     progress_updater.update_note_adding_progress(
@@ -1303,7 +1343,7 @@ def selected_notes_op(
                             mw.col.update_notes(valid_notes)
                         except Exception as e:
                             logger.error(f"Error updating valid notes after new_notes_op: {e}")
-                            print_error_traceback(e)
+                            print_error_traceback(e, logger)
                         op_changes = mw.col.merge_undo_entries(pos)
                         edited_nids.extend(
                             [note.id for note in valid_notes if note.id not in edited_nids]

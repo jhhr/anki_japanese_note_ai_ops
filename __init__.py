@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 
 from anki import hooks
-from anki.notes import Note
+from anki.notes import Note, NoteId
 from aqt import gui_hooks
 from aqt import mw
 from aqt.browser import Browser
@@ -67,8 +67,6 @@ def create_call_log_handler(function_name: str) -> logging.Handler:
     log_level_str = config.get("log_level", "ERROR")
     log_level = getattr(logging, log_level_str.upper(), logging.ERROR)
 
-    print(f"Creating log handler for {function_name} with level {log_level}")
-
     # Update the root addon logger's level to match config
     addon_logger = logging.getLogger(__name__.split(".")[0])
     addon_logger.setLevel(log_level)
@@ -78,7 +76,6 @@ def create_call_log_handler(function_name: str) -> logging.Handler:
 
     if log_to_console:
         # Create console handler
-        print("Creating console log handler")
         handler: logging.Handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(log_level)
         handler.setFormatter(
@@ -87,7 +84,6 @@ def create_call_log_handler(function_name: str) -> logging.Handler:
         return handler
 
     # Create logs directory
-    print("Creating file log handler")
     addon_dir = os.path.dirname(os.path.abspath(__file__))
     logs_dir = os.path.join(addon_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
@@ -210,8 +206,18 @@ def run_op_on_add_note(note: Note):
             # match_words_to_notes and causes some problems
             logger.info("Skipping ops for note with 'new_matched_jp_word' tag")
             return
-        clean_meaning_in_note(config, note, {})
-        extract_words_in_note(config, note, {})
+        notes_to_update_dict: dict[NoteId, Note] = {}
+        try:
+            clean_meaning_in_note(config, note, {})
+            extract_words_in_note(config, note, {})
+        except Exception as e:
+            logger.error(f"Error in clean_meaning_in_note or extract_words_in_note: {e}", exc_info=True)
+        if notes_to_update_dict:
+            updated_notes = list(notes_to_update_dict.values())
+            # Filter out the added note itself from the updated notes
+            updated_notes = [n for n in updated_notes if n.id != note.id]
+            logger.info(f"Updating {len(updated_notes)} notes after adding new note")
+            mw.col.update_notes(updated_notes)
 
 
 # Register to card adding hook
