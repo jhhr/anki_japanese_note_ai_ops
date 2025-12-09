@@ -185,6 +185,7 @@ def get_single_meaning_from_model(
 ):
     jp_meaning_return_field = "cleaned_meaning"
     en_meaning_return_field = "english_meaning"
+    logger.debug(f"Getting single meaning with {len(sentences)} sentences")
     sentences_formatted = ""
     if len(sentences) > 1:
         for sen in sentences:
