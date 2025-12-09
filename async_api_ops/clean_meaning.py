@@ -129,8 +129,8 @@ Example output format:
     {{"{meaning_index_field}": 3, "{jp_meaning_return_field}": "三番目の意味の短い説明。", "{en_meaning_return_field}": "A short English translation of the third meaning."}}
 ]
 
-Word or phrase:
-{word}
+Word or phrase (and its reading):
+{word} ({reading})
 ---{'''
 Dictionary entry:
 {dict_meaning_for_word}
@@ -178,7 +178,8 @@ Current meanings and sentences:
 
 def get_single_meaning_from_model(
     config: dict[str, str],
-    vocab: str,
+    word: str,
+    reading: str,
     sentences: list[str],
     jp_dict_entry: str,
     en_dict_entry: str = "",
@@ -215,8 +216,8 @@ Return a JSON object with two fields:
 Return the extracted and possibly modified Japanese meaning as the value of the key "{jp_meaning_return_field}".
 Return the possibly modified English meaning as the value of the key "{en_meaning_return_field}".
 
-Word or phrase:
-{vocab}
+Word or phrase (and its reading):
+{word} ({reading})
 ---
 Sentence{'s' if len(sentences) > 1 else ''}:
 {sentences_formatted}
@@ -240,7 +241,8 @@ Japanese dictionary entry:
 
 def get_new_meaning_from_model(
     config: dict[str, str],
-    vocab: str,
+    word: str,
+    reading: str,
     sentences: list[str],
 ) -> tuple[str, str]:
     jp_meaning_return_field = "new_meaning"
@@ -265,7 +267,7 @@ Return a JSON object with two fields:
 Return the meaning as the value of the key "{jp_meaning_return_field}".
 Return the English translation as the value of the key "{en_meaning_return_field}".
 
-Word or phrase: {vocab}
+Word or phrase (and its reading): {word} ({reading})
 Sentence{'s' if len(sentences) > 1 else ''}: {sentences_formatted}
 """
     model = config.get("word_meaning_model", "")
@@ -385,12 +387,13 @@ def clean_meaning_in_note(
         )
         prev_en_meaning = note[english_meaning_field]
         word = note[word_field]
+        reading = note[word_reading_field]
         sentences = get_sentences_for_note(config, note)
         # Check if the value is non-empty
         if jp_dict_entry:
             # Call API to get single meaning from the raw dictionary entry
             new_jp_meaning, new_en_meaning = get_single_meaning_from_model(
-                config, word, sentences, jp_dict_entry
+                config, word, reading, sentences, jp_dict_entry
             )
 
             # Update the note with the new value
@@ -402,7 +405,7 @@ def clean_meaning_in_note(
             return False
         else:
             # If there's no dict_entry, we'll use chatGPT to generate one from scratch
-            new_meaning, en_meaning = get_new_meaning_from_model(config, word, sentences)
+            new_meaning, en_meaning = get_new_meaning_from_model(config, word, reading, sentences)
             note[meaning_field] = new_meaning
             note[english_meaning_field] = en_meaning
             if new_meaning != "" or en_meaning != "":
