@@ -114,6 +114,7 @@ Do not kanjify:
 - もう used purely as exclamatory particle, for example もう！ or もう、やめてよ！
 - もっと as it is not truly component in もっとも which does have a kanjified form as 最も or 尤も
 - そんな, こんな, あんな, どんな
+- The expression として should be considered to not contain する and should be left as is.
 ― Gikun-type, reading-as-meaning conversions. Only perform kanjification if there is some evidence of usage in literature, online texts or dictionaries.
 Do kanjify:
 - ない when used as a standalone word, including conjugated forms like なかった, なくて. 無い is even currently used in modern text, but is simply often written in hiragana.
@@ -123,8 +124,9 @@ Do kanjify:
 - やすい as used in verbs like 食べやすい, 書きやすい, etc. This is a a form of 易い
 - the honorific prefix お
 - よう as 様[よう] in all its forms, ような, ように, ようだ, etc.
+- The pluralizing suffix ら as 等. Like in 彼ら, そいつら etc.
 - Romaji numbers, keep them as is though furigana can be added without adding <k> tags. For example, １つ (no furigana) becomes "１[ひと]つ". 10分[ぷん] becomes "10分[じゅっぷん]". 1000[せん]円[えん] stays as is.
-- The expression として should be considered to not contain する and should be left as is.
+
 
 Important final checks:
 - MAKE SURE TO NOT TO OMIT ANY PARTICLES OR COPULA FROM THE KANJIFIED SENTENCE
@@ -192,6 +194,9 @@ Example kanjified 20: 北アメリカでは １[ひと]つの 家[いえ]に １
 
 Example sentence 21: それに 触[ふ]れた 銀[ぎん]の<b>カバ</b>ノキも 見[み]えます。
 Example kanjified 21: <k> 其[そ]れ</k>に 触[ふ]れた 銀[ぎん]の<b><k> 樺[カバ]</k></b>ノ<k> 木[キ]</k>も 見[み]えます。
+
+Example sentence 22: それらの 作品[さくひん]には<b>優劣[ゆうれつ]</b>をつけがたい。
+Kanjified example 22: <k> 其[そ]れ 等[ら]</k>の 作品[さくひん]には<b><k> 優劣[ゆうれつ]</k></b>を<k> 付[つ]け 難[がた]い</k>。
 
 Return a JSON string with the following key-value pairs:
  "{kanjified_sentence_return_field}": The fully kanjified sentence.
