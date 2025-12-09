@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Union, Optional
+from typing import Union
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -217,8 +217,8 @@ MAX_ATTEMPTS = 5
 def kanjify_sentence_in_note(
     config: dict[str, str],
     note: Note,
-    notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
-    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
     attempt: int = 1,
 ) -> bool:
     model = note.note_type()
@@ -307,6 +307,8 @@ def kanjify_sentence_in_note(
                         )
                 elif note.has_tag("kanjify_sentence_mismatch"):
                     note.remove_tag("kanjify_sentence_mismatch")
+                if note.id != 0 and note.id not in notes_to_update_dict:
+                    notes_to_update_dict[note.id] = note
                 return True
             return False
         return False

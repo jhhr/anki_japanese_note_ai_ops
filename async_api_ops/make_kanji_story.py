@@ -1,6 +1,5 @@
 import json
 import logging
-from typing import Optional
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -136,8 +135,8 @@ def get_kanji_story_from_model(
 def make_story_for_note(
     config: dict[str, str],
     note: Note,
-    notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
-    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
 ) -> bool:
     model = note.note_type()
     if not model:
@@ -171,6 +170,8 @@ def make_story_for_note(
             note[story_field] = new_story
             # Return success, if the we changed something
             if new_story != current_story:
+                if note.id != 0 and note.id not in notes_to_update_dict:
+                    notes_to_update_dict[note.id] = note
                 return True
             return False
         return False

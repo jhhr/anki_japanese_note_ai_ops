@@ -176,12 +176,12 @@ def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
     if note_type_name == "Kanji draw":
         story_field = get_field_config(config, "story_field", note_type)
         if field_name == story_field and cur_field_value == "":
-            return make_story_for_note(config, note)
+            return make_story_for_note(config, note, {}, {})
 
     if note_type_name == "Japanese vocab note":
         translated_sentence_field = get_field_config(config, "translated_sentence_field", note_type)
         if field_name == translated_sentence_field and cur_field_value == "":
-            return translate_sentence_in_note(config, note, {})
+            return translate_sentence_in_note(config, note, {}, {})
 
 
 def run_op_on_add_note(note: Note):
@@ -208,10 +208,12 @@ def run_op_on_add_note(note: Note):
             return
         notes_to_update_dict: dict[NoteId, Note] = {}
         try:
-            clean_meaning_in_note(config, note, {})
-            extract_words_in_note(config, note, {})
+            clean_meaning_in_note(config, note, {}, notes_to_update_dict)
+            extract_words_in_note(config, note, {}, notes_to_update_dict)
         except Exception as e:
-            logger.error(f"Error in clean_meaning_in_note or extract_words_in_note: {e}", exc_info=True)
+            logger.error(
+                f"Error in clean_meaning_in_note or extract_words_in_note: {e}", exc_info=True
+            )
         if notes_to_update_dict:
             updated_notes = list(notes_to_update_dict.values())
             # Filter out the added note itself from the updated notes

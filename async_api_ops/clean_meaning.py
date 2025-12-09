@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, TypedDict
+from typing import TypedDict
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -294,7 +294,7 @@ def clean_meaning_in_note(
     config: dict[str, str],
     note: Note,
     notes_to_add_dict: dict[str, list[Note]],
-    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    notes_to_update_dict: dict[NoteId, Note],
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
@@ -342,7 +342,14 @@ def clean_meaning_in_note(
                 f' "{word_field}:{note[word_field]}")'
             )
             other_meaning_note_ids = mw.col.find_notes(meaning_notes_query)
-            all_meaning_notes = [mw.col.get_note(onid) for onid in other_meaning_note_ids]
+            all_meaning_notes = [
+                (
+                    mw.col.get_note(onid)
+                    if onid not in notes_to_update_dict
+                    else notes_to_update_dict[onid]
+                )
+                for onid in other_meaning_note_ids
+            ]
             all_meaning_notes.append(note)
 
             logger.debug(
@@ -374,7 +381,8 @@ def clean_meaning_in_note(
                         n.add_tag("updated_jp_meaning")
                         if new_jp_meaning != prev_jp_meaning or new_en_meaning != prev_en_meaning:
                             any_changed = True
-                            notes_to_update_dict[n.id] = n
+                            if n.id != 0 and n.id not in notes_to_update_dict:
+                                notes_to_update_dict[n.id] = n
                 return any_changed
 
         mdx_helper.load_mdx_dictionaries_if_needed(config)
@@ -401,6 +409,8 @@ def clean_meaning_in_note(
             note[english_meaning_field] = new_en_meaning
             # Return success, if the we changed something
             if new_jp_meaning != jp_dict_entry or new_en_meaning != prev_en_meaning:
+                if note.id not in notes_to_update_dict:
+                    notes_to_update_dict[note.id] = note
                 return True
             return False
         else:
@@ -409,6 +419,8 @@ def clean_meaning_in_note(
             note[meaning_field] = new_meaning
             note[english_meaning_field] = en_meaning
             if new_meaning != "" or en_meaning != "":
+                if note.id not in notes_to_update_dict:
+                    notes_to_update_dict[note.id] = note
                 return True
             return False
 

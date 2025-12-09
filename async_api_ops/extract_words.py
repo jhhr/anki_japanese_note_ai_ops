@@ -1,7 +1,7 @@
 import json
 import re
 import logging
-from typing import Optional, Union
+from typing import Union
 from collections.abc import Sequence
 from anki.notes import Note, NoteId
 from anki.collection import Collection
@@ -631,8 +631,8 @@ The sentence to process: {sentence}
 def extract_words_in_note(
     config: dict,
     note: Note,
-    notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
-    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
@@ -714,6 +714,8 @@ def extract_words_in_note(
                         cur_word_lists[key] = compared_word_lists([], word_lists[key])
                 # Finally, update the field value in the note
                 note[word_list_field] = json.dumps(cur_word_lists, ensure_ascii=False, indent=2)
+                if note.id != 0 and note.id not in notes_to_update_dict:
+                    notes_to_update_dict[note.id] = note
                 return True
             return False
         return False

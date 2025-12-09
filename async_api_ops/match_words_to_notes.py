@@ -143,7 +143,12 @@ def update_fake_note_ids(
 
     # For every new note that emptied its fake note ID, we can now add it to the updated notes dict
     for new_note in new_notes:
-        if new_note_id_field in new_note and not new_note[new_note_id_field]:
+        if (
+            new_note_id_field in new_note
+            and not new_note[new_note_id_field]
+            and new_note.id != 0
+            and new_note.id not in notes_to_update_dict
+        ):
             notes_to_update_dict[new_note.id] = new_note
 
     return notes_to_update_dict
@@ -316,7 +321,11 @@ def match_words_to_notes(
         hiragana_reading_suru = to_hiragana(reading + "する")
         matching_notes = []
         for note_id in note_ids:
-            note = mw.col.get_note(note_id)
+            note = (
+                mw.col.get_note(note_id)
+                if note_id not in notes_to_update_dict
+                else notes_to_update_dict[note_id]
+            )
             if note and word_reading_field in note:
                 note_reading = to_hiragana(note[word_reading_field])
                 logger.debug(
@@ -381,7 +390,7 @@ def match_words_to_notes(
                 a_marker_note[word_sort_field] = f"{word} {kun_on_marker}(r1){other_markers}"
 
                 # This is needed for an existing note that hasn't been edited yet
-                if a_marker_note.id:
+                if a_marker_note.id and a_marker_note.id not in notes_to_update_dict:
                     notes_to_update_dict[a_marker_note.id] = a_marker_note
 
             if len(marker_notes) == 1:
@@ -453,7 +462,9 @@ def match_words_to_notes(
             new_note_id = make_new_note_id(new_note)
             new_note[new_note_id_field] = str(new_note_id)
             notes_to_add_dict.setdefault(word, []).append(new_note)
-            create_meaning_result = clean_meaning_in_note(config, new_note, notes_to_add_dict)
+            create_meaning_result = clean_meaning_in_note(
+                config, new_note, notes_to_add_dict, notes_to_update_dict
+            )
             new_note[word_sort_field] = (
                 new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
             )
@@ -514,6 +525,10 @@ def match_words_to_notes(
                     logger.debug(f"Note {note.id} has empty meaning field")
             else:
                 logger.debug(f"Note {note.id} is missing meaning field")
+        if note_to_copy:
+            # use the updated note if available
+            if note_to_copy.id in notes_to_update_dict:
+                note_to_copy = notes_to_update_dict[note_to_copy.id]
         if not meanings:
             logger.debug(f"No meanings found for word {word} with reading {reading}")
             # We found notes but all were missing meanings, have to skip this word as it can't
@@ -817,12 +832,14 @@ _Current sentence_: {sentence}"""
                         note_to_copy[word_sort_field] = (
                             note_to_copy[word_sort_field].replace(") (", ")(").replace("  ", " ")
                         )
-                    notes_to_update_dict[note_to_copy.id] = note_to_copy
+                    if note_to_copy.id not in notes_to_update_dict:
+                        notes_to_update_dict[note_to_copy.id] = note_to_copy
                 # Note to copy was missing sort field somehow? Add it now + the meaning numbers
                 else:
                     new_note[word_sort_field] = f"{word} (m{largest_meaning_index})"
                     note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index -1})"
-                    notes_to_update_dict[note_to_copy.id] = note_to_copy
+                    if note_to_copy.id not in notes_to_update_dict:
+                        notes_to_update_dict[note_to_copy.id] = note_to_copy
                 notes_to_add_dict.setdefault(word, []).append(new_note)
                 new_note[word_sort_field] = (
                     new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
@@ -853,6 +870,8 @@ _Current sentence_: {sentence}"""
                 if note.id == matched_note_id and matched_meaning == note[meaning_field]:
                     # Ensure the matched meaning is the same as in the note to account for id=0
                     matched_note = note
+                    if matched_note.id in notes_to_update_dict:
+                        matched_note = notes_to_update_dict[matched_note.id]
                     break
             if not matched_note:
                 # This shouldn't happen as the meaning came from one of the notes in the list
@@ -872,10 +891,12 @@ _Current sentence_: {sentence}"""
             if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
                 matched_note[meaning_field] = jp_meaning.strip()
                 matched_note.add_tag("updated_jp_meaning")
-                notes_to_update_dict[matched_note.id] = matched_note
+                if matched_note.id not in notes_to_update_dict:
+                    notes_to_update_dict[matched_note.id] = matched_note
             if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
                 matched_note[english_meaning_field] = en_meaning.strip()
-                notes_to_update_dict[matched_note.id] = matched_note
+                if matched_note.id not in notes_to_update_dict:
+                    notes_to_update_dict[matched_note.id] = matched_note
             logger.debug(
                 f"Updated note {matched_note.id} with new meaning '{jp_meaning}' and"
                 f" english meaning '{en_meaning}'"
@@ -935,6 +956,8 @@ _Current sentence_: {sentence}"""
                 if current_note[new_note_id_field] == str(fake_note_id):
                     # Yes, so we can use the current note's ID
                     unfake_note = current_note
+                    if unfake_note.id in notes_to_update_dict:
+                        unfake_note = notes_to_update_dict[unfake_note.id]
                     logger.debug(
                         f"Current note ID {current_note.id} matches fake note ID"
                         f" {fake_note_id}, updating word tuple at index {i}"
@@ -1155,7 +1178,8 @@ def match_words_to_notes_for_note(
             logger.error(f"Error decoding JSON from word list field: {e}")
             # tag note
             note.add_tag("invalid_word_list_json")
-            notes_to_update_dict[note.id] = note
+            if note.id not in notes_to_update_dict:
+                notes_to_update_dict[note.id] = note
             word_list_dict = {}
         if not isinstance(word_list_dict, dict):
             logger.error("Error: Invalid word list format in the note, expected a dictionary")
@@ -1181,7 +1205,8 @@ def match_words_to_notes_for_note(
             new_word_list = word_lists_str_format(updated_word_list_dict)
             if new_word_list is not None:
                 current_note[word_list_field] = new_word_list
-                notes_to_update_dict[current_note.id] = current_note
+                if current_note.id not in notes_to_update_dict:
+                    notes_to_update_dict[current_note.id] = current_note
             progress_updater.increment_counts(
                 notes_done=1,
             )

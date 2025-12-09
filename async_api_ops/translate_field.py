@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Union
+from typing import Union
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -40,8 +40,8 @@ def get_translated_field_from_model(config: dict[str, str], sentence: str) -> Un
 def translate_sentence_in_note(
     config: dict,
     note: Note,
-    notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
-    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
@@ -70,6 +70,8 @@ def translate_sentence_in_note(
             if translated_sentence is not None:
                 # Update the note with the new value
                 note[translated_sentence_field] = translated_sentence
+                if note.id != 0 and note.id not in notes_to_update_dict:
+                    notes_to_update_dict[note.id] = note
                 return True
             return False
         return False
