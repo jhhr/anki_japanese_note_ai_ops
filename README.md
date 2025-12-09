@@ -5,10 +5,14 @@ Simple Anki addon for some custom AI prompts I use.
 
 Prompts:
 
-- `clean_meaning`: Automatically reduce a full jp dictionary entry gotten from Yomichan/Yomitan/Rikaitan etc. into just the part that pertains to the specific example sentence used for the word. Also generates new meanings when no dict entry is present. Applied on adding new notes, so I used it often. Intended to be used with a deck structure where you have multiple notes for different meanings of a word which each contains an example sentence for that particular meaning.
+- `clean_meaning`: Automatically reduce a full jp dictionary entry gotten from MDX dictionaries into just the part that pertains to the specific example sentence used for the word.
+  - Also generates new meanings when no dict entry is present. Applied on adding new notes, so I used it often. Intended to be used with a deck structure where you have multiple notes for different meanings of a word which each contains an example sentence for that particular meaning.
+  - Also will update all meanings of the word, if there are multiple, using the dictionary entry looked up from the MDX dictionaries.
 - `translate_field`: Translate a field from Japanese to English. Used rarely, since I mostly mine from anime and get the translation from the english subs.
 - `make_kanji_story`: Write a mnemonic story for the components a kanji is written with, in Japanese. Used daily on new kanji drawing practice notes. Expects a JSON file `_kanji_story_component_words.json` to exist and be a simple dict of component phrases.
-- `write_kanji_component_words`: Used once to generate the `_kanji_story_component_words.json` from my notes before when I was beginning to use the `make_kanji_story` operation. Didn't work well, I needed to add lots of component phrases I'd already come up with manually anyway and it generated a bunch of junk too.
+- `kanjify_sentence`: Take a furigana format sentence and kanjify each hiragana/katakana word if there's some valid kanji form for it. The kanjified words are wrapped with `<k>` tags
+- `extract_words`: Extract individual words from the kanjified sentence, grouped by their part of speech. Writes a json object with arrays of words into the note.
+- `match_words_to_notes`: Match the extracted words in the list to an existing word note, using the word's meaning. If matching isn't possible, creates a new word note and comes up with a meaning that matches the usage of the word in the sentence.
 
 ## Installing dependencies
 
