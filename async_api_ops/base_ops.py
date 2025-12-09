@@ -1249,7 +1249,14 @@ def selected_notes_op(
                     logger.error(f"Found note.id=0, fields: {note.fields}")
                 elif note.id not in notes_to_update_dict:
                     all_updated_notes_dict[note.id] = note
-            all_updated_notes = [n for n in all_updated_notes if n.id != 0]
+                else:
+                    # If the note is already in notes_to_update_dict, this might be a problem in the
+                    # logic of the bulk op
+                    logger.warning(
+                        f"Note {note.id} already in notes_to_update_dict during bulk op final"
+                        " update"
+                    )
+            all_updated_notes = [n for n in all_updated_notes_dict.values() if n.id != 0]
             try:
                 mw.col.update_notes(all_updated_notes)
             except Exception as e:
