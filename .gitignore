@@ -2,6 +2,7 @@ __pycache__
 .mypy_cache
 meta.json
 .idea
+.vscode
 # dependencies need to be installed on each device separately with
 # pip3 install -t lib --no-cache-dir --python-version 3.9 --only-binary=:all: -r requirements.txt
 lib/*
