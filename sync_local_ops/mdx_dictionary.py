@@ -4,6 +4,8 @@ import os
 import time
 import sqlite3
 
+from aqt import mw
+
 try:
     from mdict_query import IndexBuilder  # type: ignore
 except ImportError:
@@ -19,7 +21,9 @@ logger = logging.getLogger(__name__)
 class MDXDictionary:
     """Efficient MDX dictionary querying using mdict-query's IndexBuilder"""
 
-    def __init__(self, mdx_path: str):
+    def __init__(
+        self, mdx_path: str, show_progress: bool = False, progress_msg=None, finish: bool = True
+    ):
         """
         Initialize MDX dictionary
 
@@ -33,19 +37,25 @@ class MDXDictionary:
 
         self.mdx_path = mdx_path
         start_time = time.time()
-        print(f"Loading MDX file: {os.path.basename(mdx_path)}...")
+        load_msg = f"Loading MDX: {os.path.basename(mdx_path)}"
+        if show_progress:
+            mw.taskman.run_on_main(
+                lambda: mw.progress.update(
+                    label=progress_msg or load_msg,
+                )
+            )
 
         # IndexBuilder automatically creates a SQLite index for fast lookups
         # It will reuse existing .mdx.db file if available
         self.builder = IndexBuilder(mdx_path, sql_index=True, check=False)
 
         elapsed = time.time() - start_time
-        print(f"Loaded MDX file: {os.path.basename(mdx_path)} in {elapsed:.2f}s")
-        print(f"    Dictionary: {self.builder._title}")
-        print(
-            "    Description:"
-            f" {self.builder._description[:100] if self.builder._description else 'N/A'}"
-        )
+        loaded_msg = f"""Loaded MDX file: {os.path.basename(mdx_path)} in {elapsed:.2f}s
+    Dictionary: {self.builder._title}")
+    Description: {self.builder._description[:100] if self.builder._description else 'N/A'}"""
+        print(loaded_msg)
+        if show_progress and finish:
+            mw.taskman.run_on_main(lambda: mw.progress.finish())
 
     def query(
         self,
@@ -307,7 +317,9 @@ PickDictionaryResult = Union[Literal["first", "all", "shortest", "longest"], str
 class MultiDictionaryQuery:
     """Query multiple MDX dictionaries simultaneously"""
 
-    def __init__(self, mdx_paths: list[str]):
+    def __init__(
+        self, mdx_paths: list[str], show_progress: bool = False, finish_progress: bool = True
+    ):
         """
         Initialize with multiple MDX files
 
@@ -317,10 +329,20 @@ class MultiDictionaryQuery:
         self.dictionaries: list[MDXDictionaryEntry] = []
         start_time = time.time()
         print("\nLoading MDX dictionaries...")
-        for path in mdx_paths:
+        path_count = len(mdx_paths)
+        for i, path in enumerate(mdx_paths):
             if os.path.exists(path):
                 try:
-                    mdx_dict = MDXDictionary(path)
+                    progress_msg = (
+                        f"Loading MDX dictionary {i + 1} / {path_count}: {os.path.basename(path)}"
+                    )
+                    is_last = i == path_count - 1
+                    mdx_dict = MDXDictionary(
+                        path,
+                        show_progress=show_progress,
+                        progress_msg=progress_msg,
+                        finish=is_last and finish_progress,
+                    )
                     dict_entry: MDXDictionaryEntry = {
                         "path": path,
                         "name": mdx_dict.builder._title or os.path.basename(path),
@@ -423,7 +445,7 @@ class AnkiMDXHelper:
         self._init_failed = False
 
     def load_mdx_dictionaries_if_needed(
-        self, config: dict[str, Any]
+        self, config: dict[str, Any], show_progress: bool = False, finish_progress: bool = True
     ) -> Union["AnkiMDXHelper", None]:
         """
         Initialize with Anki addon config and load MDX dictionaries.
@@ -449,7 +471,9 @@ class AnkiMDXHelper:
                 return None
 
             mdx_paths = [os.path.join(ADDON_USER_FILES_DIR, fn) for fn in mdx_filenames]
-            self.multi_dict = MultiDictionaryQuery(mdx_paths)
+            self.multi_dict = MultiDictionaryQuery(
+                mdx_paths, show_progress=show_progress, finish_progress=finish_progress
+            )
 
             # Check if any dictionaries were actually loaded
             if not self.multi_dict.dictionaries:

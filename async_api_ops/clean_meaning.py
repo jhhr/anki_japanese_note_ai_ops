@@ -66,7 +66,7 @@ def update_all_meanings_for_word(
     """
     if not meanings_dict:
         return {}
-    mdx_helper.load_mdx_dictionaries_if_needed(config)
+    mdx_helper.load_mdx_dictionaries_if_needed(config, show_progress=True, finish_progress=False)
     pick_dictionary = config.get("mdx_pick_dictionary", "all")
 
     # We won't necessarily have a dictionary entry for the word so the prompt will differ slightly
@@ -385,7 +385,9 @@ def clean_meaning_in_note(
                                 notes_to_update_dict[n.id] = n
                 return any_changed
 
-        mdx_helper.load_mdx_dictionaries_if_needed(config)
+        mdx_helper.load_mdx_dictionaries_if_needed(
+            config, show_progress=True, finish_progress=False
+        )
         pick_dictionary = config.get("mdx_pick_dictionary", "all")
         # Get dictionary entry from mdx helper
         jp_dict_entry = mdx_helper.get_definition_text(
