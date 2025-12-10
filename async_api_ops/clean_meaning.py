@@ -90,7 +90,7 @@ def update_all_meanings_for_word(
                 sentences_formatted += f"- {sen}\n"
         else:
             sentences_formatted = ""
-        meanings_and_sentences += f"""Meaning {i+1}:
+        meanings_and_sentences += f"""Meaning {i + 1}:
 Japanese meaning: {ws['jp_meaning']}
 English meaning: {ws['en_meaning']}
 ---
@@ -171,7 +171,7 @@ Current meanings and sentences:
                     meaning_obj[en_meaning_return_field],
                 )
             else:
-                logger.warning(f"Meaning index {meaning_index+1} has no corresponding note ID")
+                logger.warning(f"Meaning index {meaning_index + 1} has no corresponding note ID")
     logger.debug(f"Updated meanings: {updated_meanings}")
     return updated_meanings
 
@@ -245,6 +245,7 @@ def get_new_meaning_from_model(
     reading: str,
     sentences: list[str],
 ) -> tuple[str, str]:
+    logger.debug(f"Getting new meaning with {len(sentences)} sentences")
     jp_meaning_return_field = "new_meaning"
     en_meaning_return_field = "english_meaning"
     sentences_formatted = ""
@@ -270,6 +271,7 @@ Return the English translation as the value of the key "{en_meaning_return_field
 Word or phrase (and its reading): {word} ({reading})
 Sentence{'s' if len(sentences) > 1 else ''}: {sentences_formatted}
 """
+    logger.debug(f"Prompt for new meaning: {prompt}")
     model = config.get("word_meaning_model", "")
     result = get_response(model, prompt)
     if result is None:
@@ -314,11 +316,6 @@ def clean_meaning_in_note(
         return False
 
     logger.debug(f"cleaning meaning in note {note.id}")
-    logger.debug(f"meaning_field in note: {meaning_field in note}")
-    logger.debug(f"english_meaning_field in note: {english_meaning_field in note}")
-    logger.debug(f"word_field in note: {word_field in note}")
-    logger.debug(f"word_reading_field in note: {word_reading_field in note}")
-    logger.debug(f"sentence_field in note: {sentence_field in note}")
 
     # Check if the note has the required fields
     if (
@@ -330,9 +327,11 @@ def clean_meaning_in_note(
     ):
         logger.debug(f"notes_to_update_dict: {notes_to_update_dict is not None}")
         if notes_to_update_dict is not None:
+            # Need to watch out with this, if this op is called in bulk from other ops, some other
+            # update may already prevent us from changing this note
             if note.id in notes_to_update_dict:
                 logger.debug(
-                    f"Skipping note {note.id} as it's already marked for update by a previous op"
+                    f"Skipping note {note.id} as it's already marked as updated by a previous op"
                 )
                 return False
             meaning_notes_query = (
@@ -357,13 +356,14 @@ def clean_meaning_in_note(
             )
 
             if len(all_meaning_notes) > 1:
-                meaning_sentences_dict = {}
-                for n in all_meaning_notes:
-                    meaning_sentences_dict[n.id] = WordAndSentences(
+                meaning_sentences_dict = {
+                    n.id: WordAndSentences(
                         jp_meaning=n[meaning_field],
                         en_meaning=n[english_meaning_field],
                         sentences=get_sentences_for_note(config, n),
                     )
+                    for n in all_meaning_notes
+                }
                 updated_meanings_dict = update_all_meanings_for_word(
                     config,
                     note[word_field],
@@ -414,7 +414,7 @@ def clean_meaning_in_note(
                 return True
             return False
         else:
-            # If there's no dict_entry, we'll use chatGPT to generate one from scratch
+            # If there's no dict_entry, we'll let a model generate one from scratch
             new_meaning, en_meaning = get_new_meaning_from_model(config, word, reading, sentences)
             note[meaning_field] = new_meaning
             note[english_meaning_field] = en_meaning

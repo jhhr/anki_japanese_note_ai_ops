@@ -545,7 +545,7 @@ def match_words_to_notes(
             en_meaning,
             match_word,
         ) in enumerate(meanings):
-            meanings_str += f"""Meaning number {i+1}:
+            meanings_str += f"""Meaning number {i + 1}:
 - *match_word*: {match_word}
 - *jp_meaning*: {jp_meaning}
 - *example_sentence*: {example_sentence}
@@ -824,11 +824,11 @@ _Current sentence_: {sentence}"""
                         # If there is no (mX) but some other number, add meaning number to end
                         # And update the note_to_copy, since it should a meaning number now too
                         new_note[word_sort_field] += f"(m{largest_meaning_index})"
-                        note_to_copy[word_sort_field] += f"(m{largest_meaning_index -1})"
+                        note_to_copy[word_sort_field] += f"(m{largest_meaning_index - 1})"
                     else:
                         # Else, same but add a space
                         new_note[word_sort_field] += f" (m{largest_meaning_index})"
-                        note_to_copy[word_sort_field] += f" (m{largest_meaning_index -1})"
+                        note_to_copy[word_sort_field] += f" (m{largest_meaning_index - 1})"
                         note_to_copy[word_sort_field] = (
                             note_to_copy[word_sort_field].replace(") (", ")(").replace("  ", " ")
                         )
@@ -837,7 +837,7 @@ _Current sentence_: {sentence}"""
                 # Note to copy was missing sort field somehow? Add it now + the meaning numbers
                 else:
                     new_note[word_sort_field] = f"{word} (m{largest_meaning_index})"
-                    note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index -1})"
+                    note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index - 1})"
                     if note_to_copy.id not in notes_to_update_dict:
                         notes_to_update_dict[note_to_copy.id] = note_to_copy
                 notes_to_add_dict.setdefault(word, []).append(new_note)

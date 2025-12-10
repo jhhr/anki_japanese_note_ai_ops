@@ -1254,6 +1254,7 @@ def selected_notes_op(
                 mw.col.update_notes(all_updated_notes)
             except Exception as e:
                 logger.error(f"Error updating notes: {e}")
+                logger.error(f"Notes causing error: {[n.fields for n in all_updated_notes]}")
                 print_error_traceback(e, logger)
             op_changes = mw.col.merge_undo_entries(pos)
             notes_to_add = []
