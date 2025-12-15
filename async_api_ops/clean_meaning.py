@@ -131,7 +131,7 @@ Example output format:
 
 Word or phrase (and its reading):
 {word} ({reading})
----{'''
+---{f'''
 Dictionary entry:
 {dict_meaning_for_word}
 ---
