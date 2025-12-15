@@ -126,7 +126,9 @@ def decode_json_result(json_str: str):
     logging.debug("json_result", json_str)
     try:
         result = json.loads(json_str)
-        logger.debug("Parsed result from json: %s", result)
+        logger.debug(
+            "Parsed result from json: %s", json.dumps(result, ensure_ascii=False, indent=2)
+        )
         return result
     except json.JSONDecodeError:
         logger.error(f"Failed to parse JSON response, json_result: {json_str}")
@@ -141,6 +143,32 @@ def decode_json_result(json_str: str):
         logger.error(f"Unexpected error parsing JSON: {e}")
         logger.error(f"json_result: {json_str}")
         return None
+
+
+def clean_response_schema_for_gemini(schema: dict) -> dict:
+    """Cleans the response schema to be compatible with Gemini's expected format.
+
+    Args:
+        response_schema: The original response schema.
+
+    Returns:
+        A cleaned response schema compatible with Gemini.
+    """
+    # Clean "additionalProperties" from array items and objects to avoid Gemini rejecting the schema
+    if isinstance(schema, dict):
+        if schema.get("type") == "array" and "items" in schema:
+            items = schema["items"]
+            if isinstance(items, dict):
+                if "additionalProperties" in items:
+                    del items["additionalProperties"]
+                # Recursively clean items
+                schema["items"] = clean_response_schema_for_gemini(items)
+        elif schema.get("type") == "object" and "properties" in schema:
+            if "additionalProperties" in schema:
+                del schema["additionalProperties"]
+            for key, value in schema["properties"].items():
+                schema["properties"][key] = clean_response_schema_for_gemini(value)
+    return schema
 
 
 def get_response_from_gemini(
@@ -200,8 +228,11 @@ def get_response_from_gemini(
     if max_output_tokens is not None:
         logger.debug("Using max_output_tokens %d", max_output_tokens)
     if response_schema:
+        response_schema = clean_response_schema_for_gemini(response_schema)
         data["generationConfig"]["responseSchema"] = response_schema
-        logger.debug("Using response schema %s", response_schema)
+        logger.debug(
+            "Using response schema %s", json.dumps(response_schema, ensure_ascii=False, indent=2)
+        )
 
     headers = {
         "Content-Type": "application/json",
@@ -329,7 +360,9 @@ def get_response_from_openai(
                 "strict": True,
             },
         }
-        logger.debug("Using response schema %s", response_schema)
+        logger.debug(
+            "Using response schema %s", json.dumps(response_schema, ensure_ascii=False, indent=2)
+        )
 
     # Make the API call
     req = CancellableRequest()
@@ -424,7 +457,9 @@ def get_response_from_anthropic(
             "type": "json_schema",
             "schema": response_schema,
         }
-        logger.debug("Using response schema %s", response_schema)
+        logger.debug(
+            "Using response schema %s", json.dumps(response_schema, ensure_ascii=False, indent=2)
+        )
 
     config = mw.addonManager.getConfig(__name__)
     if config is None:
