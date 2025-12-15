@@ -97,20 +97,22 @@ English meaning: {ws['en_meaning']}
 Sentences:
 {sentences_formatted}
 """
+
     meaning_index_field = "meaning_index"
     jp_meaning_return_field = "jp_meaning"
     en_meaning_return_field = "en_meaning"
+    dict_reference_return_field = "dictionary_reference"
 
     prompt = f"""{f'''Below is the dictionary entry for a word or phrase, along with currently used meanings for groups of sentences containing that word or phrase. Your task is to rework the meanings to better fit the usage in the sentences, using the dictionary entry as reference.
-For each meaning, either extract the relevant part from the dictionary entry, or rephrase it to better fit the sentences. Follow these rules:
-- Do not overfit the definitions to the sentences, but rather aim for general definitions that fit the usage in each sentence.
+For each meaning, either extract the relevant parts from the dictionary entry and rephrase those to better fit the sentences. Follow these rules:
+- DO NOT OVERFIT the definitions to the sentences. Especially when the number of examples is a mere 1-3 sentences. Pick as many meanings as possible than can broadly fit the theme of the sentences. 
 - If the dictionary entry describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
 - If there are more than two usage patterns for this word or phrase, describe the one used in the sentences.
+- Aggressively shorten and simplify the picked meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
 - Omit any example sentences included in the dictionary entry (often included within 「」 brackets).
-- Shorten and simplify the meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
 ''' if dict_meaning_for_word else f'''Below are currently used meanings for groups of sentences containing a certain word or phrase. Your task is to rework the meanings to better fit the usage in the sentences.
 Follow these rules:
-- Do not overfit the definitions to the sentences, but rather aim for general definitions that fit the usage in each sentence.
+- DO NOT OVERFIT the definitions to the sentences. Especially when the number of examples is a mere 1-3 sentences. Aim for general definitions that broadly fit the theme of the sentences.
 - If there are two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
 - If there are more than two usage patterns for this word or phrase, describe the one used in the sentences.
 - Shorten and simplify the meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
@@ -120,6 +122,7 @@ Return a JSON object with one `meanings` field containing an array of objects. E
 - "{meaning_index_field}": The index of the meaning (starting from 1).
 - "{jp_meaning_return_field}": The reworked Japanese meaning.
 - "{en_meaning_return_field}": The reworked English meaning.
+- "{dict_reference_return_field}": Repeat the parts of the dictionary entry that were used as reference for reworking the meaning.
 
 You do not need to rework all meanings, only those that seem not to fit well with the sentences; the array can be of any length, including empty if all meanings are fine.
 
@@ -224,9 +227,9 @@ def get_single_meaning_from_model(
     prompt = f"""Below, the dictionary entry for the word or phrase may contain multiple meanings. Your task is to either 1) extract the one meaning 2) or combine and rephrase meanings matching the usage of the word in the sentence{'s' if len(sentences) > 1 else ''}.
 
 Selection criteria:
-- If there are only two meanings for this word or phrase, one literal and one figurative, pick both and shorten their respective descriptions. Do this even if the sentence{'s' if len(sentences) > 1 else ''} only uses one of the meanings.
+- DO NOT overfit the definition to the sentence{'s' if len(sentences) > 1 else ''}, but rather pick as many meanings as possible that can broadly fit the theme of the sentence{'s' if len(sentences) > 1 else ''}.
+- Figurative uses of literal meanings should be one definition: When there is a pair of meanings for this word or phrase, one literal and one figurative, always pick both and shorten their respective descriptions. Do this even if the sentence{'s' if len(sentences) > 1 else ''} only uses one of the meanings.
 - In case there is only a single meaning, return that.
-- DO NOT overfit the definition to the sentence{'s' if len(sentences) > 1 else ''}, but rather aim for a short general definition that fits the usage in {'each sentence' if len(sentences) > 1 else 'the sentence'}.
 
 Omission rules:
 - Omit any example sentences the matching meaning(s) included (often included within 「」 brackets).
