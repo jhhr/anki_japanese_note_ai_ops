@@ -116,18 +116,12 @@ Follow these rules:
 - Shorten and simplify the meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
 '''}
 
-Return a JSON array array of objects. Each object corresponds to a meaning and has the following fields:
+Return a JSON object with one `meanings` field containing an array of objects. Each object corresponds to a meaning and has the following fields:
 - "{meaning_index_field}": The index of the meaning (starting from 1).
 - "{jp_meaning_return_field}": The reworked Japanese meaning.
 - "{en_meaning_return_field}": The reworked English meaning.
 
 You do not need to rework all meanings, only those that seem not to fit well with the sentences; the array can be of any length, including empty if all meanings are fine.
-
-Example output format:
-[
-    {{"{meaning_index_field}": 1, "{jp_meaning_return_field}": "最初の意味の短い説明。", "{en_meaning_return_field}": "A short English translation of the first meaning."}},
-    {{"{meaning_index_field}": 3, "{jp_meaning_return_field}": "三番目の意味の短い説明。", "{en_meaning_return_field}": "A short English translation of the third meaning."}}
-]
 
 Word or phrase (and its reading):
 {word} ({reading})
@@ -140,14 +134,41 @@ Current meanings and sentences:
 {meanings_and_sentences}"""
     logger.debug(f"Prompt for updating meanings: {prompt}")
 
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "meanings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        meaning_index_field: {"type": "integer"},
+                        jp_meaning_return_field: {"type": "string"},
+                        en_meaning_return_field: {"type": "string"},
+                        dict_reference_return_field: {"type": "string"},
+                    },
+                    "required": [
+                        meaning_index_field,
+                        jp_meaning_return_field,
+                        en_meaning_return_field,
+                        dict_reference_return_field,
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["meanings"],
+        "additionalProperties": False,
+    }
+
     model = config.get("word_meaning_model", "")
-    result = get_response(model, prompt)
+    result = get_response(model, prompt, response_schema=response_schema)
     if result is None:
         # Return nothing if the call failed
         return {}
     updated_meanings: dict[NoteId, tuple[str, str]] = {}
-    if isinstance(result, list):
-        for meaning_obj in result:
+    if isinstance(result, dict) and "meanings" in result and isinstance(result["meanings"], list):
+        for meaning_obj in result["meanings"]:
             try:
                 assert (
                     isinstance(meaning_obj, dict)
@@ -164,14 +185,21 @@ Current meanings and sentences:
                 logger.warning(f"Invalid meaning object in result: {meaning_obj}")
                 continue
             meaning_index = meaning_obj[meaning_index_field] - 1
-            note_id = meaning_index_to_note_id.get(meaning_index)
-            if note_id is not None:
-                updated_meanings[note_id] = (
+            meaning_note_id: NoteId | None = meaning_index_to_note_id.get(meaning_index)
+            if meaning_note_id is not None:
+                updated_meanings[meaning_note_id] = (
                     meaning_obj[jp_meaning_return_field],
                     meaning_obj[en_meaning_return_field],
                 )
             else:
                 logger.warning(f"Meaning index {meaning_index + 1} has no corresponding note ID")
+    elif not isinstance(result, dict):
+        logger.warning("Updated meanings result was not a dictionary")
+    elif "meanings" not in result:
+        logger.warning("Updated meanings result missing 'meanings' field")
+    elif not isinstance(result["meanings"], list):
+        logger.warning("Updated meanings 'meanings' field was not a list")
+
     logger.debug(f"Updated meanings: {updated_meanings}")
     return updated_meanings
 
