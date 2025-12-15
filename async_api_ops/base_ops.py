@@ -323,7 +323,11 @@ def get_response_from_openai(
     if response_schema:
         data["response_format"] = {
             "type": "json_schema",
-            "schema": response_schema,
+            "json_schema": {
+                "name": "schema_name",
+                "schema": response_schema,
+                "strict": True,
+            },
         }
         logger.debug("Using response schema %s", response_schema)
 
