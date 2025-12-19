@@ -32,7 +32,14 @@ def get_sentences_for_note(
         return []
     word_list_field = get_field_config(config, "word_list_field", note_type)
     sentence_field = get_field_config(config, "sentence_field", note_type)
-    other_sentence_note_ids = mw.col.find_notes(f'"{word_list_field}:*{note.id}*" -nid:{note.id}')
+    if note.id == 0:
+        # New note, can't search for others using its ID
+        if exclude_self:
+            return []
+        return [note[sentence_field]]
+    query = f'"{word_list_field}:*{note.id}*" -nid:{note.id}'
+    logger.debug(f"Getting sentences for note {note.id} with query: {query}")
+    other_sentence_note_ids = mw.col.find_notes(query)
     other_sentences = [] if exclude_self else [note[sentence_field]]
     for onid in other_sentence_note_ids:
         onote = mw.col.get_note(onid)
