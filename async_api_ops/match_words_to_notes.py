@@ -2,6 +2,7 @@ import random
 import json
 import re
 import asyncio
+import threading
 import logging
 from typing import Union, Sequence, Callable, Any, Coroutine, cast
 from aqt import mw
@@ -254,6 +255,10 @@ def match_words_to_notes(
 
     logger.debug(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
 
+    # Dictionary to track locks per word to prevent race conditions
+    word_locks: dict[str, threading.Lock] = {}
+    word_locks_lock = threading.Lock()  # Lock to safely create new word locks
+
     def match_op(
         _,
         notes_to_add_dict: dict[str, list[Note]],
@@ -276,7 +281,7 @@ def match_words_to_notes(
         """
         logger.debug(f"match_op, notes_to_add_dict before: {notes_to_add_dict}")
         logger.debug(f"Processing word tuple at index {word_index}: {word}, reading: {reading}")
-        nonlocal processed_word_tuples
+        nonlocal processed_word_tuples, word_locks, word_locks_lock
         # If the word contains only non-japanese characters, skip it
         if not re.search(r"[ぁ-んァ-ン一-龯]", word):
             logger.debug(
@@ -292,267 +297,281 @@ def match_words_to_notes(
         ):
             word = word[:-2]
             reading = reading[:-2]
-        # Entries for words starting with the honorific prefix may use the kanji or hiragana so
-        # query for both
-        go_word_query = ""
-        if word.startswith("御"):
-            o_word = "お" + word[1:]
-            go_word = "ご" + word[1:]
-            go_word_query = (
-                f' OR "{word_kanjified_field}:{o_word}" OR "{word_normal_field}:{o_word}" OR'
-                f' "{word_kanjified_field}:{go_word}" OR "{word_normal_field}:{go_word}"'
+
+        # Get or create a lock for this specific word to prevent race conditions
+        with word_locks_lock:
+            if word not in word_locks:
+                word_locks[word] = threading.Lock()
+
+        # Acquire the lock for this word before checking/modifying notes_to_add_dict
+        with word_locks[word]:
+            # Entries for words starting with the honorific prefix may use the kanji or hiragana so
+            # query for both
+            go_word_query = ""
+            if word.startswith("御"):
+                o_word = "お" + word[1:]
+                go_word = "ご" + word[1:]
+                go_word_query = (
+                    f' OR "{word_kanjified_field}:{o_word}" OR "{word_normal_field}:{o_word}" OR'
+                    f' "{word_kanjified_field}:{go_word}" OR "{word_normal_field}:{go_word}"'
+                )
+
+            word_query = (
+                f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}" OR'
+                f' "{word_normal_field}:{reading}"{go_word_query})'
+            )
+            word_query_suru = (
+                f'("{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
+            )
+            no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
+            query = f"({word_query} OR {word_query_suru}) {no_x_in_sort_field}"
+            logger.debug(f"Searching for notes with query: {query}")
+            note_ids: Sequence[NoteId] = mw.col.find_notes(query)
+            # Filter by reading matches, we don't do this in the query since it's not easy to check
+            # for a reading where some parts are in katakana
+
+            hiragana_reading = to_hiragana(reading)
+            hiragana_reading_suru = to_hiragana(reading + "する")
+            matching_notes = []
+            for note_id in note_ids:
+                note = (
+                    mw.col.get_note(note_id)
+                    if note_id not in notes_to_update_dict
+                    else notes_to_update_dict[note_id]
+                )
+                if note and word_reading_field in note:
+                    note_reading = to_hiragana(note[word_reading_field])
+                    logger.debug(
+                        f"Comparing note reading: {note_reading} with {hiragana_reading} and"
+                        f" {hiragana_reading_suru}"
+                    )
+                    if note_reading in [hiragana_reading, hiragana_reading_suru]:
+                        matching_notes.append(note)
+
+            logger.debug(
+                f"Found matching notes: {[note[word_sort_field] for note in matching_notes]}"
             )
 
-        word_query = (
-            f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}" OR'
-            f' "{word_normal_field}:{reading}"{go_word_query})'
-        )
-        word_query_suru = (
-            f'("{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
-        )
-        no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
-        query = f"({word_query} OR {word_query_suru}) {no_x_in_sort_field}"
-        logger.debug(f"Searching for notes with query: {query}")
-        note_ids: Sequence[NoteId] = mw.col.find_notes(query)
-        # Filter by reading matches, we don't do this in the query since it's not easy to check
-        # for a reading where some parts are in katakana
+            # This part is why the locks are needed, async tasks should await for the lock before
+            # checking notes_to_add_dict
+            matching_new_notes = notes_to_add_dict.get(word, [])
 
-        hiragana_reading = to_hiragana(reading)
-        hiragana_reading_suru = to_hiragana(reading + "する")
-        matching_notes = []
-        for note_id in note_ids:
-            note = (
-                mw.col.get_note(note_id)
-                if note_id not in notes_to_update_dict
-                else notes_to_update_dict[note_id]
-            )
-            if note and word_reading_field in note:
-                note_reading = to_hiragana(note[word_reading_field])
-                logger.debug(
-                    f"Comparing note reading: {note_reading} with {hiragana_reading} and"
-                    f" {hiragana_reading_suru}"
-                )
-                if note_reading in [hiragana_reading, hiragana_reading_suru]:
-                    matching_notes.append(note)
+            if not matching_notes:
+                new_note = Note(col=mw.col, model=note_type)
+                new_note[word_kanjified_field] = word
+                new_note[word_normal_field] = word
+                new_note[word_reading_field] = reading
+                new_note[word_sort_field] = word
+                new_note.add_tag("new_matched_jp_word")
+                # Query for a note with a (kun)/(on) or (rX) marker in the sort field, we'll want to
+                # set the marker in this note appropriately based on that:
+                # - if there is (kun) --> this should be (on), or other way around
+                # - if there is (rX) --> this should be (rY) where Y is the next number in the sequence
+                # - if there is (kun)(rX) --> this should be (kun)(rY) where Y is the next number in
+                #   the sequence, same for (on)(rX)
+                # - if there is no marker, this should have none
+                marker_regex = f"^{word} ?(?:\((?:kun|on)\))?(?:\(r\d+\))?(?:\(m\d+\))?$"
+                marker_note_ids = mw.col.find_notes(f'"{word_sort_field}:re:{marker_regex}"')
+                # Additionally, search the notes_to_add_dict to see if any of them have a marker like
+                # this, as we'll need to increment the rX number higher than the largest one found
+                marker_notes = [mw.col.get_note(note_id) for note_id in marker_note_ids]
+                if word in notes_to_add_dict:
+                    for added_note in notes_to_add_dict[word]:
+                        if word_sort_field in added_note:
+                            marker_sort_field = added_note[word_sort_field]
+                            if re.match(rf"{marker_regex}", marker_sort_field):
+                                # If the marker matches, we can add this note ID to the marker notes
+                                marker_notes.append(added_note)
 
-        logger.debug(f"Found matching notes: {[note[word_sort_field] for note in matching_notes]}")
+                # When checking the marker notes, theres' two cases
+                # Case 1: The existing notes had some (rX) number, the new should be (rY) where Y is
+                #         the next number in the sequence. No edits needed to the existing notes
+                # Case 2: If the existing notes didn't have (rX) the new note will have (r2) and the
+                #         existing notes will be edited to have (r1)
+                def update_marker_note(a_marker_note: Note):
+                    # Case 2: No (rX) present
+                    # If there's other markers, place (r1) between (kun/on) and the rest
 
-        matching_new_notes = notes_to_add_dict.get(word, [])
+                    if a_marker_note.id and a_marker_note.id in notes_to_update_dict:
+                        # Replace note with the one from the dict so all edits to the note are in it
+                        a_marker_note = notes_to_update_dict[a_marker_note.id]
+                    other_markers_match = re.search(
+                        r"(\((?:kun|on)\))?(\(\w\d+\))?",
+                        a_marker_note[word_sort_field],
+                    )
+                    other_markers = ""
+                    kun_on_marker = ""
+                    if other_markers_match:
+                        kun_on_marker = other_markers_match.group(1) or ""
+                        other_markers = other_markers_match.group(2) or ""
+                    a_marker_note[word_sort_field] = f"{word} {kun_on_marker}(r1){other_markers}"
 
-        if not matching_notes and not matching_new_notes:
-            new_note = Note(col=mw.col, model=note_type)
-            new_note[word_kanjified_field] = word
-            new_note[word_normal_field] = word
-            new_note[word_reading_field] = reading
-            new_note[word_sort_field] = word
-            new_note.add_tag("new_matched_jp_word")
-            # Query for a note with a (kun)/(on) or (rX) marker in the sort field, we'll want to
-            # set the marker in this note appropriately based on that:
-            # - if there is (kun) --> this should be (on), or other way around
-            # - if there is (rX) --> this should be (rY) where Y is the next number in the sequence
-            # - if there is (kun)(rX) --> this should be (kun)(rY) where Y is the next number in
-            #   the sequence, same for (on)(rX)
-            # - if there is no marker, this should have none
-            marker_regex = f"^{word} ?(?:\((?:kun|on)\))?(?:\(r\d+\))?(?:\(m\d+\))?$"
-            marker_note_ids = mw.col.find_notes(f'"{word_sort_field}:re:{marker_regex}"')
-            # Additionally, search the notes_to_add_dict to see if any of them have a marker like
-            # this, as we'll need to increment the rX number higher than the largest one found
-            marker_notes = [mw.col.get_note(note_id) for note_id in marker_note_ids]
-            if word in notes_to_add_dict:
-                for added_note in notes_to_add_dict[word]:
-                    if word_sort_field in added_note:
-                        marker_sort_field = added_note[word_sort_field]
-                        if re.match(rf"{marker_regex}", marker_sort_field):
-                            # If the marker matches, we can add this note ID to the marker notes
-                            marker_notes.append(added_note)
+                    # This is needed for an existing note that hasn't been edited yet
+                    if a_marker_note.id and a_marker_note.id not in notes_to_update_dict:
+                        notes_to_update_dict[a_marker_note.id] = a_marker_note
 
-            # When checking the marker notes, theres' two cases
-            # Case 1: The existing notes had some (rX) number, the new should be (rY) where Y is
-            #         the next number in the sequence. No edits needed to the existing notes
-            # Case 2: If the existing notes didn't have (rX) the new note will have (r2) and the
-            #         existing notes will be edited to have (r1)
-            def update_marker_note(a_marker_note: Note):
-                # Case 2: No (rX) present
-                # If there's other markers, place (r1) between (kun/on) and the rest
-
-                if a_marker_note.id and a_marker_note.id in notes_to_update_dict:
-                    # Replace note with the one from the dict so all edits to the note are in it
-                    a_marker_note = notes_to_update_dict[a_marker_note.id]
-                other_markers_match = re.search(
-                    r"(\((?:kun|on)\))?(\(\w\d+\))?",
-                    a_marker_note[word_sort_field],
-                )
-                other_markers = ""
-                kun_on_marker = ""
-                if other_markers_match:
-                    kun_on_marker = other_markers_match.group(1) or ""
-                    other_markers = other_markers_match.group(2) or ""
-                a_marker_note[word_sort_field] = f"{word} {kun_on_marker}(r1){other_markers}"
-
-                # This is needed for an existing note that hasn't been edited yet
-                if a_marker_note.id and a_marker_note.id not in notes_to_update_dict:
-                    notes_to_update_dict[a_marker_note.id] = a_marker_note
-
-            if len(marker_notes) == 1:
-                marker_note = marker_notes[0]
-                if marker_note and word_sort_field in marker_note:
-                    if marker_note.id and marker_note.id in notes_to_update_dict:
-                        marker_note = notes_to_update_dict[marker_note.id]
-                    marker_sort_field = marker_note[word_sort_field]
-                    # Check if the sort field has a (kun) or (on) marker
-                    if "(kun)" in marker_sort_field:
-                        new_note[word_sort_field] = f"{word} (on)"
-                    elif "(on)" in marker_sort_field:
-                        new_note[word_sort_field] = f"{word} (kun)"
-                    else:
-                        # If no (kun)/(on) marker, just use the word
-                        new_note[word_sort_field] = word
-                    # Check for (rX) markers
-                    r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
-                    if r_match:
-                        r_number = int(r_match.group(1)) + 1
-                        new_note[word_sort_field] += f" (r{r_number})"
-                    else:
-                        new_note[word_sort_field] += " (r2)"
-                        update_marker_note(marker_note)
-
-            elif len(marker_notes) > 1:
-                # This ought to be case where there's either zero or multiple rX markers for the
-                # same word, so get the largest rX number and otherwise use the same (kun)/(on)
-                # logic as above
-                largest_r_number = 0
-                # Hopefully there are only either (kun)(rX) or (on)(rX) markers, and not both
-                # as we can't know which kind of reading this word is using without doing some
-                # reading lookups for the word...
-                found_kun = False
-                found_on = False
-                for marker_note in marker_notes:
+                if len(marker_notes) == 1:
+                    marker_note = marker_notes[0]
                     if marker_note and word_sort_field in marker_note:
+                        if marker_note.id and marker_note.id in notes_to_update_dict:
+                            marker_note = notes_to_update_dict[marker_note.id]
                         marker_sort_field = marker_note[word_sort_field]
+                        # Check if the sort field has a (kun) or (on) marker
                         if "(kun)" in marker_sort_field:
-                            found_kun = True
+                            new_note[word_sort_field] = f"{word} (on)"
                         elif "(on)" in marker_sort_field:
-                            found_on = True
+                            new_note[word_sort_field] = f"{word} (kun)"
+                        else:
+                            # If no (kun)/(on) marker, just use the word
+                            new_note[word_sort_field] = word
+                        # Check for (rX) markers
                         r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
                         if r_match:
-                            r_number = int(r_match.group(1))
-                            if r_number > largest_r_number:
-                                largest_r_number = r_number
-                if found_kun and not found_on:
-                    new_note[word_sort_field] = f"{word} (kun)(r{largest_r_number + 1})"
-                elif found_on and not found_kun:
-                    new_note[word_sort_field] = f"{word} (on)(r{largest_r_number + 1})"
-                elif not found_kun and not found_on:
-                    new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
-                else:
-                    # If we found both (kun) and (on) markers, we can't decide which one to use,
-                    # so just use the word without any markers and add a tag to the note for this
-                    # to be manually checked
-                    new_note[word_sort_field] = word
-                    new_note.add_tag("check_reading_marker")
-                if largest_r_number == 0:
-                    # Case 2: need to update the marker notes
+                            r_number = int(r_match.group(1)) + 1
+                            new_note[word_sort_field] += f" (r{r_number})"
+                        else:
+                            new_note[word_sort_field] += " (r2)"
+                            update_marker_note(marker_note)
+
+                elif len(marker_notes) > 1:
+                    # This ought to be case where there's either zero or multiple rX markers for the
+                    # same word, so get the largest rX number and otherwise use the same (kun)/(on)
+                    # logic as above
+                    largest_r_number = 0
+                    # Hopefully there are only either (kun)(rX) or (on)(rX) markers, and not both
+                    # as we can't know which kind of reading this word is using without doing some
+                    # reading lookups for the word...
+                    found_kun = False
+                    found_on = False
                     for marker_note in marker_notes:
-                        update_marker_note(marker_note)
+                        if marker_note and word_sort_field in marker_note:
+                            marker_sort_field = marker_note[word_sort_field]
+                            if "(kun)" in marker_sort_field:
+                                found_kun = True
+                            elif "(on)" in marker_sort_field:
+                                found_on = True
+                            r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
+                            if r_match:
+                                r_number = int(r_match.group(1))
+                                if r_number > largest_r_number:
+                                    largest_r_number = r_number
+                    if found_kun and not found_on:
+                        new_note[word_sort_field] = f"{word} (kun)(r{largest_r_number + 1})"
+                    elif found_on and not found_kun:
+                        new_note[word_sort_field] = f"{word} (on)(r{largest_r_number + 1})"
+                    elif not found_kun and not found_on:
+                        new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                    else:
+                        # If we found both (kun) and (on) markers, we can't decide which one to use,
+                        # so just use the word without any markers and add a tag to the note for this
+                        # to be manually checked
+                        new_note[word_sort_field] = word
+                        new_note.add_tag("check_reading_marker")
+                    if largest_r_number == 0:
+                        # Case 2: need to update the marker notes
+                        for marker_note in marker_notes:
+                            update_marker_note(marker_note)
 
-            new_note[furigana_sentence_field] = sentence
-            new_note[meaning_field] = ""
-            new_note[part_of_speech_field] = WORD_LIST_TO_PART_OF_SPEECH.get(word_list_key, "")
-            new_note[english_meaning_field] = ""
-            new_note_id = make_new_note_id(new_note)
-            new_note[new_note_id_field] = str(new_note_id)
-            notes_to_add_dict.setdefault(word, []).append(new_note)
-            create_meaning_result = clean_meaning_in_note(
-                config, new_note, notes_to_add_dict, notes_to_update_dict
-            )
-            new_note[word_sort_field] = (
-                new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
-            )
-            processed_word_tuples[word_index] = (
-                word,
-                reading,
-                new_note[word_sort_field],
-                new_note_id,
-            )
-            return create_meaning_result
-
-        if matching_new_notes:
-            # If we have notes to add that match the word, we should add them to the list of notes
-            # to check against, so we are comparing against both existing notes and new notes
-            matching_notes.extend(matching_new_notes)
-
-        # Get all the meanings from the notes to check against the sentence
-        meanings: list[tuple[str, int, NoteId, str, str, str]] = []
-        # meaning is a tuple of (jp_meaning, meaning_number, note_id, example_sentence, en_meaning)
-        largest_meaning_index = 0
-        note_to_copy = None
-        for note in matching_notes:
-            logger.debug(
-                f"Processing note {note.id} for word {word} with reading {reading}, sort field"
-                f" {note[word_sort_field]}"
-            )
-            if meaning_field in note:
-                meaning = note[meaning_field]
-                other_sentence = (
-                    note[furigana_sentence_field] if furigana_sentence_field in note else ""
+                new_note[furigana_sentence_field] = sentence
+                new_note[meaning_field] = ""
+                new_note[part_of_speech_field] = WORD_LIST_TO_PART_OF_SPEECH.get(word_list_key, "")
+                new_note[english_meaning_field] = ""
+                new_note_id = make_new_note_id(new_note)
+                new_note[new_note_id_field] = str(new_note_id)
+                # Add the new note to the notes to add dict
+                # With the threading lock in place other tasks processing the same word can find it
+                notes_to_add_dict.setdefault(word, []).append(new_note)
+                create_meaning_result = clean_meaning_in_note(
+                    config, new_note, notes_to_add_dict, notes_to_update_dict
                 )
-                english_meaning = (
-                    note[english_meaning_field] if english_meaning_field in note else ""
+                new_note[word_sort_field] = (
+                    new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
                 )
-                match_word = note[word_kanjified_field] if word_kanjified_field in note else ""
-                if meaning:
-                    sort_field = note[word_sort_field]
-                    # Get the meaning number, if any from sort field, in the form (m1), (m2), etc.
-                    match = re.match(r"\(m(\d+)\)", sort_field)
-                    matched_meaning_number = 0
-                    if not note_to_copy:
-                        # Ensure we have a note to copy that has a meaning
-                        note_to_copy = note
-                    if match:
-                        matched_meaning_number = int(match.group(1))
-                        if matched_meaning_number > largest_meaning_index:
-                            largest_meaning_index = matched_meaning_number
+                processed_word_tuples[word_index] = (
+                    word,
+                    reading,
+                    new_note[word_sort_field],
+                    new_note_id,
+                )
+                return create_meaning_result
+
+            if matching_new_notes:
+                # If we have notes to add that match the word, we should add them to the list of notes
+                # to check against, so we are comparing against both existing notes and new notes
+                matching_notes.extend(matching_new_notes)
+
+            # Get all the meanings from the notes to check against the sentence
+            meanings: list[tuple[str, int, NoteId, str, str, str]] = []
+            # meaning is a tuple of (jp_meaning, meaning_number, note_id, example_sentence, en_meaning)
+            largest_meaning_index = 0
+            note_to_copy = None
+            for note in matching_notes:
+                logger.debug(
+                    f"Processing note {note.id} for word {word} with reading {reading}, sort field"
+                    f" {note[word_sort_field]}"
+                )
+                if meaning_field in note:
+                    meaning = note[meaning_field]
+                    other_sentence = (
+                        note[furigana_sentence_field] if furigana_sentence_field in note else ""
+                    )
+                    english_meaning = (
+                        note[english_meaning_field] if english_meaning_field in note else ""
+                    )
+                    match_word = note[word_kanjified_field] if word_kanjified_field in note else ""
+                    if meaning:
+                        sort_field = note[word_sort_field]
+                        # Get the meaning number, if any from sort field, in the form (m1), (m2), etc.
+                        match = re.match(r"\(m(\d+)\)", sort_field)
+                        matched_meaning_number = 0
+                        if not note_to_copy:
+                            # Ensure we have a note to copy that has a meaning
                             note_to_copy = note
-                    meanings.append((
-                        meaning,
-                        matched_meaning_number,
-                        note.id,
-                        other_sentence,
-                        english_meaning,
-                        match_word,
-                    ))
+                        if match:
+                            matched_meaning_number = int(match.group(1))
+                            if matched_meaning_number > largest_meaning_index:
+                                largest_meaning_index = matched_meaning_number
+                                note_to_copy = note
+                        meanings.append((
+                            meaning,
+                            matched_meaning_number,
+                            note.id,
+                            other_sentence,
+                            english_meaning,
+                            match_word,
+                        ))
+                    else:
+                        logger.debug(f"Note {note.id} has empty meaning field")
                 else:
-                    logger.debug(f"Note {note.id} has empty meaning field")
-            else:
-                logger.debug(f"Note {note.id} is missing meaning field")
-        if note_to_copy:
-            # use the updated note if available
-            if note_to_copy.id in notes_to_update_dict:
-                note_to_copy = notes_to_update_dict[note_to_copy.id]
-        if not meanings:
-            logger.debug(f"No meanings found for word {word} with reading {reading}")
-            # We found notes but all were missing meanings, have to skip this word as it can't
-            # processed properly
-            return False
-        # Sort meanings by the meaning number
-        meanings.sort(key=lambda x: x[1])
-        meanings_str = ""
-        for i, (
-            jp_meaning,
-            _,
-            _,
-            example_sentence,
-            en_meaning,
-            match_word,
-        ) in enumerate(meanings):
-            meanings_str += f"""Meaning number {i + 1}:
+                    logger.debug(f"Note {note.id} is missing meaning field")
+            if note_to_copy:
+                # use the updated note if available
+                if note_to_copy.id in notes_to_update_dict:
+                    note_to_copy = notes_to_update_dict[note_to_copy.id]
+            if not meanings:
+                logger.debug(f"No meanings found for word {word} with reading {reading}")
+                # We found notes but all were missing meanings, have to skip this word as it can't
+                # processed properly
+                return False
+            # Sort meanings by the meaning number
+            meanings.sort(key=lambda x: x[1])
+            meanings_str = ""
+            for i, (
+                jp_meaning,
+                _,
+                _,
+                example_sentence,
+                en_meaning,
+                match_word,
+            ) in enumerate(meanings):
+                meanings_str += f"""Meaning number {i + 1}:
 - *match_word*: {match_word}
 - *jp_meaning*: {jp_meaning}
 - *example_sentence*: {example_sentence}
 - *en_meaning*: {en_meaning}
 """
 
-        instructions = """You are an expert Japanese lexicographer. Your task is to analyze how a Japanese word is used in a _current sentence_ and compare it to a list of existing dictionary meanings. You are designed to output JSON.
+            instructions = """You are an expert Japanese lexicographer. Your task is to analyze how a Japanese word is used in a _current sentence_ and compare it to a list of existing dictionary meanings. You are designed to output JSON.
 
 **Primary Goal: Minimize creation of new meanings**
 Your main goal is to try to contain all closely related nuances in a single meaning. Always modify one of the existing meanings, if it somewhat matches the current context and could be adjusted to fit the current and previous contexts. However, do not refer to specific phrases in a meaning, to avoid overfitting; to fit more contexts, try to explain the meaning in general terms using easy-to-understand language. Keep the meaning short, 3 sentences is already too long. Only if such modifications no longer make sense because the existings meanings are not close enough or further modification would make the meaning too long and/or complicated, you may consider the **CREATE NEW** action.
@@ -602,312 +621,315 @@ None of the meanings fit, so you create a new one.
 }
 ```"""
 
-        prompt = f"""MEANINGS AND EXAMPLE SENTENCES
+            prompt = f"""MEANINGS AND EXAMPLE SENTENCES
 {meanings_str}
 
 _Targeted word_: {word}
 _Current sentence_: {sentence}"""
 
-        # response_schema = {
-        #     "type": "object",
-        #     "properties": {
-        #         "meanings": {
-        #             "type": "array",
-        #             "description": "Array of meaning objects for this word",
-        #             "items": {
-        #                 "type": "object",
-        #                 "properties": {
-        #                     "is_matched_meaning": {
-        #                         "type": "boolean",
-        #                         "description": "Whether this meaning matches an existing note",
-        #                     },
-        #                     "meaning_number": {
-        #                         "type": "integer",
-        #                         "description": (
-        #                             "The number of the listed meaning if it matches, or null if it"
-        #                             " doesn't match"
-        #                         ),
-        #                     },
-        #                     "en_meaning": {
-        #                         "type": "string",
-        #                         "description": "New English meaning definition for the word",
-        #                     },
-        #                     "jp_meaning": {
-        #                         "type": "string",
-        #                         "description": "New Japanese meaning definition for the word",
-        #                     },
-        #                 },
-        #                 "required": ["is_matched_meaning"],
-        #             },
-        #         }
-        #     },
-        #     "required": ["meanings"],
-        # }
+            # response_schema = {
+            #     "type": "object",
+            #     "properties": {
+            #         "meanings": {
+            #             "type": "array",
+            #             "description": "Array of meaning objects for this word",
+            #             "items": {
+            #                 "type": "object",
+            #                 "properties": {
+            #                     "is_matched_meaning": {
+            #                         "type": "boolean",
+            #                         "description": "Whether this meaning matches an existing note",
+            #                     },
+            #                     "meaning_number": {
+            #                         "type": "integer",
+            #                         "description": (
+            #                             "The number of the listed meaning if it matches, or null if it"
+            #                             " doesn't match"
+            #                         ),
+            #                     },
+            #                     "en_meaning": {
+            #                         "type": "string",
+            #                         "description": "New English meaning definition for the word",
+            #                     },
+            #                     "jp_meaning": {
+            #                         "type": "string",
+            #                         "description": "New Japanese meaning definition for the word",
+            #                     },
+            #                 },
+            #                 "required": ["is_matched_meaning"],
+            #             },
+            #         }
+            #     },
+            #     "required": ["meanings"],
+            # }
 
-        # The response is not expected to be very long, 1k tokens would about 30 meanings and
-        # generally a word might have 1-3 meanings with some rare words having 5+
-        # Reaching this limit very likely means the model got stuck in a loop repeating the same
-        # text over and over
-        # However the thinking tokens are also counted towards the limit so the total token count
-        # of thinking + response must be considered. Thinking can take a several thousand tokens
-        max_output_tokens = 8000
-        logger.debug(f"\n\nmeanings_str: {meanings_str}")
+            # The response is not expected to be very long, 1k tokens would about 30 meanings and
+            # generally a word might have 1-3 meanings with some rare words having 5+
+            # Reaching this limit very likely means the model got stuck in a loop repeating the same
+            # text over and over
+            # However the thinking tokens are also counted towards the limit so the total token count
+            # of thinking + response must be considered. Thinking can take a several thousand tokens
+            max_output_tokens = 8000
+            logger.debug(f"\n\nmeanings_str: {meanings_str}")
 
-        raw_result = get_response(
-            model,
-            prompt,
-            cancel_state=cancel_state,
-            instructions=instructions,
-            # The response schema seems to actually make the model mess up the result more as the
-            # schema doesn't match the complex rules described in the instructions
-            # response_schema=response_schema,
-            max_output_tokens=max_output_tokens,
-            json_result_corrector=json_result_corrector,
-        )
-        logger.debug(f"Raw result: {raw_result}")
-        if raw_result is None:
-            logger.debug("Failed to get a response from the API.")
-            # If the prompt failed, return nothing
-            return False
-        meaning_action = None
-        # First get the list of meanings from the raw result
-        if isinstance(raw_result, dict):
-            meaning_action = raw_result
-        elif isinstance(raw_result, list) and len(raw_result) > 0:
-            # If the result is a list, get the first item
-            meaning_action = raw_result[0]
-        else:
-            logger.debug(
-                f"Error: Expected a list or dict, got {type(raw_result)} instead. Result:"
-                f" {raw_result}"
+            raw_result = get_response(
+                model,
+                prompt,
+                cancel_state=cancel_state,
+                instructions=instructions,
+                # The response schema seems to actually make the model mess up the result more as the
+                # schema doesn't match the complex rules described in the instructions
+                # response_schema=response_schema,
+                max_output_tokens=max_output_tokens,
+                json_result_corrector=json_result_corrector,
             )
-            return False
-        # Check the meaning_action structure
-        if "meaning_number" in meaning_action and not isinstance(
-            meaning_action["meaning_number"], (int, type(None))
-        ):
-            logger.debug(
-                "Error: invalid meaning action, 'meaning_number' is not an int or"
-                f" None. Result: {meaning_action}"
-            )
-            return False
-        if "is_matched_meaning" in meaning_action and not isinstance(
-            meaning_action["is_matched_meaning"], bool
-        ):
-            logger.debug(
-                "Error: invalid meaning action, 'is_matched_meaning' is not a bool."
-                f" Result: {meaning_action}"
-            )
-            return False
-        if "jp_meaning" in meaning_action and not isinstance(
-            meaning_action["jp_meaning"], (str, type(None))
-        ):
-            logger.debug(
-                "Error: invalid meaning action, 'jp_meaning' is not a str or None."
-                f" Result: {meaning_action}"
-            )
-            return False
-        if "en_meaning" in meaning_action and not isinstance(
-            meaning_action["en_meaning"], (str, type(None))
-        ):
-            logger.debug(
-                "Error: invalid meaning action, 'en_meaning' is not a str or None."
-                f" Result: {meaning_action}"
-            )
-            return False
-        if "is_matched_meaning" in meaning_action and "meaning_number" not in meaning_action:
-            logger.debug(
-                "Error: invalid meaning action, 'is_matched_meaning' is set but"
-                f" 'meaning_number' is not. Result: {meaning_action}"
-            )
-            return False
-        if "meaning_number" in meaning_action and meaning_action["meaning_number"] is not None:
-            if (
-                meaning_action["meaning_number"] < 1
-                or meaning_action["meaning_number"] > len(meanings) + 1
+            logger.debug(f"Raw result: {raw_result}")
+            if raw_result is None:
+                logger.debug("Failed to get a response from the API.")
+                # If the prompt failed, return nothing
+                return False
+            meaning_action = None
+            # First get the list of meanings from the raw result
+            if isinstance(raw_result, dict):
+                meaning_action = raw_result
+            elif isinstance(raw_result, list) and len(raw_result) > 0:
+                # If the result is a list, get the first item
+                meaning_action = raw_result[0]
+            else:
+                logger.debug(
+                    f"Error: Expected a list or dict, got {type(raw_result)} instead. Result:"
+                    f" {raw_result}"
+                )
+                return False
+            # Check the meaning_action structure
+            if "meaning_number" in meaning_action and not isinstance(
+                meaning_action["meaning_number"], (int, type(None))
             ):
                 logger.debug(
-                    "Error: invalid meaning action, 'meaning_number' is out of range."
+                    "Error: invalid meaning action, 'meaning_number' is not an int or"
+                    f" None. Result: {meaning_action}"
+                )
+                return False
+            if "is_matched_meaning" in meaning_action and not isinstance(
+                meaning_action["is_matched_meaning"], bool
+            ):
+                logger.debug(
+                    "Error: invalid meaning action, 'is_matched_meaning' is not a bool."
                     f" Result: {meaning_action}"
                 )
                 return False
-        is_matched_meaning = meaning_action.get("is_matched_meaning", False)
-        meaning_number = meaning_action.get("meaning_number", None)
-        jp_meaning = meaning_action.get("jp_meaning", None)
-        en_meaning = meaning_action.get("en_meaning", None)
-        # If meaning_number is too big, the AI got confused, skip this
-        if meaning_number is not None and meaning_number > len(meanings):
-            logger.debug(
-                "Error: invalid 'meaning_number' in meaning action, too large. Result:"
-                f" {meaning_action}"
-            )
-            return False
-        if is_matched_meaning and meaning_number is not None:
-            meaning_number = meaning_number - 1  # Convert to 0-based index
-            try:
-                meanings[meaning_number]
-            except IndexError:
+            if "jp_meaning" in meaning_action and not isinstance(
+                meaning_action["jp_meaning"], (str, type(None))
+            ):
                 logger.debug(
-                    f"Error: Matched meaning number {meaning_number} is out of range for"
-                    f" word {word} with reading {reading}"
+                    "Error: invalid meaning action, 'jp_meaning' is not a str or None."
+                    f" Result: {meaning_action}"
                 )
                 return False
-
-        if not is_matched_meaning and not jp_meaning and not en_meaning:
-            logger.debug(
-                "Error: Meaning action is not a match and is not modifying"
-                f" either meaning. Result: {meaning_action}"
-            )
-            return False
-        if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
-            # If either jp_meaning or en_meaning is set, we should treat this as a new meaning
-            # though technically the requirement was for both, we'll accept this as still useful
-            # (semi)valid action CREATE NEW
-            logger.debug(
-                f"Interpreting odd meaning action as CREATE NEW for word {word} with reading"
-                f" {reading}"
-            )
-            meaning_action = {
-                "meaning_number": None,
-                "is_matched_meaning": False,
-                "jp_meaning": jp_meaning,
-                "en_meaning": en_meaning,
-            }
-        logger.debug(
-            f"Valid meaning action for word {word} with reading {reading}: {meaning_action}"
-        )
-        if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
-            # Action CREATE NEW. duplicate the note with the biggest meaning number, incrementing it by 1
-            if meanings:
-                largest_meaning_index += 1
-            if note_to_copy:
-                if note_to_copy.id in notes_to_update_dict:
-                    # Replace note object from dict if its there
-                    note_to_copy = notes_to_update_dict[note_to_copy.id]
-                new_note = copy_into_new_note(note_to_copy)
-                # Don't copy tags and the word list field to the new note
-                new_note.set_tags_from_str("")
-                new_note[word_list_field] = ""
-                new_note[meaning_audio_field] = ""
-                new_note.add_tag("new_matched_jp_word")
-                new_note[meaning_field] = jp_meaning.strip() if jp_meaning else ""
-                new_note[english_meaning_field] = en_meaning.strip() if en_meaning else ""
-
-                # If we're copying a note, we need to ensure the meaning number is at least 2
-                # as the first meaning should be (m1)
-                largest_meaning_index = max(largest_meaning_index, 2)
-                # Either replace the (mX) in the sort field, or if there was none, add it
-                prev_sort_field = new_note[word_sort_field]
-                mxRec = re.compile(r"\(m(\d+)\)")
-                # Additionally, check notes_to_add_dict for any notes we've added for this word
-                # during this run, as we'll need to use the largest meaning index out of them
-                if word in notes_to_add_dict:
-                    for added_note in notes_to_add_dict[word]:
-                        if word_sort_field in added_note:
-                            added_sort_field = added_note[word_sort_field]
-                            mx_match = mxRec.search(added_sort_field)
-                            if mx_match:
-                                # If we found a (mX) in the sort field,
-                                # update the largest meaning index
-                                largest_meaning_index = max(
-                                    largest_meaning_index, int(mx_match.group(1)) + 1
-                                )
-                new_note_id = make_new_note_id(new_note)
-                new_note[new_note_id_field] = str(new_note_id)
-                if prev_sort_field and mxRec.search(prev_sort_field):
-                    # Replace the existing (mX) with the new meaning number
-                    new_note[word_sort_field] = mxRec.sub(
-                        f"(m{largest_meaning_index})", prev_sort_field
-                    )
-                elif prev_sort_field:
-                    if re.search(r"\(\w\d+\)", prev_sort_field):
-                        # If there is no (mX) but some other number, add meaning number to end
-                        # And update the note_to_copy, since it should a meaning number now too
-                        new_note[word_sort_field] += f"(m{largest_meaning_index})"
-                        note_to_copy[word_sort_field] += f"(m{largest_meaning_index - 1})"
-                    else:
-                        # Else, same but add a space
-                        new_note[word_sort_field] += f" (m{largest_meaning_index})"
-                        note_to_copy[word_sort_field] += f" (m{largest_meaning_index - 1})"
-                        note_to_copy[word_sort_field] = (
-                            note_to_copy[word_sort_field].replace(") (", ")(").replace("  ", " ")
-                        )
-                    if note_to_copy.id not in notes_to_update_dict:
-                        notes_to_update_dict[note_to_copy.id] = note_to_copy
-                # Note to copy was missing sort field somehow? Add it now + the meaning numbers
-                else:
-                    new_note[word_sort_field] = f"{word} (m{largest_meaning_index})"
-                    note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index - 1})"
-                    if note_to_copy.id not in notes_to_update_dict:
-                        notes_to_update_dict[note_to_copy.id] = note_to_copy
-                notes_to_add_dict.setdefault(word, []).append(new_note)
-                new_note[word_sort_field] = (
-                    new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
+            if "en_meaning" in meaning_action and not isinstance(
+                meaning_action["en_meaning"], (str, type(None))
+            ):
+                logger.debug(
+                    "Error: invalid meaning action, 'en_meaning' is not a str or None."
+                    f" Result: {meaning_action}"
                 )
-                # Note, new_note.id will be 0 here, we'll instead use the sort field value to
-                # find it after insertion and then update the processed_word_tuples
-                processed_word_tuples[word_index] = (
-                    word,
-                    reading,
-                    new_note[word_sort_field],
-                    new_note_id,
+                return False
+            if "is_matched_meaning" in meaning_action and "meaning_number" not in meaning_action:
+                logger.debug(
+                    "Error: invalid meaning action, 'is_matched_meaning' is set but"
+                    f" 'meaning_number' is not. Result: {meaning_action}"
+                )
+                return False
+            if "meaning_number" in meaning_action and meaning_action["meaning_number"] is not None:
+                if (
+                    meaning_action["meaning_number"] < 1
+                    or meaning_action["meaning_number"] > len(meanings) + 1
+                ):
+                    logger.debug(
+                        "Error: invalid meaning action, 'meaning_number' is out of range."
+                        f" Result: {meaning_action}"
+                    )
+                    return False
+            is_matched_meaning = meaning_action.get("is_matched_meaning", False)
+            meaning_number = meaning_action.get("meaning_number", None)
+            jp_meaning = meaning_action.get("jp_meaning", None)
+            en_meaning = meaning_action.get("en_meaning", None)
+            # If meaning_number is too big, the AI got confused, skip this
+            if meaning_number is not None and meaning_number > len(meanings):
+                logger.debug(
+                    "Error: invalid 'meaning_number' in meaning action, too large. Result:"
+                    f" {meaning_action}"
+                )
+                return False
+            if is_matched_meaning and meaning_number is not None:
+                meaning_number = meaning_number - 1  # Convert to 0-based index
+                try:
+                    meanings[meaning_number]
+                except IndexError:
+                    logger.debug(
+                        f"Error: Matched meaning number {meaning_number} is out of range for"
+                        f" word {word} with reading {reading}"
+                    )
+                    return False
+
+            if not is_matched_meaning and not jp_meaning and not en_meaning:
+                logger.debug(
+                    "Error: Meaning action is not a match and is not modifying"
+                    f" either meaning. Result: {meaning_action}"
+                )
+                return False
+            if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
+                # If either jp_meaning or en_meaning is set, we should treat this as a new meaning
+                # though technically the requirement was for both, we'll accept this as still useful
+                # (semi)valid action CREATE NEW
+                logger.debug(
+                    f"Interpreting odd meaning action as CREATE NEW for word {word} with reading"
+                    f" {reading}"
+                )
+                meaning_action = {
+                    "meaning_number": None,
+                    "is_matched_meaning": False,
+                    "jp_meaning": jp_meaning,
+                    "en_meaning": en_meaning,
+                }
+            logger.debug(
+                f"Valid meaning action for word {word} with reading {reading}: {meaning_action}"
+            )
+            if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
+                # Action CREATE NEW. duplicate the note with the biggest meaning number, incrementing it by 1
+                if meanings:
+                    largest_meaning_index += 1
+                if note_to_copy:
+                    if note_to_copy.id in notes_to_update_dict:
+                        # Replace note object from dict if its there
+                        note_to_copy = notes_to_update_dict[note_to_copy.id]
+                    new_note = copy_into_new_note(note_to_copy)
+                    # Don't copy tags and the word list field to the new note
+                    new_note.set_tags_from_str("")
+                    new_note[word_list_field] = ""
+                    new_note[meaning_audio_field] = ""
+                    new_note.add_tag("new_matched_jp_word")
+                    new_note[meaning_field] = jp_meaning.strip() if jp_meaning else ""
+                    new_note[english_meaning_field] = en_meaning.strip() if en_meaning else ""
+
+                    # If we're copying a note, we need to ensure the meaning number is at least 2
+                    # as the first meaning should be (m1)
+                    largest_meaning_index = max(largest_meaning_index, 2)
+                    # Either replace the (mX) in the sort field, or if there was none, add it
+                    prev_sort_field = new_note[word_sort_field]
+                    mxRec = re.compile(r"\(m(\d+)\)")
+                    # Additionally, check notes_to_add_dict for any notes we've added for this word
+                    # during this run, as we'll need to use the largest meaning index out of them
+                    if word in notes_to_add_dict:
+                        for added_note in notes_to_add_dict[word]:
+                            if word_sort_field in added_note:
+                                added_sort_field = added_note[word_sort_field]
+                                mx_match = mxRec.search(added_sort_field)
+                                if mx_match:
+                                    # If we found a (mX) in the sort field,
+                                    # update the largest meaning index
+                                    largest_meaning_index = max(
+                                        largest_meaning_index, int(mx_match.group(1)) + 1
+                                    )
+                    new_note_id = make_new_note_id(new_note)
+                    new_note[new_note_id_field] = str(new_note_id)
+                    if prev_sort_field and mxRec.search(prev_sort_field):
+                        # Replace the existing (mX) with the new meaning number
+                        new_note[word_sort_field] = mxRec.sub(
+                            f"(m{largest_meaning_index})", prev_sort_field
+                        )
+                    elif prev_sort_field:
+                        if re.search(r"\(\w\d+\)", prev_sort_field):
+                            # If there is no (mX) but some other number, add meaning number to end
+                            # And update the note_to_copy, since it should a meaning number now too
+                            new_note[word_sort_field] += f"(m{largest_meaning_index})"
+                            note_to_copy[word_sort_field] += f"(m{largest_meaning_index - 1})"
+                        else:
+                            # Else, same but add a space
+                            new_note[word_sort_field] += f" (m{largest_meaning_index})"
+                            note_to_copy[word_sort_field] += f" (m{largest_meaning_index - 1})"
+                            note_to_copy[word_sort_field] = (
+                                note_to_copy[word_sort_field]
+                                .replace(") (", ")(")
+                                .replace("  ", " ")
+                            )
+                        if note_to_copy.id not in notes_to_update_dict:
+                            notes_to_update_dict[note_to_copy.id] = note_to_copy
+                    # Note to copy was missing sort field somehow? Add it now + the meaning numbers
+                    else:
+                        new_note[word_sort_field] = f"{word} (m{largest_meaning_index})"
+                        note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index - 1})"
+                        if note_to_copy.id not in notes_to_update_dict:
+                            notes_to_update_dict[note_to_copy.id] = note_to_copy
+                    notes_to_add_dict.setdefault(word, []).append(new_note)
+                    new_note[word_sort_field] = (
+                        new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
+                    )
+                    # Note, new_note.id will be 0 here, we'll instead use the sort field value to
+                    # find it after insertion and then update the processed_word_tuples
+                    processed_word_tuples[word_index] = (
+                        word,
+                        reading,
+                        new_note[word_sort_field],
+                        new_note_id,
+                    )
+                    return True
+                else:
+                    logger.debug(f"Error: No note to copy for word {word} with reading {reading}")
+                    return False
+            elif is_matched_meaning and meaning_number is not None:
+                # Action MATCH. update the meaning in the note with the matched meaning
+                logger.debug(
+                    f"Matched meaning JP:'{jp_meaning}'/EN:'{en_meaning}' for word {word} with"
+                    f" reading {reading}, meaning number {meaning_number}, meanings: {meanings}"
+                )
+                # We have a match, so we can update the note with the matched meaning
+                matched_note = None
+
+                matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number]
+                for note in matching_notes:
+                    if note.id == matched_note_id and matched_meaning == note[meaning_field]:
+                        # Ensure the matched meaning is the same as in the note to account for id=0
+                        matched_note = note
+                        if matched_note.id in notes_to_update_dict:
+                            matched_note = notes_to_update_dict[matched_note.id]
+                        break
+                if not matched_note:
+                    # This shouldn't happen as the meaning came from one of the notes in the list
+                    # and indicates the matched_meaning somehow isn't in the matching_notes
+                    logger.debug(
+                        f"Error: Matched note with ID {matched_note_id} not found for word"
+                        f" {word} with reading {reading}"
+                    )
+                    return False
+                # Add the matched note to processed_word_tuples
+                new_word_tuple = (word, reading, matched_note[word_sort_field], matched_note.id)
+                logger.debug(
+                    f"Setting processed word tuple at index {word_index}, with tuple"
+                    f" {new_word_tuple}"
+                )
+                processed_word_tuples[word_index] = new_word_tuple
+                # Now we need to update the meaning in the note
+                if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
+                    matched_note[meaning_field] = jp_meaning.strip()
+                    matched_note.add_tag("updated_jp_meaning")
+                    if matched_note.id not in notes_to_update_dict:
+                        notes_to_update_dict[matched_note.id] = matched_note
+                if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
+                    matched_note[english_meaning_field] = en_meaning.strip()
+                    if matched_note.id not in notes_to_update_dict:
+                        notes_to_update_dict[matched_note.id] = matched_note
+                logger.debug(
+                    f"Updated note {matched_note.id} with new meaning '{jp_meaning}' and"
+                    f" english meaning '{en_meaning}'"
                 )
                 return True
             else:
-                logger.debug(f"Error: No note to copy for word {word} with reading {reading}")
-                return False
-        elif is_matched_meaning and meaning_number is not None:
-            # Action MATCH. update the meaning in the note with the matched meaning
-            logger.debug(
-                f"Matched meaning JP:'{jp_meaning}'/EN:'{en_meaning}' for word {word} with"
-                f" reading {reading}, meaning number {meaning_number}, meanings: {meanings}"
-            )
-            # We have a match, so we can update the note with the matched meaning
-            matched_note = None
-
-            matched_meaning, _, matched_note_id, _, _, _ = meanings[meaning_number]
-            for note in matching_notes:
-                if note.id == matched_note_id and matched_meaning == note[meaning_field]:
-                    # Ensure the matched meaning is the same as in the note to account for id=0
-                    matched_note = note
-                    if matched_note.id in notes_to_update_dict:
-                        matched_note = notes_to_update_dict[matched_note.id]
-                    break
-            if not matched_note:
-                # This shouldn't happen as the meaning came from one of the notes in the list
-                # and indicates the matched_meaning somehow isn't in the matching_notes
                 logger.debug(
-                    f"Error: Matched note with ID {matched_note_id} not found for word"
-                    f" {word} with reading {reading}"
+                    f"Error: Unexpected invalid meaning object for word {word} with reading"
+                    f" {reading}: {meaning_action}"
                 )
                 return False
-            # Add the matched note to processed_word_tuples
-            new_word_tuple = (word, reading, matched_note[word_sort_field], matched_note.id)
-            logger.debug(
-                f"Setting processed word tuple at index {word_index}, with tuple {new_word_tuple}"
-            )
-            processed_word_tuples[word_index] = new_word_tuple
-            # Now we need to update the meaning in the note
-            if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
-                matched_note[meaning_field] = jp_meaning.strip()
-                matched_note.add_tag("updated_jp_meaning")
-                if matched_note.id not in notes_to_update_dict:
-                    notes_to_update_dict[matched_note.id] = matched_note
-            if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
-                matched_note[english_meaning_field] = en_meaning.strip()
-                if matched_note.id not in notes_to_update_dict:
-                    notes_to_update_dict[matched_note.id] = matched_note
-            logger.debug(
-                f"Updated note {matched_note.id} with new meaning '{jp_meaning}' and"
-                f" english meaning '{en_meaning}'"
-            )
-            return True
-        else:
-            logger.debug(
-                f"Error: Unexpected invalid meaning object for word {word} with reading"
-                f" {reading}: {meaning_action}"
-            )
-            return False
 
     new_tasks_count = 0
 
