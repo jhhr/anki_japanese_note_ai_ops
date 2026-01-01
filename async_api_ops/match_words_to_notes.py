@@ -719,7 +719,7 @@ def match_words_to_notes(
                     if meaning:
                         sort_field = note[word_sort_field]
                         # Get the meaning number, if any from sort field, in the form (m1), (m2), etc.
-                        match = re.match(r"\(m(\d+)\)", sort_field)
+                        match = re.search(r"\(m(\d+)\)", sort_field)
                         matched_meaning_number = 0
                         if not note_to_copy:
                             # Ensure we have a note to copy that has a meaning
