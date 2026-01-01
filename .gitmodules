@@ -1,0 +1,4 @@
+[submodule "sync_local_ops/jp_text_processing"]
+	path = sync_local_ops/jp_text_processing
+	url = https://github.com/jhhr/jp_text_processing.git
+	branch = main

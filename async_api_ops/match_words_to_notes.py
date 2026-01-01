@@ -2,9 +2,9 @@ import random
 import json
 import re
 import asyncio
-import threading
 import logging
-from typing import Union, Sequence, Callable, Any, Coroutine, cast
+from typing import Union, Sequence, Callable, Any, Coroutine, cast, Literal, Optional
+
 from aqt import mw
 
 from anki.notes import Note, NoteId
@@ -28,6 +28,14 @@ from ..configuration import (
     raw_multi_meaning_word_type,
     matched_word_type,
 )
+from ..sync_local_ops.jp_text_processing.kana.kana_highlight import kana_highlight, WithTagsDef
+from ..sync_local_ops.jp_text_processing.kana.check_word_reading_type import (
+    check_word_reading_type,
+    WordReadingType,
+)
+from ..sync_local_ops.jp_text_processing.kana.make_furigana_from_reading import (
+    make_furigana_from_reading,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +58,46 @@ WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
     "yojijukugo": "Idiom",
 }
 WORD_LISTS = list(WORD_LIST_TO_PART_OF_SPEECH.keys())
+
+
+def check_note_processed_furigana_field(
+    note: Note,
+    word_processed_furigana_field: str,
+) -> WordReadingType:
+    """Check if the note's processed furigana field contains <kun> or <on> tags created by
+    kana_highlight.'
+    Args:
+        note (Note): The note to check.
+        word_processed_furigana_field (str): The field name for the processed furigana field.
+    Returns:
+    """
+    if word_processed_furigana_field in note:
+        processed_furigana = note[word_processed_furigana_field]
+        return check_word_reading_type(processed_furigana)
+    return ""
+
+
+def check_marker_note_on_or_kun(
+    marker_note: Note, word_sort_field: str, word_processed_furigana_field: str
+) -> WordReadingType:
+    """Check if the marker note is a onyomi or kunyomi type reading for the word.
+    First simply checks if the sort field has (on) or (kun) markers, if not, uses the processed
+    furigana field to determine the reading type.
+    Args:
+        marker_note (Note): The note to check.
+        word_sort_field (str): The field name for the word sort field.
+        word_processed_furigana_field (str): The field name for the processed furigana field.
+    Returns:
+        str: "on" if the note has (on), "kun" if it has (kun), "" otherwise.
+    """
+    if word_sort_field in marker_note:
+        marker_sort_field = marker_note[word_sort_field]
+        if "(kun)" in marker_sort_field:
+            return "kun"
+        elif "(on)" in marker_sort_field:
+            return "on"
+    # If no marker in sort field, check the processed furigana field
+    return check_note_processed_furigana_field(marker_note, word_processed_furigana_field)
 
 
 def make_new_note_id(note: Note) -> int:
@@ -201,12 +249,6 @@ def match_words_to_notes(
             Otherwise, words that already have a note match will be skipped during processing and
             returned as is.
     """
-    if not word_tuples:
-        logger.debug("No words to match against notes")
-        return word_tuples
-    if not sentence:
-        logger.error("Error: No sentence provided for matching words")
-        return word_tuples
     if not config:
         logger.error("Error: Missing addon configuration")
         return word_tuples
@@ -214,6 +256,15 @@ def match_words_to_notes(
     model = config.get("match_words_model", "")
     if not model:
         logger.error("Error: Missing match words model in config")
+        return word_tuples
+
+    log_prefix = f"Match words, note.id={current_note.id}--"
+
+    if not word_tuples:
+        logger.debug(f"{log_prefix}No words to match against notes")
+        return word_tuples
+    if not sentence:
+        logger.error(f"{log_prefix}Error: No sentence provided for matching words")
         return word_tuples
 
     config["rate_limits"] = config.get("rate_limits", {})
@@ -224,6 +275,10 @@ def match_words_to_notes(
     word_kanjified_field = get_field_config(config, "word_kanjified_field", note_type)
     word_normal_field = get_field_config(config, "word_normal_field", note_type)
     word_reading_field = get_field_config(config, "word_reading_field", note_type)
+    word_furigana_field = get_field_config(config, "word_furigana_field", note_type)
+    word_processed_furigana_field = get_field_config(
+        config, "word_processed_furigana_field", note_type
+    )
     word_sort_field = get_field_config(config, "word_sort_field", note_type)
     meaning_field = get_field_config(config, "meaning_field", note_type)
     meaning_audio_field = get_field_config(config, "meaning_audio_field", note_type)
@@ -238,6 +293,8 @@ def match_words_to_notes(
         word_kanjified_field,
         word_normal_field,
         word_reading_field,
+        word_furigana_field,
+        word_processed_furigana_field,
         word_sort_field,
         meaning_field,
         furigana_sentence_field,
@@ -252,8 +309,6 @@ def match_words_to_notes(
         return word_tuples
 
     processed_word_tuples = cast(list[ProcessedWordTuple], word_tuples.copy())
-
-    logger.debug(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
 
     # Dictionary to track locks per word to prevent race conditions
     word_locks: dict[str, asyncio.Lock] = {}
@@ -279,14 +334,15 @@ def match_words_to_notes(
         Returns:
             bool: True if the word tuple was processed successfully, False otherwise.
         """
-        logger.debug(f"match_op, notes_to_add_dict before: {notes_to_add_dict}")
-        logger.debug(f"Processing word tuple at index {word_index}: {word}, reading: {reading}")
+        logger.debug(
+            f"{log_prefix}Processing word tuple at index {word_index}: {word}, reading: {reading}"
+        )
         nonlocal processed_word_tuples, word_locks, word_locks_lock
         # If the word contains only non-japanese characters, skip it
         if not re.search(r"[ぁ-んァ-ン一-龯]", word):
             logger.debug(
-                f"Skipping word '{word}' at index {word_index} as it contains no Japanese"
-                " characters"
+                f"{log_prefix}Skipping word '{word}' at index {word_index} as it contains no"
+                " Japanese characters"
             )
             processed_word_tuples[word_index] = None
         # Check for existing suru verbs words including する in either field, remove する in the word
@@ -315,17 +371,21 @@ def match_words_to_notes(
                     f' OR "{word_kanjified_field}:{o_word}" OR "{word_normal_field}:{o_word}" OR'
                     f' "{word_kanjified_field}:{go_word}" OR "{word_normal_field}:{go_word}"'
                 )
+            alt_reading_query = ""
+            # If word contains no kanji, we can search for a match using only its reading
+            if not re.search(r"[一-龯]", word):
+                alt_reading_query = f' OR "{word_normal_field}:{reading}"'
 
             word_query = (
-                f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}" OR'
-                f' "{word_normal_field}:{reading}"{go_word_query})'
+                f'("{word_kanjified_field}:{word}" OR "{word_normal_field}:{word}"'
+                f" {alt_reading_query}{go_word_query})"
             )
             word_query_suru = (
                 f'("{word_kanjified_field}:{word}する" OR "{word_normal_field}:{word}する")'
             )
-            no_x_in_sort_field = f'-"{word_sort_field}:re:\(x\d\)"'
+            no_x_in_sort_field = rf'-"{word_sort_field}:re:\(x\d\)"'
             query = f"({word_query} OR {word_query_suru}) {no_x_in_sort_field}"
-            logger.debug(f"Searching for notes with query: {query}")
+            logger.debug(f"{log_prefix}Searching for notes with query: {query}")
             note_ids: Sequence[NoteId] = mw.col.find_notes(query)
             # Filter by reading matches, we don't do this in the query since it's not easy to check
             # for a reading where some parts are in katakana
@@ -333,6 +393,15 @@ def match_words_to_notes(
             hiragana_reading = to_hiragana(reading)
             hiragana_reading_suru = to_hiragana(reading + "する")
             matching_notes = []
+
+            def compare_readings(note_reading: str) -> bool:
+                note_hiragana_reading = to_hiragana(note_reading)
+                logger.debug(
+                    f"{log_prefix}Comparing note reading: {note_hiragana_reading} with"
+                    f" {hiragana_reading} and {hiragana_reading_suru}"
+                )
+                return note_hiragana_reading in [hiragana_reading, hiragana_reading_suru]
+
             for note_id in note_ids:
                 note = (
                     mw.col.get_note(note_id)
@@ -340,27 +409,57 @@ def match_words_to_notes(
                     else notes_to_update_dict[note_id]
                 )
                 if note and word_reading_field in note:
-                    note_reading = to_hiragana(note[word_reading_field])
-                    logger.debug(
-                        f"Comparing note reading: {note_reading} with {hiragana_reading} and"
-                        f" {hiragana_reading_suru}"
-                    )
-                    if note_reading in [hiragana_reading, hiragana_reading_suru]:
+                    if compare_readings(note[word_reading_field]):
                         matching_notes.append(note)
 
             logger.debug(
-                f"Found matching notes: {[note[word_sort_field] for note in matching_notes]}"
+                f"{log_prefix}Found matching notes:"
+                f" {[note[word_sort_field] for note in matching_notes]}"
             )
 
             # This part is why the locks are needed, async tasks should await for the lock before
             # checking notes_to_add_dict
-            matching_new_notes = notes_to_add_dict.get(word, [])
+            unfiltered_matching_new_notes = notes_to_add_dict.get(word, [])
+            # Filter matching_new_notes by reading as well
+            matching_new_notes = []
+            for new_note in unfiltered_matching_new_notes:
+                if word_reading_field in new_note:
+                    if compare_readings(new_note[word_reading_field]):
+                        matching_new_notes.append(new_note)
 
-            if not matching_notes:
+            # Only create a new note if there are no existing matches in DB AND no pending notes to add
+            if not matching_notes and not matching_new_notes:
                 new_note = Note(col=mw.col, model=note_type)
                 new_note[word_kanjified_field] = word
                 new_note[word_normal_field] = word
                 new_note[word_reading_field] = reading
+                new_note_furigana = make_furigana_from_reading(word, reading)
+                new_note[word_furigana_field] = new_note_furigana
+                logger.debug(
+                    f"{log_prefix}New note furigana from MeCab for word {word}: {new_note_furigana}"
+                )
+                new_note_processed_furigana = kana_highlight(
+                    kanji_to_highlight="",
+                    text=new_note_furigana,
+                    return_type="furigana",
+                    with_tags_def=WithTagsDef(
+                        with_tags=True,
+                        merge_consecutive=False,
+                        onyomi_to_katakana=False,
+                        include_suru_okuri=True,
+                    ),
+                )
+                logger.debug(
+                    f"{log_prefix}New note processed furigana for word {word}:"
+                    f" {new_note_processed_furigana}"
+                )
+                new_note[word_processed_furigana_field] = new_note_processed_furigana
+                new_note_reading_type = check_note_processed_furigana_field(
+                    new_note, word_processed_furigana_field
+                )
+                logger.debug(
+                    f"{log_prefix}New note reading type for word {word}: {new_note_reading_type}"
+                )
                 new_note[word_sort_field] = word
                 new_note.add_tag("new_matched_jp_word")
                 # Query for a note with a (kun)/(on) or (rX) marker in the sort field, we'll want to
@@ -370,107 +469,205 @@ def match_words_to_notes(
                 # - if there is (kun)(rX) --> this should be (kun)(rY) where Y is the next number in
                 #   the sequence, same for (on)(rX)
                 # - if there is no marker, this should have none
-                marker_regex = f"^{word} ?(?:\((?:kun|on)\))?(?:\(r\d+\))?(?:\(m\d+\))?$"
-                marker_note_ids = mw.col.find_notes(f'"{word_sort_field}:re:{marker_regex}"')
+                marker_regex = rf"^{word} ?(?:\((?:kun|on)\))?(?:\(r\d+\))?(?:\(m\d+\))?$"
+                marker_note_query = f'"{word_sort_field}:re:{marker_regex}"'
+                marker_note_ids = mw.col.find_notes(marker_note_query)
+                unedited_marker_note_ids = [
+                    nid for nid in marker_note_ids if nid not in notes_to_update_dict
+                ]
+                # Fetch unedited marker notes from db
+                marker_notes = [mw.col.get_note(note_id) for note_id in unedited_marker_note_ids]
+                if unedited_marker_note_ids:
+                    logger.debug(
+                        f"{log_prefix}Fetched {len(marker_notes)} unedited marker notes from DB,"
+                        f" query: {marker_note_query}, sort fields:"
+                        f" {[note[word_sort_field] for note in marker_notes]}"
+                    )
+                # Fetch rest from notes_to_update_dict
+                edited_marker_notes = []
+                for nid in marker_note_ids:
+                    if nid in notes_to_update_dict:
+                        edited_marker_notes.append(notes_to_update_dict[nid])
+                marker_notes.extend(edited_marker_notes)
+                if edited_marker_notes:
+                    logger.debug(
+                        f"{log_prefix}Fetched "
+                        f"{len(edited_marker_notes)} edited marker notes from notes_to_update_dict,"
+                        f" sort fields: {[note[word_sort_field] for note in edited_marker_notes]}"
+                    )
                 # Additionally, search the notes_to_add_dict to see if any of them have a marker like
                 # this, as we'll need to increment the rX number higher than the largest one found
-                marker_notes = [mw.col.get_note(note_id) for note_id in marker_note_ids]
+                added_marker_notes = []
                 if word in notes_to_add_dict:
                     for added_note in notes_to_add_dict[word]:
                         if word_sort_field in added_note:
                             marker_sort_field = added_note[word_sort_field]
                             if re.match(rf"{marker_regex}", marker_sort_field):
                                 # If the marker matches, we can add this note ID to the marker notes
-                                marker_notes.append(added_note)
+                                added_marker_notes.append(added_note)
+                marker_notes.extend(added_marker_notes)
+                if added_marker_notes:
+                    logger.debug(
+                        f"{log_prefix}Fetched {len(added_marker_notes)} added marker notes from"
+                        " notes_to_add_dict, sort fields:"
+                        f" {[note[word_sort_field] for note in added_marker_notes]}"
+                    )
 
                 # When checking the marker notes, theres' two cases
-                # Case 1: The existing notes had some (rX) number, the new should be (rY) where Y is
-                #         the next number in the sequence. No edits needed to the existing notes
+                # Case 1: The existing notes had some (rX) number with either none or (on)/(kun)
+                #         markers, in which case the new should be (rY) where Y is the next number
+                #         in the sequence. The existing notes are updated to have (on) if the new
+                #         note is (kun) and vice versa if they lacked the (on)/(kun) marker.
                 # Case 2: If the existing notes didn't have (rX) the new note will have (r2) and the
-                #         existing notes will be edited to have (r1)
-                def update_marker_note(a_marker_note: Note):
-                    # Case 2: No (rX) present
-                    # If there's other markers, place (r1) between (kun/on) and the rest
+                #         existing notes will be edited to have (r1). The same (on)/(kun) adding
+                #         is done as in case 1.
 
-                    if a_marker_note.id and a_marker_note.id in notes_to_update_dict:
-                        # Replace note with the one from the dict so all edits to the note are in it
-                        a_marker_note = notes_to_update_dict[a_marker_note.id]
-                    other_markers_match = re.search(
-                        r"(\((?:kun|on)\))?(\(\w\d+\))?",
-                        a_marker_note[word_sort_field],
+                def update_note_reading_markers(
+                    a_note: Note,
+                    add_reading_number: Optional[int] = None,
+                    add_reading_type: Optional[Literal["on", "kun"]] = None,
+                ):
+                    """
+                    Helper function to update the reading markers in the note's sort field while
+                    preserving other markers.
+                    Args:
+                        a_note (Note): The note to update.
+                        add_reading_number (Optional[int]): The reading number to add (rX).
+                        add_reading_type (Optional[Literal["on", "kun"]]): The reading type to add
+                            (on/kun).
+                    """
+
+                    if a_note.id > 0 and a_note.id in notes_to_update_dict:
+                        # Ensure we edit the latest version of the note
+                        a_note = notes_to_update_dict[a_note.id]
+
+                    markers_match = re.search(
+                        r"(\((?:kun|on)\))?(\(r\d+\))?(\(\w\d+\))?",
+                        a_note[word_sort_field],
                     )
                     other_markers = ""
                     kun_on_marker = ""
-                    if other_markers_match:
-                        kun_on_marker = other_markers_match.group(1) or ""
-                        other_markers = other_markers_match.group(2) or ""
-                    a_marker_note[word_sort_field] = f"{word} {kun_on_marker}(r1){other_markers}"
+                    r_marker = ""
+                    if markers_match:
+                        kun_on_marker = markers_match.group(1) or ""
+                        r_marker = markers_match.group(2) or ""
+                        other_markers = markers_match.group(3) or ""
+                    # If there wasn't an (rX) marker, add the specified one
+                    if not r_marker and add_reading_number is not None:
+                        r_marker = f"(r{add_reading_number})"
+                    # If there wasn't a (kun)/(on) marker, add the specified one
+                    if not kun_on_marker and add_reading_type is not None:
+                        kun_on_marker = f"({add_reading_type})"
+
+                    a_note[word_sort_field] = f"{word} {kun_on_marker}{r_marker}{other_markers}"
 
                     # This is needed for an existing note that hasn't been edited yet
-                    if a_marker_note.id and a_marker_note.id not in notes_to_update_dict:
-                        notes_to_update_dict[a_marker_note.id] = a_marker_note
+                    # Don't add new notes (id == 0) to notes_to_update_dict
+                    if a_note.id > 0 and a_note.id not in notes_to_update_dict:
+                        notes_to_update_dict[a_note.id] = a_note
 
-                if len(marker_notes) == 1:
-                    marker_note = marker_notes[0]
+                # Get the largest rX number and also the largest kun/on rX numbers separately
+                # to handle the case where there are both types of readings for the word and we
+                # need to number them separately
+                largest_r_number = 0
+                largest_kun_r_number = 0
+                largest_on_r_number = 0
+                # kun/on markers are used only there exists both types of readings for the word
+                # when all readings are of the same type, no marker is used
+                has_kun_markers = False
+                has_on_markers = False
+                kun_marker_notes = []
+                on_marker_notes = []
+                for marker_note in marker_notes:
                     if marker_note and word_sort_field in marker_note:
-                        if marker_note.id and marker_note.id in notes_to_update_dict:
-                            marker_note = notes_to_update_dict[marker_note.id]
                         marker_sort_field = marker_note[word_sort_field]
-                        # Check if the sort field has a (kun) or (on) marker
-                        if "(kun)" in marker_sort_field:
-                            new_note[word_sort_field] = f"{word} (on)"
-                        elif "(on)" in marker_sort_field:
-                            new_note[word_sort_field] = f"{word} (kun)"
-                        else:
-                            # If no (kun)/(on) marker, just use the word
-                            new_note[word_sort_field] = word
-                        # Check for (rX) markers
+                        marker_note_reading_type = check_marker_note_on_or_kun(
+                            marker_note, word_sort_field, word_processed_furigana_field
+                        )
+                        if marker_note_reading_type == "kun":
+                            has_kun_markers = "(kun)" in marker_sort_field
+                            kun_marker_notes.append(marker_note)
+                            if "(kun)" not in marker_sort_field and new_note_reading_type == "on":
+                                logger.debug(
+                                    f"{log_prefix}Updating marker note {marker_note.id} to"
+                                    f" (kun) for word {word} because new note is (on)"
+                                )
+                                # This case should happend the first time we find a kunyomi
+                                # reading when all previous were onyomi. Once this is done, the
+                                # next check should find all marker notes having either (kun)
+                                # or (on)
+                                update_note_reading_markers(marker_note, add_reading_type="kun")
+                                has_kun_markers = True
+                        elif marker_note_reading_type == "on":
+                            has_on_markers = "(on)" in marker_sort_field
+                            on_marker_notes.append(marker_note)
+                            if "(on)" not in marker_sort_field and new_note_reading_type == "kun":
+                                logger.debug(
+                                    f"{log_prefix}Updating marker note {marker_note.id} to (on)"
+                                    f" for word {word} because new note is (kun)"
+                                )
+                                # As above
+                                update_note_reading_markers(marker_note, add_reading_type="on")
+                                has_on_markers = True
                         r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
                         if r_match:
-                            r_number = int(r_match.group(1)) + 1
-                            new_note[word_sort_field] += f" (r{r_number})"
-                        else:
-                            new_note[word_sort_field] += " (r2)"
-                            update_marker_note(marker_note)
+                            r_number = int(r_match.group(1))
+                            if r_number > largest_r_number:
+                                largest_r_number = r_number
+                            # Check for largest kun/on r_numbers separately, note that these
+                            # are the r_numbers for notes detected as kun/on by the reading type
+                            # check, not merely by the presence of existing (kun)/(on) markers
+                            if (
+                                marker_note_reading_type == "kun"
+                                and r_number > largest_kun_r_number
+                            ):
+                                largest_kun_r_number = r_number
+                            if marker_note_reading_type == "on" and r_number > largest_on_r_number:
+                                largest_on_r_number = r_number
 
-                elif len(marker_notes) > 1:
-                    # This ought to be case where there's either zero or multiple rX markers for the
-                    # same word, so get the largest rX number and otherwise use the same (kun)/(on)
-                    # logic as above
-                    largest_r_number = 0
-                    # Hopefully there are only either (kun)(rX) or (on)(rX) markers, and not both
-                    # as we can't know which kind of reading this word is using without doing some
-                    # reading lookups for the word...
-                    found_kun = False
-                    found_on = False
-                    for marker_note in marker_notes:
-                        if marker_note and word_sort_field in marker_note:
-                            marker_sort_field = marker_note[word_sort_field]
-                            if "(kun)" in marker_sort_field:
-                                found_kun = True
-                            elif "(on)" in marker_sort_field:
-                                found_on = True
-                            r_match = re.search(r"\(r(\d+)\)", marker_sort_field)
-                            if r_match:
-                                r_number = int(r_match.group(1))
-                                if r_number > largest_r_number:
-                                    largest_r_number = r_number
-                    if found_kun and not found_on:
-                        new_note[word_sort_field] = f"{word} (kun)(r{largest_r_number + 1})"
-                    elif found_on and not found_kun:
-                        new_note[word_sort_field] = f"{word} (on)(r{largest_r_number + 1})"
-                    elif not found_kun and not found_on:
-                        new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                    def update_marker_notes_with_r1(marker_notes_list: list[Note]):
+                        for marker_note in marker_notes_list:
+                            # Adding reading number only applies if there was no numbering
+                            # before
+                            update_note_reading_markers(marker_note, add_reading_number=1)
+
+                    # Now set the new note's sort field based on what we found
+                    if new_note_reading_type == "on":
+                        if has_on_markers:
+                            # There are existing (on) notes, so we need to add numbering
+                            new_note[word_sort_field] = f"{word} (on)(r{largest_on_r_number + 1})"
+                            if largest_on_r_number == 0:
+                                # Case 2: need to update the marker notes
+                                update_marker_notes_with_r1(on_marker_notes)
+                        elif has_kun_markers:
+                            # All existing notes are (kun), so this should be (on) without numbering
+                            new_note[word_sort_field] = f"{word} (on)"
+                        else:
+                            # Existing notes had no markers and matched reading type, so no on/kun
+                            # marking but need numbering
+                            new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                            if largest_r_number == 0:
+                                update_marker_notes_with_r1(marker_notes)
+                    elif new_note_reading_type == "kun":
+                        if has_kun_markers:
+                            # There are existing (kun) notes, so we need to add numbering
+                            new_note[word_sort_field] = f"{word} (kun)(r{largest_kun_r_number + 1})"
+                            if largest_kun_r_number == 0:
+                                update_marker_notes_with_r1(kun_marker_notes)
+                        elif has_on_markers:
+                            # All existing notes are (on), so this should be (kun) without numbering
+                            new_note[word_sort_field] = f"{word} (kun)"
+                        else:
+                            # Existing notes had no markers and matched reading type, so no on/kun
+                            # marking but need numbering
+                            new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                            if largest_r_number == 0:
+                                update_marker_notes_with_r1(marker_notes)
                     else:
-                        # If we found both (kun) and (on) markers, we can't decide which one to use,
-                        # so just use the word without any markers and add a tag to the note for this
-                        # to be manually checked
-                        new_note[word_sort_field] = word
-                        new_note.add_tag("check_reading_marker")
-                    if largest_r_number == 0:
-                        # Case 2: need to update the marker notes
-                        for marker_note in marker_notes:
-                            update_marker_note(marker_note)
+                        # Reading type juk or undetermined, add numbering only
+                        new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                        if largest_r_number == 0:
+                            update_marker_notes_with_r1(marker_notes)
 
                 new_note[furigana_sentence_field] = sentence
                 new_note[meaning_field] = ""
@@ -507,8 +704,8 @@ def match_words_to_notes(
             note_to_copy = None
             for note in matching_notes:
                 logger.debug(
-                    f"Processing note {note.id} for word {word} with reading {reading}, sort field"
-                    f" {note[word_sort_field]}"
+                    f"{log_prefix}Processing note {note.id} for word {word} with reading {reading},"
+                    f" sort field {note[word_sort_field]}"
                 )
                 if meaning_field in note:
                     meaning = note[meaning_field]
@@ -541,15 +738,17 @@ def match_words_to_notes(
                             match_word,
                         ))
                     else:
-                        logger.debug(f"Note {note.id} has empty meaning field")
+                        logger.debug(f"{log_prefix}Note {note.id} has empty meaning field")
                 else:
-                    logger.debug(f"Note {note.id} is missing meaning field")
+                    logger.debug(f"{log_prefix}Note {note.id} is missing meaning field")
             if note_to_copy:
                 # use the updated note if available
                 if note_to_copy.id in notes_to_update_dict:
                     note_to_copy = notes_to_update_dict[note_to_copy.id]
             if not meanings:
-                logger.debug(f"No meanings found for word {word} with reading {reading}")
+                logger.debug(
+                    f"{log_prefix}No meanings found for word {word} with reading {reading}"
+                )
                 # We found notes but all were missing meanings, have to skip this word as it can't
                 # processed properly
                 return False
@@ -670,7 +869,7 @@ _Current sentence_: {sentence}"""
             # However the thinking tokens are also counted towards the limit so the total token count
             # of thinking + response must be considered. Thinking can take a several thousand tokens
             max_output_tokens = 8000
-            logger.debug(f"\n\nmeanings_str: {meanings_str}")
+            logger.debug(f"{log_prefix}\n\nmeanings_str: {meanings_str}")
 
             raw_result = get_response(
                 model,
@@ -683,9 +882,9 @@ _Current sentence_: {sentence}"""
                 max_output_tokens=max_output_tokens,
                 json_result_corrector=json_result_corrector,
             )
-            logger.debug(f"Raw result: {raw_result}")
+            logger.debug(f"{log_prefix}Raw result: {raw_result}")
             if raw_result is None:
-                logger.debug("Failed to get a response from the API.")
+                logger.debug(f"{log_prefix}Failed to get a response from the API.")
                 # If the prompt failed, return nothing
                 return False
             meaning_action = None
@@ -697,8 +896,8 @@ _Current sentence_: {sentence}"""
                 meaning_action = raw_result[0]
             else:
                 logger.debug(
-                    f"Error: Expected a list or dict, got {type(raw_result)} instead. Result:"
-                    f" {raw_result}"
+                    f"{log_prefix}Error: Expected a list or dict, got {type(raw_result)} instead."
+                    f" Result: {raw_result}"
                 )
                 return False
             # Check the meaning_action structure
@@ -706,7 +905,7 @@ _Current sentence_: {sentence}"""
                 meaning_action["meaning_number"], (int, type(None))
             ):
                 logger.debug(
-                    "Error: invalid meaning action, 'meaning_number' is not an int or"
+                    f"{log_prefix}Error: invalid meaning action, 'meaning_number' is not an int or"
                     f" None. Result: {meaning_action}"
                 )
                 return False
@@ -714,15 +913,15 @@ _Current sentence_: {sentence}"""
                 meaning_action["is_matched_meaning"], bool
             ):
                 logger.debug(
-                    "Error: invalid meaning action, 'is_matched_meaning' is not a bool."
-                    f" Result: {meaning_action}"
+                    f"{log_prefix}Error: invalid meaning action, 'is_matched_meaning' is not a"
+                    f" bool. Result: {meaning_action}"
                 )
                 return False
             if "jp_meaning" in meaning_action and not isinstance(
                 meaning_action["jp_meaning"], (str, type(None))
             ):
                 logger.debug(
-                    "Error: invalid meaning action, 'jp_meaning' is not a str or None."
+                    f"{log_prefix}Error: invalid meaning action, 'jp_meaning' is not a str or None."
                     f" Result: {meaning_action}"
                 )
                 return False
@@ -730,13 +929,13 @@ _Current sentence_: {sentence}"""
                 meaning_action["en_meaning"], (str, type(None))
             ):
                 logger.debug(
-                    "Error: invalid meaning action, 'en_meaning' is not a str or None."
+                    f"{log_prefix}Error: invalid meaning action, 'en_meaning' is not a str or None."
                     f" Result: {meaning_action}"
                 )
                 return False
             if "is_matched_meaning" in meaning_action and "meaning_number" not in meaning_action:
                 logger.debug(
-                    "Error: invalid meaning action, 'is_matched_meaning' is set but"
+                    f"{log_prefix}Error: invalid meaning action, 'is_matched_meaning' is set but"
                     f" 'meaning_number' is not. Result: {meaning_action}"
                 )
                 return False
@@ -746,8 +945,8 @@ _Current sentence_: {sentence}"""
                     or meaning_action["meaning_number"] > len(meanings) + 1
                 ):
                     logger.debug(
-                        "Error: invalid meaning action, 'meaning_number' is out of range."
-                        f" Result: {meaning_action}"
+                        f"{log_prefix}Error: invalid meaning action, 'meaning_number' is out of"
+                        f" range. Result: {meaning_action}"
                     )
                     return False
             is_matched_meaning = meaning_action.get("is_matched_meaning", False)
@@ -757,8 +956,8 @@ _Current sentence_: {sentence}"""
             # If meaning_number is too big, the AI got confused, skip this
             if meaning_number is not None and meaning_number > len(meanings):
                 logger.debug(
-                    "Error: invalid 'meaning_number' in meaning action, too large. Result:"
-                    f" {meaning_action}"
+                    f"{log_prefix}Error: invalid 'meaning_number' in meaning action, too large."
+                    f" Result: {meaning_action}"
                 )
                 return False
             if is_matched_meaning and meaning_number is not None:
@@ -767,14 +966,14 @@ _Current sentence_: {sentence}"""
                     meanings[meaning_number]
                 except IndexError:
                     logger.debug(
-                        f"Error: Matched meaning number {meaning_number} is out of range for"
-                        f" word {word} with reading {reading}"
+                        f"{log_prefix}Error: Matched meaning number {meaning_number} is out of"
+                        f" range for word {word} with reading {reading}"
                     )
                     return False
 
             if not is_matched_meaning and not jp_meaning and not en_meaning:
                 logger.debug(
-                    "Error: Meaning action is not a match and is not modifying"
+                    f"{log_prefix}Error: Meaning action is not a match and is not modifying"
                     f" either meaning. Result: {meaning_action}"
                 )
                 return False
@@ -783,8 +982,8 @@ _Current sentence_: {sentence}"""
                 # though technically the requirement was for both, we'll accept this as still useful
                 # (semi)valid action CREATE NEW
                 logger.debug(
-                    f"Interpreting odd meaning action as CREATE NEW for word {word} with reading"
-                    f" {reading}"
+                    f"{log_prefix}Interpreting odd meaning action as CREATE NEW for word"
+                    f" {word} with reading {reading}"
                 )
                 meaning_action = {
                     "meaning_number": None,
@@ -793,7 +992,8 @@ _Current sentence_: {sentence}"""
                     "en_meaning": en_meaning,
                 }
             logger.debug(
-                f"Valid meaning action for word {word} with reading {reading}: {meaning_action}"
+                f"{log_prefix}Valid meaning action for word {word} with reading {reading}:"
+                f" {meaning_action}"
             )
             if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
                 # Action CREATE NEW. duplicate the note with the biggest meaning number, incrementing it by 1
@@ -853,13 +1053,13 @@ _Current sentence_: {sentence}"""
                                 .replace(") (", ")(")
                                 .replace("  ", " ")
                             )
-                        if note_to_copy.id not in notes_to_update_dict:
+                        if note_to_copy.id > 0 and note_to_copy.id not in notes_to_update_dict:
                             notes_to_update_dict[note_to_copy.id] = note_to_copy
                     # Note to copy was missing sort field somehow? Add it now + the meaning numbers
                     else:
                         new_note[word_sort_field] = f"{word} (m{largest_meaning_index})"
                         note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index - 1})"
-                        if note_to_copy.id not in notes_to_update_dict:
+                        if note_to_copy.id > 0 and note_to_copy.id not in notes_to_update_dict:
                             notes_to_update_dict[note_to_copy.id] = note_to_copy
                     notes_to_add_dict.setdefault(word, []).append(new_note)
                     new_note[word_sort_field] = (
@@ -875,13 +1075,16 @@ _Current sentence_: {sentence}"""
                     )
                     return True
                 else:
-                    logger.debug(f"Error: No note to copy for word {word} with reading {reading}")
+                    logger.debug(
+                        f"{log_prefix}Error: No note to copy for word {word} with reading {reading}"
+                    )
                     return False
             elif is_matched_meaning and meaning_number is not None:
                 # Action MATCH. update the meaning in the note with the matched meaning
                 logger.debug(
-                    f"Matched meaning JP:'{jp_meaning}'/EN:'{en_meaning}' for word {word} with"
-                    f" reading {reading}, meaning number {meaning_number}, meanings: {meanings}"
+                    f"{log_prefix}Matched meaning JP:'{jp_meaning}'/EN:'{en_meaning}' for word"
+                    f" {word} with reading {reading}, meaning number {meaning_number}, meanings:"
+                    f" {meanings}"
                 )
                 # We have a match, so we can update the note with the matched meaning
                 matched_note = None
@@ -898,14 +1101,17 @@ _Current sentence_: {sentence}"""
                     # This shouldn't happen as the meaning came from one of the notes in the list
                     # and indicates the matched_meaning somehow isn't in the matching_notes
                     logger.debug(
-                        f"Error: Matched note with ID {matched_note_id} not found for word"
-                        f" {word} with reading {reading}"
+                        f"{log_prefix}Error: Matched note with ID {matched_note_id} not found for"
+                        f" word {word} with reading {reading}"
                     )
                     return False
                 # Add the matched note to processed_word_tuples
-                new_word_tuple = (word, reading, matched_note[word_sort_field], matched_note.id)
+                matched_note_id = (
+                    matched_note.id if matched_note.id > 0 else matched_note[new_note_id_field]
+                )
+                new_word_tuple = (word, reading, matched_note[word_sort_field], matched_note_id)
                 logger.debug(
-                    f"Setting processed word tuple at index {word_index}, with tuple"
+                    f"{log_prefix}Setting processed word tuple at index {word_index}, with tuple"
                     f" {new_word_tuple}"
                 )
                 processed_word_tuples[word_index] = new_word_tuple
@@ -913,21 +1119,21 @@ _Current sentence_: {sentence}"""
                 if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
                     matched_note[meaning_field] = jp_meaning.strip()
                     matched_note.add_tag("updated_jp_meaning")
-                    if matched_note.id not in notes_to_update_dict:
+                    if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
                         notes_to_update_dict[matched_note.id] = matched_note
                 if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
                     matched_note[english_meaning_field] = en_meaning.strip()
-                    if matched_note.id not in notes_to_update_dict:
+                    if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
                         notes_to_update_dict[matched_note.id] = matched_note
                 logger.debug(
-                    f"Updated note {matched_note.id} with new meaning '{jp_meaning}' and"
-                    f" english meaning '{en_meaning}'"
+                    f"{log_prefix}Updated note {matched_note.id} with new meaning '{jp_meaning}'"
+                    f" and english meaning '{en_meaning}'"
                 )
                 return True
             else:
                 logger.debug(
-                    f"Error: Unexpected invalid meaning object for word {word} with reading"
-                    f" {reading}: {meaning_action}"
+                    f"{log_prefix}Error: Unexpected invalid meaning object for word {word} with"
+                    f" reading {reading}: {meaning_action}"
                 )
                 return False
 
@@ -935,7 +1141,7 @@ _Current sentence_: {sentence}"""
 
     def handle_return_word_tuples():
         nonlocal processed_word_tuples
-        logger.debug(f"Returning processed word tuples: {processed_word_tuples}")
+        logger.debug(f"{log_prefix}Returning processed word tuples: {processed_word_tuples}")
         # filter out any None values from processed_word_tuples
         update_word_list_in_dict(processed_word_tuples)
 
@@ -943,7 +1149,7 @@ _Current sentence_: {sentence}"""
 
     def create_result_handler(word_index, word):
         def handle_result(_: bool):
-            logger.debug(f"Task completed for word {word} (index {word_index})")
+            logger.debug(f"{log_prefix}Task completed for word {word} (index {word_index})")
             # At this point, processed_word_tuples[word_index] should have the final result for
             # this word. Only update the word list after all tasks complete
             # Don't call update_word_list_in_dict here
@@ -956,7 +1162,7 @@ _Current sentence_: {sentence}"""
         if mw.progress.want_cancel():
             break
         if not isinstance(word_tuple, (tuple, list)):
-            logger.debug(f"Error: Invalid word tuple at index {i}: {word_tuple}")
+            logger.debug(f"{log_prefix}Error: Invalid word tuple at index {i}: {word_tuple}")
             continue
         word = ""
         reading = ""
@@ -966,11 +1172,13 @@ _Current sentence_: {sentence}"""
             try:
                 fake_note_id = int(word_tuple[3])
             except Exception as e:
-                logger.debug(f"Error: Invalid third value in word tuple: {word_tuple}, {e}")
+                logger.debug(
+                    f"{log_prefix}Error: Invalid third value in word tuple: {word_tuple}, {e}"
+                )
                 continue
             if fake_note_id < 0:
                 logger.debug(
-                    f"Trying to set new note ID found in word tuple at index {i}:"
+                    f"{log_prefix}Trying to set new note ID found in word tuple at index {i}:"
                     f" {word_tuple} to actual note.id"
                 )
                 # Is the current note the holder of this fake Id?
@@ -981,7 +1189,7 @@ _Current sentence_: {sentence}"""
                     if unfake_note.id in notes_to_update_dict:
                         unfake_note = notes_to_update_dict[unfake_note.id]
                     logger.debug(
-                        f"Current note ID {current_note.id} matches fake note ID"
+                        f"{log_prefix}Current note ID {current_note.id} matches fake note ID"
                         f" {fake_note_id}, updating word tuple at index {i}"
                     )
 
@@ -994,20 +1202,20 @@ _Current sentence_: {sentence}"""
                         note_id = nids[0]
                         # Found a note, set the note_id into the word_tuple
                         logger.debug(
-                            f"Found note with ID {note_id} for new note ID {fake_note_id},"
-                            f" updating word tuple at index {i}"
+                            f"{log_prefix}Found note with ID {note_id} for new note ID"
+                            f" {fake_note_id}, updating word tuple at index {i}"
                         )
                         unfake_note = mw.col.get_note(note_id)
                     elif len(nids) > 1:
                         logger.debug(
-                            f"Error: Found multiple notes with new note ID {fake_note_id},"
-                            " can't determine which one to use"
+                            f"{log_prefix}Error: Found multiple notes with new note ID"
+                            f" {fake_note_id}, can't determine which one to use"
                         )
                         continue
                     else:
                         logger.debug(
-                            f"Error: No note found with new note ID {fake_note_id}, this note"
-                            " was never added doesn't exist"
+                            f"{log_prefix}Error: No note found with new note ID {fake_note_id},"
+                            " this note was never added doesn't exist"
                         )
                         continue
                 if unfake_note is not None:
@@ -1016,8 +1224,8 @@ _Current sentence_: {sentence}"""
                     # Update the processed word tuples with the new note ID
                     processed_word_tuples[i] = word_tuple
                     logger.debug(
-                        f"Setting new note ID to {unfake_note.id} for word tuple at index {i}:"
-                        f" {word_tuple}"
+                        f"{log_prefix}Setting new note ID to {unfake_note.id} for word tuple at"
+                        f" index {i}: {word_tuple}"
                     )
                     # Also remove the fake id from the note now, so we don't try doing this again
                     if unfake_note.id in notes_to_update_dict:
@@ -1029,8 +1237,8 @@ _Current sentence_: {sentence}"""
                     need_update_note = True
                 else:
                     logger.debug(
-                        f"Error: No note found to un-fake the new note ID {fake_note_id} for"
-                        f" word tuple at index {i}"
+                        f"{log_prefix}Error: No note found to un-fake the new note ID"
+                        f" {fake_note_id} for word tuple at index {i}"
                     )
                     continue
             if not replace_existing:
@@ -1041,18 +1249,18 @@ _Current sentence_: {sentence}"""
         elif len(word_tuple) == 2:
             word, reading = word_tuple
         else:
-            logger.debug(f"Error: Invalid word tuple length at index {i}: {word_tuple}")
+            logger.debug(f"{log_prefix}Error: Invalid word tuple length at index {i}: {word_tuple}")
             continue
         if not word or not reading:
-            logger.debug(f"Error: Empty word or reading at index {i}: {word_tuple}")
+            logger.debug(f"{log_prefix}Error: Empty word or reading at index {i}: {word_tuple}")
             continue
 
-        logger.debug(f"Processing word tuple {word_tuple} at index {i}")
+        logger.debug(f"{log_prefix}Processing word tuple {word_tuple} at index {i}")
 
         new_tasks_count += 1
 
         def handle_op_error(e: Exception):
-            logger.error(f"Error processing word tuple {word_tuple} at index {i}: {e}")
+            logger.error(f"{log_prefix}Error processing word tuple {word_tuple} at index {i}: {e}")
             print_error_traceback(e, logger)
 
         handle_op_result = create_result_handler(i, word)
@@ -1093,13 +1301,15 @@ _Current sentence_: {sentence}"""
 
     # After all tasks are created, add one final task
     if word_list_task_count > 0 or need_update_note:
-        logger.debug(f"Adding final update task after processing {len(note_tasks)} word tasks")
+        logger.debug(
+            f"{log_prefix}Adding final update task after processing {len(note_tasks)} word tasks"
+        )
 
         async def final_update_task():
             # Wait for all word-specific tasks to complete
             await asyncio.gather(*note_tasks)
             logger.debug(
-                "All word tasks completed, updating word list with final"
+                f"{log_prefix}All word tasks completed, updating word list with final"
                 f" processed_word_tuples: {processed_word_tuples}"
             )
             update_word_list_in_dict(processed_word_tuples)
@@ -1107,10 +1317,11 @@ _Current sentence_: {sentence}"""
         # Add this task, but don't add it to note_tasks to avoid circular waiting
         tasks.append(asyncio.create_task(final_update_task()))
 
-    logger.debug(f"Final processed word tuples: {processed_word_tuples}")
+    logger.debug(f"{log_prefix}Final processed word tuples: {processed_word_tuples}")
     if not note_tasks and need_update_note:
         logger.debug(
-            "No word tasks were created, but we need to update the note with final_word_tuples"
+            f"{log_prefix}No word tasks were created, but we need to update the note with"
+            " final_word_tuples"
         )
 
         # If we ended up skipping all word tuples, we still may need to update the note
@@ -1191,20 +1402,23 @@ def match_words_to_notes_for_note(
 
     word_tuples = []
     note_tasks: list[asyncio.Task] = []
+    log_prefix = f"Match words, note.id={note.id}--"
     # Get the word tuples from the note
     word_list_field = get_field_config(config, "word_list_field", note_type)
     if word_list_field in note:
         try:
             word_list_dict = json.loads(note[word_list_field])
         except json.JSONDecodeError as e:
-            logger.error(f"Error decoding JSON from word list field: {e}")
+            logger.error(f"{log_prefix}Error decoding JSON from word list field: {e}")
             # tag note
             note.add_tag("invalid_word_list_json")
-            if note.id not in notes_to_update_dict:
+            if note.id > 0 and note.id not in notes_to_update_dict:
                 notes_to_update_dict[note.id] = note
             word_list_dict = {}
         if not isinstance(word_list_dict, dict):
-            logger.error("Error: Invalid word list format in the note, expected a dictionary")
+            logger.error(
+                f"{log_prefix}Error: Invalid word list format in the note, expected a dictionary"
+            )
             return
 
         # Make a task for waiting for until all tasks for a single note are done before
@@ -1216,7 +1430,7 @@ def match_words_to_notes_for_note(
         ):
             await asyncio.gather(*all_note_tasks)
             if current_note.id in notes_to_update_dict:
-                logger.debug(f"Updating note {note.id} with new word list")
+                logger.debug(f"{log_prefix}Updating note {note.id} with new word list")
                 current_note = notes_to_update_dict[current_note.id]
                 edited_nids.append(current_note.id)
             logger.debug(
@@ -1236,7 +1450,8 @@ def match_words_to_notes_for_note(
         def make_word_list_updater(current_key):
             def update_function(updated_tuples: list[ProcessedWordTuple]):
                 logger.debug(
-                    f"Updating word list for key '{current_key}' with tuples: {updated_tuples}"
+                    f"{log_prefix}Updating word list for key '{current_key}' with tuples:"
+                    f" {updated_tuples}"
                 )
                 word_list_dict[current_key] = [wt for wt in updated_tuples if wt is not None]
 
@@ -1249,14 +1464,17 @@ def match_words_to_notes_for_note(
             # Check if any words have already been encountered
             for wt in word_tuples:
                 word = wt[0]
-                if word in encountered_words:
+                reading = wt[1]
+                word_key = f"{word}_{reading}"
+                if word_key in encountered_words:
                     # remove word from word_tuples
                     word_tuples.remove(wt)
                 else:
-                    encountered_words.add(word)
+                    encountered_words.add(word_key)
             if not isinstance(word_tuples, list):
                 logger.error(
-                    f"Error: Invalid word list format for key '{word_list_key}' in the note"
+                    f"{log_prefix}Error: Invalid word list format for key '{word_list_key}' in the"
+                    " note"
                 )
                 continue
             update_word_list_in_dict = make_word_list_updater(word_list_key)
