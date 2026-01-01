@@ -834,52 +834,49 @@ def make_inner_bulk_op(
                     logger.debug("Inner bulk operation mw.progress.want_cancel()")
                     return False
 
-                # Use ThreadPoolExecutor for CPU-bound operations
-                with ThreadPoolExecutor(max_workers=1) as executor:
-
-                    def execute_op():
-                        progress_updater.increment_counts(
-                            tasks_in_progress=1,
-                        )
-                        task_start_time = time.time()
-                        progress_updater.update_progress()
-                        try:
-                            if mw.progress.want_cancel() or cancel_state.is_cancelled():
-                                logger.debug("Inner process op: cancellation requested")
-                                return False
-                            return op(
-                                config,
-                                notes_to_add_dict=notes_to_add_dict,
-                                notes_to_update_dict=notes_to_update_dict,
-                                **op_args,
-                            )
-                        except Exception as e:
-                            logger.error(
-                                "Inner process op error, passing to handle_op_error: %s", e
-                            )
-                            handle_op_error(e)
-                            return False
-                        finally:
-                            task_time = time.time() - task_start_time
-                            progress_updater.increment_counts(
-                                tasks_done=1,
-                                tasks_in_progress=-1,
-                                cumulative_task_time=task_time,
-                            )
-                            progress_updater.update_progress()
-
-                    # Check for cancellation again before running
-                    if mw.progress.want_cancel():
-                        return False
-
-                    # Run the operation in a thread with cancellation checking
+                async def execute_op():
+                    progress_updater.increment_counts(
+                        tasks_in_progress=1,
+                    )
+                    task_start_time = time.time()
+                    progress_updater.update_progress()
                     try:
-                        op_result = await asyncio.get_event_loop().run_in_executor(
-                            executor, execute_op
+                        if mw.progress.want_cancel() or cancel_state.is_cancelled():
+                            logger.debug("Inner process op: cancellation requested")
+                            return False
+                        result = op(
+                            config,
+                            notes_to_add_dict=notes_to_add_dict,
+                            notes_to_update_dict=notes_to_update_dict,
+                            **op_args,
                         )
-                    except asyncio.CancelledError:
-                        # If the operation was cancelled, return False
+                        # Check if result is a coroutine and await it if so
+                        if asyncio.iscoroutine(result):
+                            return await result
+                        return result
+                    except Exception as e:
+                        logger.error("Inner process op error, passing to handle_op_error: %s", e)
+                        handle_op_error(e)
                         return False
+                    finally:
+                        task_time = time.time() - task_start_time
+                        progress_updater.increment_counts(
+                            tasks_done=1,
+                            tasks_in_progress=-1,
+                            cumulative_task_time=task_time,
+                        )
+                        progress_updater.update_progress()
+
+                # Check for cancellation again before running
+                if mw.progress.want_cancel():
+                    return False
+
+                # Run the operation - directly await if it's async, otherwise run in executor
+                try:
+                    op_result = await execute_op()
+                except asyncio.CancelledError:
+                    # If the operation was cancelled, return False
+                    return False
 
             # Handle results
             handle_op_result(op_result)

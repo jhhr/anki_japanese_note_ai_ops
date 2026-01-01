@@ -256,10 +256,10 @@ def match_words_to_notes(
     logger.debug(f"match_words_to_notes, notes_to_add_dict before: {notes_to_add_dict}")
 
     # Dictionary to track locks per word to prevent race conditions
-    word_locks: dict[str, threading.Lock] = {}
-    word_locks_lock = threading.Lock()  # Lock to safely create new word locks
+    word_locks: dict[str, asyncio.Lock] = {}
+    word_locks_lock = asyncio.Lock()  # Lock to safely create new word locks
 
-    def match_op(
+    async def match_op(
         _,
         notes_to_add_dict: dict[str, list[Note]],
         notes_to_update_dict: dict[NoteId, Note],
@@ -299,12 +299,12 @@ def match_words_to_notes(
             reading = reading[:-2]
 
         # Get or create a lock for this specific word to prevent race conditions
-        with word_locks_lock:
+        async with word_locks_lock:
             if word not in word_locks:
-                word_locks[word] = threading.Lock()
+                word_locks[word] = asyncio.Lock()
 
         # Acquire the lock for this word before checking/modifying notes_to_add_dict
-        with word_locks[word]:
+        async with word_locks[word]:
             # Entries for words starting with the honorific prefix may use the kanji or hiragana so
             # query for both
             go_word_query = ""
