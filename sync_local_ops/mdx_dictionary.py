@@ -4,6 +4,7 @@ import os
 import time
 import sqlite3
 import re
+import traceback
 
 from aqt import mw
 
@@ -451,7 +452,10 @@ class MultiDictionaryQuery:
                     }
                     self.dictionaries.append(dict_entry)
                 except Exception as e:
-                    print(f"Failed to load MDX file {path}: {e}")
+                    print(f"Failed to load MDX file {path}")
+                    tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
+                    for line in tb_lines:
+                        print(line.rstrip())
             else:
                 print(f"MDX file not found: {path}")
         elapsed = time.time() - start_time
