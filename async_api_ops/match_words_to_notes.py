@@ -282,7 +282,11 @@ def match_words_to_notes(
     word_sort_field = get_field_config(config, "word_sort_field", note_type)
     meaning_field = get_field_config(config, "meaning_field", note_type)
     meaning_audio_field = get_field_config(config, "meaning_audio_field", note_type)
+    sentence_field = get_field_config(config, "sentence_field", note_type)
+    sentence_audio_field = get_field_config(config, "sentence_audio_field", note_type)
     furigana_sentence_field = get_field_config(config, "furigana_sentence_field", note_type)
+    kanjified_sentence_field = get_field_config(config, "kanjified_sentence_field", note_type)
+    sentence_field = get_field_config(config, "sentence_field", note_type)
     part_of_speech_field = get_field_config(config, "part_of_speech_field", note_type)
     english_meaning_field = get_field_config(config, "english_meaning_field", note_type)
     new_note_id_field = get_field_config(config, "new_note_id_field", note_type)
@@ -427,12 +431,20 @@ def match_words_to_notes(
                     if compare_readings(new_note[word_reading_field]):
                         matching_new_notes.append(new_note)
 
-            # Only create a new note if there are no existing matches in DB AND no pending notes to add
+            # Create a new note if there are no existing matches in DB AND no pending notes to add
             if not matching_notes and not matching_new_notes:
+                logger.debug(
+                    f"{log_prefix}Creating new note when matching notes not found for word {word}"
+                    f" with reading {reading}"
+                )
                 new_note = Note(col=mw.col, model=note_type)
                 new_note[word_kanjified_field] = word
                 new_note[word_normal_field] = word
                 new_note[word_reading_field] = reading
+                new_note[sentence_field] = current_note[sentence_field]
+                new_note[sentence_audio_field] = current_note[sentence_audio_field]
+                new_note[furigana_sentence_field] = current_note[furigana_sentence_field]
+                new_note[kanjified_sentence_field] = current_note[kanjified_sentence_field]
                 new_note_furigana = make_furigana_from_reading(word, reading)
                 new_note[word_furigana_field] = new_note_furigana
                 logger.debug(
@@ -679,7 +691,13 @@ def match_words_to_notes(
                 # With the threading lock in place other tasks processing the same word can find it
                 notes_to_add_dict.setdefault(word, []).append(new_note)
                 create_meaning_result = clean_meaning_in_note(
-                    config, new_note, notes_to_add_dict, notes_to_update_dict
+                    config=config,
+                    note=new_note,
+                    notes_to_add_dict=notes_to_add_dict,
+                    notes_to_update_dict=notes_to_update_dict,
+                    allow_update_all_meanings=True,
+                    allow_reupdate_existing=True,
+                    other_meaning_notes=matching_notes,
                 )
                 new_note[word_sort_field] = (
                     new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
@@ -982,7 +1000,7 @@ _Current sentence_: {sentence}"""
                 # though technically the requirement was for both, we'll accept this as still useful
                 # (semi)valid action CREATE NEW
                 logger.debug(
-                    f"{log_prefix}Interpreting odd meaning action as CREATE NEW for word"
+                    f"{log_prefix}Interpreting meaning action as CREATE NEW for word"
                     f" {word} with reading {reading}"
                 )
                 meaning_action = {
@@ -1003,15 +1021,36 @@ _Current sentence_: {sentence}"""
                     if note_to_copy.id in notes_to_update_dict:
                         # Replace note object from dict if its there
                         note_to_copy = notes_to_update_dict[note_to_copy.id]
+                    logger.debug(
+                        f"{log_prefix}Creating new note with new meaning for word {word} with"
+                        f" reading {reading} by copying note {note_to_copy.id}"
+                    )
                     new_note = copy_into_new_note(note_to_copy)
                     # Don't copy tags and the word list field to the new note
                     new_note.set_tags_from_str("")
                     new_note[word_list_field] = ""
                     new_note[meaning_audio_field] = ""
                     new_note.add_tag("new_matched_jp_word")
+                    new_note[sentence_field] = current_note[sentence_field]
+                    new_note[sentence_audio_field] = current_note[sentence_audio_field]
+                    new_note[furigana_sentence_field] = current_note[furigana_sentence_field]
+                    new_note[kanjified_sentence_field] = current_note[kanjified_sentence_field]
                     new_note[meaning_field] = jp_meaning.strip() if jp_meaning else ""
                     new_note[english_meaning_field] = en_meaning.strip() if en_meaning else ""
-
+                    # Process the meaning again with clean_meaning_in_note to get the best possible
+                    # meaning
+                    # Provide other_meaning_notes to override fetching from DB again as the meanings
+                    # gathered here can include yet un-added notes which the clean meaning op
+                    # couldn't get otherwise
+                    clean_meaning_in_note(
+                        config=config,
+                        note=new_note,
+                        notes_to_add_dict=notes_to_add_dict,
+                        notes_to_update_dict=notes_to_update_dict,
+                        allow_update_all_meanings=True,
+                        allow_reupdate_existing=True,
+                        other_meaning_notes=matching_notes,
+                    )
                     # If we're copying a note, we need to ensure the meaning number is at least 2
                     # as the first meaning should be (m1)
                     largest_meaning_index = max(largest_meaning_index, 2)

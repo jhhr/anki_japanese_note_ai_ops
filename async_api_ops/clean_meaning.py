@@ -1,5 +1,5 @@
 import logging
-from typing import TypedDict
+from typing import Optional, TypedDict
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -97,10 +97,11 @@ def update_all_meanings_for_word(
                 sentences_formatted += f"- {sen}\n"
         else:
             sentences_formatted = ""
-        meanings_and_sentences += f"""Meaning {i + 1}:
+        meanings_and_sentences += f"""---
+Meaning index {i + 1}:
 Japanese meaning: {ws['jp_meaning']}
 English meaning: {ws['en_meaning']}
----
+
 Sentences:
 {sentences_formatted}
 """
@@ -112,7 +113,7 @@ Sentences:
 
     prompt = f"""{f'''Below is the dictionary entry for a word or phrase, along with currently used meanings for groups of sentences containing that word or phrase. Your task is to rework the meanings to better fit the usage in the sentences, using the dictionary entry as reference.
 For each meaning, either extract the relevant parts from the dictionary entry and rephrase those to better fit the sentences. Follow these rules:
-- DO NOT OVERFIT the definitions to the sentences. Especially when the number of examples is a mere 1-3 sentences. Pick as many meanings as possible than can broadly fit the theme of the sentences. 
+- DO NOT OVERFIT the definitions to the sentences. Especially when the number of examples is a single sentence. Pick as many meanings as possible than can broadly fit the theme of the sentences. 
 - If the dictionary entry describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
 - If there are more than two usage patterns for this word or phrase, describe the one used in the sentences.
 - Aggressively shorten and simplify the picked meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
@@ -126,7 +127,7 @@ Follow these rules:
 '''}
 
 Return a JSON object with one `meanings` field containing an array of objects. Each object corresponds to a meaning and has the following fields:
-- "{meaning_index_field}": The index of the meaning (starting from 1).
+- "{meaning_index_field}": The 1-based index of the meaning. IMPORTANT: This should match the index of the meaning in above list exactly.
 - "{jp_meaning_return_field}": The reworked Japanese meaning.
 - "{en_meaning_return_field}": The reworked English meaning.
 - "{dict_reference_return_field}": Repeat the parts of the dictionary entry that were used as reference for reworking the meaning.
@@ -335,6 +336,9 @@ def clean_meaning_in_note(
     note: Note,
     notes_to_add_dict: dict[str, list[Note]],
     notes_to_update_dict: dict[NoteId, Note],
+    allow_update_all_meanings: Optional[bool] = True,
+    allow_reupdate_existing: Optional[bool] = False,
+    other_meaning_notes: Optional[list[Note]] = None,
 ) -> bool:
     note_type = note.note_type()
     if not note_type:
@@ -363,35 +367,39 @@ def clean_meaning_in_note(
         and word_reading_field in note
         and sentence_field in note
     ):
-        logger.debug(f"notes_to_update_dict: {notes_to_update_dict is not None}")
-        if notes_to_update_dict is not None:
-            # Need to watch out with this, if this op is called in bulk from other ops, some other
-            # update may already prevent us from changing this note
-            if note.id in notes_to_update_dict:
+        logger.debug(
+            f"allow_update_all_meanings: {allow_update_all_meanings}, allow_reupdate_existing:"
+            f" {allow_reupdate_existing}, note id: {note.id}, provided other_meaning_notes:"
+            f" {other_meaning_notes is not None}"
+        )
+        if allow_update_all_meanings:
+            if not allow_reupdate_existing and note.id in notes_to_update_dict:
                 logger.debug(
                     f"Skipping note {note.id} as it's already marked as updated by a previous op"
                 )
                 return False
-            meaning_notes_query = (
-                f"{word_sort_field}:re:m\\d+ -{word_sort_field}:re:x\\d+"
-                f' -nid:{note.id} "{word_reading_field}:{note[word_reading_field]}"'
-                f' ("{word_normal_field}:{note[word_normal_field]}" OR'
-                f' "{word_field}:{note[word_field]}")'
-            )
-            other_meaning_note_ids = mw.col.find_notes(meaning_notes_query)
-            all_meaning_notes = [
-                (
-                    mw.col.get_note(onid)
-                    if onid not in notes_to_update_dict
-                    else notes_to_update_dict[onid]
+            if other_meaning_notes is None:
+                meaning_notes_query = (
+                    f"{word_sort_field}:re:m\\d+ -{word_sort_field}:re:x\\d+"
+                    f' -nid:{note.id} "{word_reading_field}:{note[word_reading_field]}"'
+                    f' ("{word_normal_field}:{note[word_normal_field]}" OR'
+                    f' "{word_field}:{note[word_field]}")'
                 )
-                for onid in other_meaning_note_ids
-            ]
-            all_meaning_notes.append(note)
+                other_meaning_note_ids = mw.col.find_notes(meaning_notes_query)
+                other_meaning_notes = [
+                    (
+                        mw.col.get_note(onid)
+                        if allow_reupdate_existing or onid not in notes_to_update_dict
+                        else notes_to_update_dict[onid]
+                    )
+                    for onid in other_meaning_note_ids
+                ]
+                logger.debug(
+                    f"Other meaning notes count: {len(other_meaning_notes)}, query:"
+                    f" {meaning_notes_query}"
+                )
 
-            logger.debug(
-                f"All meaning notes count: {len(all_meaning_notes)}, query: {meaning_notes_query}"
-            )
+            all_meaning_notes = other_meaning_notes + [note]
 
             if len(all_meaning_notes) > 1:
                 meaning_sentences_dict = {
@@ -419,7 +427,7 @@ def clean_meaning_in_note(
                         n.add_tag("updated_jp_meaning")
                         if new_jp_meaning != prev_jp_meaning or new_en_meaning != prev_en_meaning:
                             any_changed = True
-                            if n.id != 0 and n.id not in notes_to_update_dict:
+                            if n.id > 0 and n.id not in notes_to_update_dict:
                                 notes_to_update_dict[n.id] = n
                 return any_changed
 
@@ -449,7 +457,7 @@ def clean_meaning_in_note(
             note[english_meaning_field] = new_en_meaning
             # Return success, if the we changed something
             if new_jp_meaning != jp_dict_entry or new_en_meaning != prev_en_meaning:
-                if note.id not in notes_to_update_dict:
+                if note.id > 0 and note.id not in notes_to_update_dict:
                     notes_to_update_dict[note.id] = note
                 return True
             return False
@@ -459,7 +467,7 @@ def clean_meaning_in_note(
             note[meaning_field] = new_meaning
             note[english_meaning_field] = en_meaning
             if new_meaning != "" or en_meaning != "":
-                if note.id not in notes_to_update_dict:
+                if note.id > 0 and note.id not in notes_to_update_dict:
                     notes_to_update_dict[note.id] = note
                 return True
             return False
