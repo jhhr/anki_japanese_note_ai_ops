@@ -3,6 +3,7 @@ from typing import Any, Literal, Optional, TypedDict, Union
 import os
 import time
 import sqlite3
+import re
 
 from aqt import mw
 
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 class MDXDictionary:
     """Efficient MDX dictionary querying using mdict-query's IndexBuilder"""
+
+    # Maximum recursion depth when following links to prevent infinite loops
+    MAX_LINK_DEPTH = 10
 
     def __init__(
         self, mdx_path: str, show_progress: bool = False, progress_msg=None, finish: bool = True
@@ -56,6 +60,94 @@ class MDXDictionary:
         print(loaded_msg)
         if show_progress and finish:
             mw.taskman.run_on_main(lambda: mw.progress.finish())
+
+    def _parse_link_entries(self, result: str) -> list[str]:
+        """Parse @@@LINK= entries from a dictionary result.
+
+        Args:
+            result: Dictionary result that may contain @@@LINK= markers
+
+        Returns:
+            List of linked entry names, or empty list if no links found
+        """
+
+        # Match @@@LINK=<entry_name> patterns
+        # The entry name may contain Japanese characters, brackets, and other symbols
+        link_pattern = r"@@@LINK=(.+?)(?=\n|$)"
+        matches = re.findall(link_pattern, result)
+
+        if not matches:
+            return []
+
+        # Clean up the linked entries (remove extra whitespace)
+        linked_entries = [match.strip() for match in matches]
+        logger.debug(f"Found {len(linked_entries)} link(s): {linked_entries}")
+        return linked_entries
+
+    def _is_link_only_result(self, result: str) -> bool:
+        """Check if result contains only links without actual content.
+
+        Args:
+            result: Dictionary result to check
+
+        Returns:
+            True if result only contains @@@LINK= markers
+        """
+        # Remove all @@@LINK= lines and whitespace
+        import re
+
+        cleaned = re.sub(r"@@@LINK=.+?(?=\n|$)", "", result)
+        cleaned = cleaned.strip()
+        return len(cleaned) == 0
+
+    def _follow_links(self, result: str, depth: int = 0) -> Union[str, None]:
+        """Follow @@@LINK= references to get actual definitions.
+
+        Args:
+            result: Dictionary result that may contain links
+            depth: Current recursion depth
+
+        Returns:
+            Actual definition content, or None if links lead nowhere
+        """
+        # Prevent infinite recursion
+        if depth >= self.MAX_LINK_DEPTH:
+            logger.warning(f"Max link depth ({self.MAX_LINK_DEPTH}) reached, stopping recursion")
+            return result
+
+        # Check if this result contains only links
+        if not self._is_link_only_result(result):
+            # Result has actual content, return it
+            return result
+
+        # Parse out the linked entries
+        linked_entries = self._parse_link_entries(result)
+        if not linked_entries:
+            # No links found but also no content - return as is
+            return result
+
+        # Try to follow the links
+        all_linked_results = []
+        for entry in linked_entries:
+            logger.debug(f"Following link to: {entry} (depth {depth + 1})")
+            # Query the linked entry
+            linked_result = self.builder.mdx_lookup(entry, ignorecase=False)
+
+            if linked_result:
+                # Join all results for this entry
+                joined_result = "\n".join(r for r in linked_result if r)
+
+                # Recursively follow links in the result
+                final_result = self._follow_links(joined_result, depth + 1)
+                if final_result:
+                    all_linked_results.append(final_result)
+
+        if not all_linked_results:
+            # None of the links led to actual content
+            return None
+
+        # Combine all results
+        return "\n\n".join(all_linked_results)
 
     def query(
         self,
@@ -115,6 +207,15 @@ class MDXDictionary:
 
                 # Take all results and join them
                 result = "\n".join(result for result in results if result)
+
+            # Follow any @@@LINK= references to get actual definitions
+            result = self._follow_links(result)
+
+            if not result:
+                logger.debug(
+                    f"Links for '{query}' led to no content in {os.path.basename(self.mdx_path)}"
+                )
+                return None
 
             if strip_html_tags:
                 result = strip_html_advanced(result, preserve_structure)
