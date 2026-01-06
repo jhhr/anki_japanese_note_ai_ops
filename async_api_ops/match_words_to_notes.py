@@ -647,7 +647,9 @@ def match_words_to_notes(
                     if new_note_reading_type == "on":
                         if has_on_markers:
                             # There are existing (on) notes, so we need to add numbering
-                            new_note[word_sort_field] = f"{word} (on)(r{largest_on_r_number + 1})"
+                            new_note[word_sort_field] = (
+                                f"{word} (on)(r{max(largest_on_r_number,1) + 1})"
+                            )
                             if largest_on_r_number == 0:
                                 # Case 2: need to update the marker notes
                                 update_marker_notes_with_r1(on_marker_notes)
@@ -657,13 +659,15 @@ def match_words_to_notes(
                         else:
                             # Existing notes had no markers and matched reading type, so no on/kun
                             # marking but need numbering
-                            new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                            new_note[word_sort_field] = f"{word} (r{max(largest_r_number,1) + 1})"
                             if largest_r_number == 0:
                                 update_marker_notes_with_r1(marker_notes)
                     elif new_note_reading_type == "kun":
                         if has_kun_markers:
                             # There are existing (kun) notes, so we need to add numbering
-                            new_note[word_sort_field] = f"{word} (kun)(r{largest_kun_r_number + 1})"
+                            new_note[word_sort_field] = (
+                                f"{word} (kun)(r{max(largest_kun_r_number,1) + 1})"
+                            )
                             if largest_kun_r_number == 0:
                                 update_marker_notes_with_r1(kun_marker_notes)
                         elif has_on_markers:
@@ -672,12 +676,12 @@ def match_words_to_notes(
                         else:
                             # Existing notes had no markers and matched reading type, so no on/kun
                             # marking but need numbering
-                            new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                            new_note[word_sort_field] = f"{word} (r{max(largest_r_number,1) + 1})"
                             if largest_r_number == 0:
                                 update_marker_notes_with_r1(marker_notes)
                     else:
                         # Reading type juk or undetermined, add numbering only
-                        new_note[word_sort_field] = f"{word} (r{largest_r_number + 1})"
+                        new_note[word_sort_field] = f"{word} (r{max(largest_r_number,1) + 1})"
                         if largest_r_number == 0:
                             update_marker_notes_with_r1(marker_notes)
 
