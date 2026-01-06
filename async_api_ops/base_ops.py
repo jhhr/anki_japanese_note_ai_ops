@@ -986,6 +986,7 @@ def sync_bulk_notes_op(
     edited_nids: list[NoteId],
     notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
     notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    on_end: Optional[Callable[..., None]] = None,
 ):
     """
     Perform a simple sync bulk operation on a sequence of notes. Will run the operation
@@ -1002,6 +1003,9 @@ def sync_bulk_notes_op(
         notes: A sequence of Note objects to process.
         edited_nids: A list to store the IDs of edited notes, to be mutated in place.
         model: The AI model to use for the operation, to get rate limit from config.
+        on_end: An optional callback to run on completion of the bulk op. Should be running other
+            side effects that do not edit or add notes as those should be handled through
+            notes_to_add_dict and notes_to_update_dict.
     """
     total_notes = len(notes)
     note_cnt = 0
@@ -1033,6 +1037,9 @@ def sync_bulk_notes_op(
 
     logger.debug("Sync bulk notes op finished. editedNids %s", edited_nids)
 
+    if on_end:
+        on_end()
+
     mw.taskman.run_on_main(lambda: mw.progress.finish())
 
     return pos, notes_to_add_dict, notes_to_update_dict
@@ -1049,6 +1056,7 @@ async def bulk_notes_op(
     notes_to_add_dict: dict[str, list[Note]] = {},
     notes_to_update_dict: dict[NoteId, Note] = {},
     model: str = "",
+    on_end: Optional[Callable[..., None]] = None,
 ) -> tuple[int, dict[str, list[Note]], dict[NoteId, Note]]:
     """
     Perform a simple async or sync bulk operation on a sequence of notes. Will run the operation
@@ -1064,6 +1072,9 @@ async def bulk_notes_op(
         notes: A sequence of Note objects to process.
         edited_nids: A list to store the IDs of edited notes, to be mutated in place.
         model: The AI model to use for the operation, to get rate limit from config.
+        on_end: An optional callback to run on completion of the bulk op. Should be running other
+            side effects that do not edit or add notes as those should be handled through
+            notes_to_add_dict and notes_to_update_dict.
     """
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     config["rate_limits"] = config.get("rate_limits", {})
@@ -1083,6 +1094,7 @@ async def bulk_notes_op(
             edited_nids=edited_nids,
             notes_to_add_dict=notes_to_add_dict,
             notes_to_update_dict=notes_to_update_dict,
+            on_end=on_end,
         )
 
     updated_notes: list[Note] = []
@@ -1178,9 +1190,14 @@ async def bulk_notes_op(
         logger.debug("Bulk notes op cancellation requested, returning early")
         if not cancel_manager.monitor_task.done():
             cancel_manager.monitor_task.cancel()
+        if on_end:
+            on_end()
         return pos, notes_to_add_dict, notes_to_update_dict
 
     logger.debug("Bulk notes op completed successfully, updating notes")
+
+    if on_end:
+        on_end()
 
     return pos, notes_to_add_dict, notes_to_update_dict
 

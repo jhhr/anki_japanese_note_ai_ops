@@ -688,3 +688,6 @@ class AnkiMDXHelper:
             html += "<hr>"
 
         return html
+
+
+mdx_helper = AnkiMDXHelper()

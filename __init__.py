@@ -42,6 +42,9 @@ from .async_api_ops.extract_words import (  # noqa: E402
 from .async_api_ops.match_words_to_notes import (  # noqa: E402
     match_words_to_notes_from_selected,
 )
+from .async_api_ops.make_all_meanings import (  # noqa: E402
+    make_meanings_selected_notes,
+)
 
 
 # Initialize root logger for the addon at module load
@@ -115,6 +118,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     component_words_action = QAction("Kanjify sentence", mw)
     extract_words_action = QAction("Extract words", mw)
     match_words_action = QAction("Match extracted words to notes", mw)
+    make_all_meanings_action = QAction("Generate all meanings for selected notes", mw)
     # Connect the action to the operation
     qconnect(
         meaning_action.triggered,
@@ -140,6 +144,10 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
         match_words_action.triggered,
         lambda: match_words_to_notes_from_selected(browser.selectedNotes(), parent=browser),
     )
+    qconnect(
+        make_all_meanings_action.triggered,
+        lambda: make_meanings_selected_notes(browser.selectedNotes(), parent=browser),
+    )
 
     ai_menu = menu.addMenu("AI helper")
     if ai_menu is None:
@@ -152,6 +160,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     ai_menu.addAction(component_words_action)
     ai_menu.addAction(extract_words_action)
     ai_menu.addAction(match_words_action)
+    ai_menu.addAction(make_all_meanings_action)
 
 
 def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):

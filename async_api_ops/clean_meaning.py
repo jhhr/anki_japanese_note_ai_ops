@@ -13,12 +13,10 @@ from .base_ops import (
     selected_notes_op,
     AsyncTaskProgressUpdater,
 )
-from ..sync_local_ops.mdx_dictionary import AnkiMDXHelper
+from ..sync_local_ops.mdx_dictionary import mdx_helper
 from ..utils import get_field_config
 
 logger = logging.getLogger(__name__)
-
-mdx_helper = AnkiMDXHelper()
 
 
 def get_sentences_for_note(
