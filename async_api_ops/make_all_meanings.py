@@ -35,6 +35,10 @@ class MakeMeaningsResult(Enum):
     ERROR = 3
 
 
+def make_meaning_dict_key(word: str, reading: str) -> str:
+    return f"{word}_{reading}"
+
+
 def make_all_meanings_for_word(
     config: dict[str, str], word: str, reading: str, all_meanings_dict: GeneratedMeaningsDictType
 ) -> MakeMeaningsResult:
@@ -140,7 +144,7 @@ Dictionary entry:
         return MakeMeaningsResult.ERROR
 
     all_meanings = result["meanings"]
-    all_meanings_dict[f"{word}_{reading}"] = all_meanings
+    all_meanings_dict[make_meaning_dict_key(word, reading)] = all_meanings
 
     return MakeMeaningsResult.SUCCESS
 
@@ -179,7 +183,7 @@ def make_meanings_in_note(
         and word_sort_field in note
         and word_normal_field in note
     ):
-        word_key = f"{note[word_field]}_{note[word_reading_field]}"
+        word_key = make_meaning_dict_key(note[word_field], note[word_reading_field])
         if (
             word_key in processed_words_set
             or note.has_tag(MEANINGS_GENERATED_TAG)

@@ -23,7 +23,7 @@ from ..configuration import (
     GeneratedMeaningsDictType,
     GeneratedMeaningType,
 )
-from .make_all_meanings import write_meanings_dict_to_file
+from .make_all_meanings import write_meanings_dict_to_file, make_meaning_dict_key
 
 from ..utils import get_field_config
 
@@ -628,7 +628,7 @@ def clean_meaning_in_note(
             if note.id > 0 and note.id not in notes_to_update_dict:
                 notes_to_update_dict[note.id] = note
 
-        word_key = f"{note[word_field]}_{note[word_reading_field]}"
+        word_key = make_meaning_dict_key(note[word_field], note[word_reading_field])
         word_generated_meanings = all_generated_meanings_dict.get(word_key, None)
 
         def get_other_meaning_notes():

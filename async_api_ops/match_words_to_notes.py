@@ -21,6 +21,8 @@ from .base_ops import (
     AsyncTaskProgressUpdater,
 )
 from .clean_meaning import clean_meaning_in_note
+from .make_all_meanings import make_all_meanings_for_word, make_meaning_dict_key
+
 from .extract_words import word_lists_str_format
 from ..kana_conv import to_hiragana
 from ..utils import copy_into_new_note, get_field_config, print_error_traceback
@@ -368,6 +370,23 @@ def match_words_to_notes(
 
         # Acquire the lock for this word before checking/modifying notes_to_add_dict
         async with word_locks[word]:
+            # If meanings haven't been generated yet for this note, do that now so that
+            # the generated meanings dict is up to date for the matching process and calling
+            # clean_meaning_in_note later
+            # This can mutate a "word_**" key in all_generated_meanings_dict which would be bad
+            # if other tasks trying to access it at the same time, however the word_locks is also
+            # protecting this
+            word_key = make_meaning_dict_key(word, reading)
+            if word_key not in all_generated_meanings_dict:
+                # Offload blocking HTTP call to a thread to avoid
+                # blocking the event loop in nested bulk ops
+                await asyncio.to_thread(
+                    make_all_meanings_for_word,
+                    config,
+                    word,
+                    reading,
+                    all_generated_meanings_dict,
+                )
             # Entries for words starting with the honorific prefix may use the kanji or hiragana so
             # query for both
             go_word_query = ""
@@ -897,7 +916,9 @@ _Current sentence_: {sentence}"""
             max_output_tokens = 8000
             logger.debug(f"{log_prefix}\n\nmeanings_str: {meanings_str}")
 
-            raw_result = get_response(
+            # Offload the blocking HTTP call to a thread to keep concurrency
+            raw_result = await asyncio.to_thread(
+                get_response,
                 model,
                 prompt,
                 cancel_state=cancel_state,
@@ -1327,7 +1348,7 @@ _Current sentence_: {sentence}"""
         task: asyncio.Task = asyncio.create_task(
             process_word_tuple(
                 # task_index is consumed by process_op in make_inner_bulk_op and not passed back!
-                task_index=len(tasks),
+                task_index=i,
                 notes_to_add_dict=notes_to_add_dict,
                 notes_to_update_dict=notes_to_update_dict,
                 # the below kwargs are passed back to the match_op function (and any more if we were

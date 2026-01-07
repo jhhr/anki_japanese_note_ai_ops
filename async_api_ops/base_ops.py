@@ -848,19 +848,30 @@ def make_inner_bulk_op(
                         logger.debug("Inner process op: cancellation requested")
                         return False
 
-                    # Run the operation in a thread pool to avoid blocking the event loop
-                    # on synchronous API calls
-                    loop = asyncio.get_event_loop()
-
-                    def blocking_op():
-                        return op(
+                    # If the op itself is async, run it directly; otherwise run the blocking call
+                    # in the thread pool so the event loop is not blocked by HTTP requests.
+                    if asyncio.iscoroutinefunction(op):
+                        op_result = await op(
                             config,
                             notes_to_add_dict=notes_to_add_dict,
                             notes_to_update_dict=notes_to_update_dict,
                             **op_args,
                         )
+                    else:
+                        loop = asyncio.get_event_loop()
 
-                    op_result = await loop.run_in_executor(executor, blocking_op)
+                        def blocking_op():
+                            return op(
+                                config,
+                                notes_to_add_dict=notes_to_add_dict,
+                                notes_to_update_dict=notes_to_update_dict,
+                                **op_args,
+                            )
+
+                        op_result = await loop.run_in_executor(executor, blocking_op)
+
+                    if asyncio.iscoroutine(op_result):
+                        op_result = await op_result
 
                 except Exception as e:
                     logger.error("Inner process op error, passing to handle_op_error: %s", e)
