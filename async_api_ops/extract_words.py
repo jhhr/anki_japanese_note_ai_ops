@@ -17,9 +17,9 @@ from .base_ops import (
 )
 from ..utils import get_field_config
 from ..configuration import (
-    raw_one_meaning_word_type,
-    raw_multi_meaning_word_type,
-    matched_word_type,
+    RawOneMeaningWordType,
+    RawMultiMeaningWordType,
+    MatchedWordType,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ def word_tuple_sort_key(
 def compared_word_lists(
     cur_word_list: list[tuple],
     new_word_list: list[tuple],
-) -> list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]]:
+) -> list[Union[RawOneMeaningWordType, RawMultiMeaningWordType, MatchedWordType]]:
     """
     Compare two word lists and return a list of words that combine both lists, keeping all previous
     words and only adding new words that are not already in the current list.
@@ -91,7 +91,7 @@ def compared_word_lists(
     # Get all tuples that are only in the new set
     added_set = new_set - cur_set
     # check each new tuple for validity
-    added_list: list[Union[raw_one_meaning_word_type, raw_multi_meaning_word_type]] = []
+    added_list: list[Union[RawOneMeaningWordType, RawMultiMeaningWordType]] = []
     for word_tuple in added_set:
         word, reading, meaning_number, sort_word, note_id = None, None, None, None, None
 

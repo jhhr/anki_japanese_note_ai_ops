@@ -896,21 +896,24 @@ async def bulk_nested_notes_op(
     notes_to_add_dict: dict[str, list[Note]],
     notes_to_update_dict: dict[NoteId, Note],
     model: str = "",
+    on_end: Optional[Callable[..., None]] = None,
 ) -> tuple[int, dict[str, list[Note]], dict[NoteId, Note]]:
     """
     Perform a bulk operation on a sequence of notes, with multiple nested async operations occurring
     per note instead of just one. Otherwise similar to `bulk_notes_op` except this cannot be
     performed synchronously and thus, requires rate limits to be set in the config.
 
-    Args:
-        message: A message to display in the progress dialog.
-        config: Addon config dict.
-        bulk_inner_op: The nested operation function to apply to each note. This op itself will
+
+    :param message: A message to display in the progress dialog.
+    :param config: Addon config dict.
+    :param bulk_inner_op: The nested operation function to apply to each note. This op itself will
            handle calling inner_bulk_op and updating updated_notes and edited_nids.
-        col: The Anki collection object.
-        notes: A sequence of Note objects to process.
-        edited_nids: A list to store the IDs of edited notes, to be mutated in place.
-        model: The AI model to use for the operation, to get rate limit from config.
+    :param col: The Anki collection object.
+    :param notes: A sequence of Note objects to process.
+    :param edited_nids: A list to store the IDs of edited notes, to be mutated in place.
+    :param model: The AI model to use for the operation, to get rate limit from config.
+    :param on_end: An optional callback to run on completion of the bulk op. Should be running other
+           side effects that do not edit or add notes as those should be handled through
     """
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     if not model:
@@ -972,8 +975,12 @@ async def bulk_nested_notes_op(
 
         if cancel_manager.is_cancel_requested():
             logger.debug("Bulk operation was cancelled, returning results so far")
+            if on_end:
+                on_end()
             return pos, notes_to_add_dict, notes_to_update_dict
 
+    if on_end:
+        on_end()
     return pos, notes_to_add_dict, notes_to_update_dict
 
 
@@ -1198,7 +1205,6 @@ async def bulk_notes_op(
 
     if on_end:
         on_end()
-
     return pos, notes_to_add_dict, notes_to_update_dict
 
 

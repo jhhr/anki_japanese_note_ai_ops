@@ -8,6 +8,8 @@ from aqt.utils import showWarning
 from collections.abc import Sequence
 from pathlib import Path
 
+from ..configuration import KANJI_STORY_COMPONENT_WORDS_LOG
+
 from .base_ops import (
     get_response,
     bulk_notes_op,
@@ -15,8 +17,6 @@ from .base_ops import (
     AsyncTaskProgressUpdater,
 )
 from ..utils import get_field_config
-
-KANJI_STORY_COMPONENT_WORDS_LOG = "_kanji_story_component_words.json"
 
 logger = logging.getLogger(__name__)
 

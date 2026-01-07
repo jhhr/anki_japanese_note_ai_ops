@@ -3,6 +3,7 @@ import json
 import re
 import asyncio
 import logging
+from pathlib import Path
 from typing import Union, Sequence, Callable, Any, Coroutine, cast, Literal, Optional
 
 from aqt import mw
@@ -24,9 +25,11 @@ from .extract_words import word_lists_str_format
 from ..kana_conv import to_hiragana
 from ..utils import copy_into_new_note, get_field_config, print_error_traceback
 from ..configuration import (
-    raw_one_meaning_word_type,
-    raw_multi_meaning_word_type,
-    matched_word_type,
+    RawOneMeaningWordType,
+    RawMultiMeaningWordType,
+    MatchedWordType,
+    GeneratedMeaningsDictType,
+    MEANINGS_DICT_FILE,
 )
 from ..sync_local_ops.jp_text_processing.kana.kana_highlight import kana_highlight, WithTagsDef
 from ..sync_local_ops.jp_text_processing.kana.check_word_reading_type import (
@@ -36,6 +39,7 @@ from ..sync_local_ops.jp_text_processing.kana.check_word_reading_type import (
 from ..sync_local_ops.jp_text_processing.kana.make_furigana_from_reading import (
     make_furigana_from_reading,
 )
+from .make_all_meanings import write_meanings_dict_to_file
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +121,8 @@ def make_new_note_id(note: Note) -> int:
     return -random.randint(1000000, 9999999)
 
 
-ProcessedWordTuple = Union[
-    raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type, None
-]
-FinalWordTuple = Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]
+ProcessedWordTuple = Union[RawOneMeaningWordType, RawMultiMeaningWordType, MatchedWordType, None]
+FinalWordTuple = Union[RawOneMeaningWordType, RawMultiMeaningWordType, MatchedWordType]
 
 
 def update_fake_note_ids(
@@ -211,9 +213,7 @@ def json_result_corrector(json_result: str) -> str:
 def match_words_to_notes(
     config: dict,
     current_note: Note,
-    word_tuples: list[
-        Union[raw_one_meaning_word_type, raw_multi_meaning_word_type, matched_word_type]
-    ],
+    word_tuples: list[Union[RawOneMeaningWordType, RawMultiMeaningWordType, MatchedWordType]],
     word_list_key: str,
     sentence: str,
     tasks: list[asyncio.Task],
@@ -222,6 +222,7 @@ def match_words_to_notes(
     notes_to_update_dict: dict[NoteId, Note],
     progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
+    all_generated_meanings_dict: GeneratedMeaningsDictType,
     update_word_list_in_dict: Callable[[list[ProcessedWordTuple]], None],
     note_type: NotetypeDict,
     replace_existing: bool = False,
@@ -229,23 +230,25 @@ def match_words_to_notes(
     """
     Match words to notes based on the kanjified sentence.
 
-    Args:
-        config (dict): Addon config
-        current_note (Note): The current note being processed
-        word_tuples (list): List of tuples containing words and their readings, possibly some values
+    :param config (dict): Addon config
+    :param current_note (Note): The current note being processed
+    :param word_tuples (list): List of tuples containing words and their readings, possibly some values
             already processed by this function previously
-        sentence (str): The sentence that provides context for the words' meaning
-        tasks (list): List of asyncio tasks to append to. Will be mutated by this function.
-        notes_to_add_dict (dict): Dict to append new notes to be added. Will be mutated by this
+    :param sentence (str): The sentence that provides context for the words' meaning
+    :param tasks (list): List of asyncio tasks to append to. Will be mutated by this function.
+    :param notes_to_add_dict (dict): Dict to append new notes to be added. Will be mutated by this
             function. Used to also check if the operation has already created something it should
             reuse.
-        notes_to_update_dict (dict): Dict to append notes to be updated with new meanings and also
+    :param notes_to_update_dict (dict): Dict to append notes to be updated with new meanings and also
             to get an already updated note for additional changes if needed. Will be mutated by this
             function.
-        progress_updater (AsyncTaskProgressUpdater): An updater to report progress of the operation.
-        update_word_list_in_dict (Callable): Function to update the word list in a note. Should
+    :param progress_updater (AsyncTaskProgressUpdater): An updater to report progress of the operation.
+    :param cancel_state (CancelState): An object to check if the operation has been cancelled.
+    :param all_generated_meanings_dict (GeneratedMeaningsDictType): Required to be passed to
+            clean_meaning_in_note
+    :param update_word_list_in_dict (Callable): Function to update the word list in a note. Should
             be called async when the task actually finishes.
-        replace_existing (bool): If True, replace existing matched words with new matches.
+    :param replace_existing (bool): If True, replace existing matched words with new matches.
             Otherwise, words that already have a note match will be skipped during processing and
             returned as is.
     """
@@ -341,7 +344,7 @@ def match_words_to_notes(
         logger.debug(
             f"{log_prefix}Processing word tuple at index {word_index}: {word}, reading: {reading}"
         )
-        nonlocal processed_word_tuples, word_locks, word_locks_lock
+        nonlocal processed_word_tuples, word_locks, word_locks_lock, all_generated_meanings_dict
         # If the word contains only non-japanese characters, skip it
         if not re.search(r"[ぁ-んァ-ン一-龯]", word):
             logger.debug(
@@ -699,6 +702,7 @@ def match_words_to_notes(
                     note=new_note,
                     notes_to_add_dict=notes_to_add_dict,
                     notes_to_update_dict=notes_to_update_dict,
+                    all_generated_meanings_dict=all_generated_meanings_dict,
                     allow_update_all_meanings=True,
                     allow_reupdate_existing=True,
                     other_meaning_notes=matching_notes,
@@ -1051,6 +1055,7 @@ _Current sentence_: {sentence}"""
                         note=new_note,
                         notes_to_add_dict=notes_to_add_dict,
                         notes_to_update_dict=notes_to_update_dict,
+                        all_generated_meanings_dict=all_generated_meanings_dict,
                         allow_update_all_meanings=True,
                         allow_reupdate_existing=True,
                         other_meaning_notes=matching_notes,
@@ -1388,6 +1393,7 @@ def match_words_to_notes_for_note(
     notes_to_update_dict: dict[NoteId, Note],
     progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
+    all_generated_meanings_dict: GeneratedMeaningsDictType,
 ) -> None:
     """
     Match words to notes for a single note.
@@ -1405,6 +1411,10 @@ def match_words_to_notes_for_note(
         increment_done_tasks (Callable[..., None]): Used for progress dialog updating
         increment_in_progress_tasks (Callable[..., None]): Used for progress dialog updating
         get_progress (Callable[..., str]): Used for progress dialog updating
+        cancel_state (CancelState): The cancel state to check for cancellation.
+        all_generated_meanings_dict (GeneratedMeaningsDictType): Dict of all generated meanings
+            for reuse across multiple calls. Provided to avoid doing file operations during
+            async operations and to avoid doing file reading in every op.
     """
     if not note:
         logger.error("Error: No note provided for matching words")
@@ -1533,6 +1543,7 @@ def match_words_to_notes_for_note(
                 notes_to_update_dict=notes_to_update_dict,
                 progress_updater=progress_updater,
                 cancel_state=cancel_state,
+                all_generated_meanings_dict=all_generated_meanings_dict,
                 update_word_list_in_dict=update_word_list_in_dict,
                 note_type=note_type,
                 replace_existing=replace_existing,
@@ -1580,7 +1591,42 @@ def bulk_match_words_to_notes(
         return
     model = config.get("match_words_model", "")
     message = "Matching words"
-    inner_op = match_words_to_notes_for_note
+    media_path = Path(mw.pm.profileFolder(), "collection.media")
+    all_meanings_dict_path = Path(media_path, MEANINGS_DICT_FILE)
+
+    all_generated_meanings_dict: GeneratedMeaningsDictType = {}
+    if all_meanings_dict_path.exists():
+        with open(all_meanings_dict_path, "r", encoding="utf-8") as f:
+            all_generated_meanings_dict = json.load(f)
+
+    def inner_op(
+        config: dict,
+        note: Note,
+        tasks: list[asyncio.Task],
+        edited_nids: list[NoteId],
+        notes_to_add_dict: dict[str, list[Note]],
+        notes_to_update_dict: dict[NoteId, Note],
+        progress_updater: AsyncTaskProgressUpdater,
+        cancel_state: CancelState,
+    ):
+        nonlocal all_generated_meanings_dict
+        return match_words_to_notes_for_note(
+            config=config,
+            note=note,
+            tasks=tasks,
+            edited_nids=edited_nids,
+            notes_to_add_dict=notes_to_add_dict,
+            notes_to_update_dict=notes_to_update_dict,
+            progress_updater=progress_updater,
+            cancel_state=cancel_state,
+            all_generated_meanings_dict=all_generated_meanings_dict,
+        )
+
+    def on_end():
+        nonlocal all_generated_meanings_dict
+        # Write updated meanings dictionary to file after successful operation
+        write_meanings_dict_to_file(all_generated_meanings_dict)
+
     return bulk_nested_notes_op(
         message=message,
         config=config,
@@ -1592,6 +1638,7 @@ def bulk_match_words_to_notes(
         notes_to_add_dict=notes_to_add_dict,
         notes_to_update_dict=notes_to_update_dict,
         model=model,
+        on_end=on_end,
     )
 
 

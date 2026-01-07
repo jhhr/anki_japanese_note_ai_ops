@@ -10,6 +10,13 @@ from aqt.browser import Browser
 from aqt.utils import showWarning
 from collections.abc import Sequence
 
+from ..configuration import (
+    MEANINGS_DICT_FILE,
+    NO_DICTIONARY_ENTRY_TAG,
+    MEANINGS_GENERATED_TAG,
+    GeneratedMeaningsDictType,
+)
+
 from .base_ops import (
     get_response,
     bulk_notes_op,
@@ -21,8 +28,6 @@ from ..utils import get_field_config
 
 logger = logging.getLogger(__name__)
 
-MEANINGS_DICT_FILE = "_all_meanings_dict.json"
-
 
 class MakeMeaningsResult(Enum):
     SUCCESS = 1
@@ -31,17 +36,19 @@ class MakeMeaningsResult(Enum):
 
 
 def make_all_meanings_for_word(
-    config: dict[str, str], word: str, reading: str, all_meanings_dict: dict[str, list[dict]]
+    config: dict[str, str], word: str, reading: str, all_meanings_dict: GeneratedMeaningsDictType
 ) -> MakeMeaningsResult:
     """
     Receive a word and its reading, and get an LLM to split all the meanings for that word found
     in the dictionary entries and write those into a JSON file.
 
-    param config: Addon configuration dictionary.
-    param word: The word or phrase being defined.
-    param reading: The reading of the word or phrase.
-    param all_meanings_dict: The dictionary to store all meanings.
-    return: True when meanings were successfully made, False otherwise.
+    :param config: Addon configuration dictionary.
+    :param word: The word or phrase being defined.
+    :param reading: The reading of the word or phrase.
+    :param all_generated_meanings_dict: Dict of all generated meanings
+            for reuse across multiple calls. Provided to avoid doing file operations during
+            async operations and to avoid doing file reading in every op.
+    :return: True when meanings were successfully made, False otherwise.
     """
     mdx_helper.load_mdx_dictionaries_if_needed(config, show_progress=True, finish_progress=False)
 
@@ -61,13 +68,19 @@ def make_all_meanings_for_word(
     en_meaning_field = "en_meaning"
     prompt = f"""Below are dictionary entries from multiple different dictionaries for a word or phrase. Your task is to create a single comprehensive list of all distinct meanings expressed in these. Follow these rules:
 
+Definition rules:
 - Create a Japanese meaning and English meaning.
-- The English meaning doesn't have to translate the Japanese meaning literally but can explain the meaning by simply listing equivalent words or phrases, if possible. 
+- The English meaning should almost always be a short list of equivalent words or phrases separated by semicolons. Only explain in sentences when equivalents do not exist; e.g. the word is "untranslatable".
 - Each meaning should be concise, ideally a single sentence but more if absolutely necessary.
+- Try to minimize the number of separate meanings by combining those that are closely related.
+
+Combination rules:
 - If the dictionary entries describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
 - If the dictionary entries includes multiple meanings that are similar, combine them into one. Avoid grouping too many meanings together; prioritize short and clear definitions.
+
+Information extraction rules:
 - Make sure to analyze the different dictionary entries carefully and identify the same meanings expressed in different ways. The aim is to compress all the information into a minimal set of distinct meanings.
-- Shorten and simplify the meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
+- Note that the dictionary entries may include information about additinal phrases that use the word. These would usually come after the list of main meanings per dictionary. Ignore these additional phrases and only focus on the main meanings of the word or phrase itself.
 - Exclude any example sentences, usage notes, or extraneous information.
 
 Return a JSON object with one `meanings` field containing an array of objects, each with `{jp_meaning_field}` and `{en_meaning_field}` keys for each distinct meaning.
@@ -79,7 +92,7 @@ Dictionary entry:
 {dict_meaning_for_word}
 ---
 """
-    logger.debug(f"Prompt for updating meanings: {prompt}")
+    logger.debug(f"Prompt for generating possible meanings: {prompt}")
 
     response_schema = {
         "type": "object",
@@ -285,8 +298,8 @@ def make_meanings_in_note(
         word_key = f"{note[word_field]}_{note[word_reading_field]}"
         if (
             word_key in processed_words_set
-            or note.has_tag("2-meanings-generated-to-json")
-            or note.has_tag("2-no-dictionary-entry")
+            or note.has_tag(MEANINGS_GENERATED_TAG)
+            or note.has_tag(NO_DICTIONARY_ENTRY_TAG)
         ):
             logger.debug(f"word '{word_key}' already processed, skipping")
             return True
@@ -315,7 +328,7 @@ def make_meanings_in_note(
             processed_words_set.add(word_key)
             # Tag all notes for this word to know which notes have had meanings generated
             for meaning_note in all_meaning_notes:
-                meaning_note.add_tag("2-meanings-generated-to-json")
+                meaning_note.add_tag(MEANINGS_GENERATED_TAG)
                 notes_to_update_dict[meaning_note.id] = meaning_note
             return True
         elif result == MakeMeaningsResult.NO_DICTIONARY_ENTRY:
@@ -326,7 +339,7 @@ def make_meanings_in_note(
             processed_words_set.add(word_key)
             # Tag all notes for this word to know which notes have no dictionary entry
             for meaning_note in all_meaning_notes:
-                meaning_note.add_tag("2-no-dictionary-entry")
+                meaning_note.add_tag(NO_DICTIONARY_ENTRY_TAG)
                 notes_to_update_dict[meaning_note.id] = meaning_note
             return False
         return False
@@ -363,26 +376,26 @@ def bulk_make_meanings_op(
 
     # Load existing meanings dictionary if it exists, we'll mutate the dict while processing and
     # then write it back at the end
-    all_meanings_dict = {}
+    all_generated_meanings_dict: GeneratedMeaningsDictType = {}
     if all_meanings_dict_path.exists():
         with open(all_meanings_dict_path, "r", encoding="utf-8") as f:
-            all_meanings_dict = json.load(f)
+            all_generated_meanings_dict = json.load(f)
 
     def op(config, note, notes_to_add_dict, notes_to_update_dict):
-        nonlocal processed_words_set, all_meanings_dict
+        nonlocal processed_words_set, all_generated_meanings_dict
         return make_meanings_in_note(
             config,
             note,
             processed_words_set,
-            all_meanings_dict,
+            all_generated_meanings_dict,
             notes_to_add_dict,
             notes_to_update_dict,
         )
 
     def on_end():
-        nonlocal all_meanings_dict
+        nonlocal all_generated_meanings_dict
         # Write updated meanings dictionary to file after successful operation
-        write_meanings_dict_to_file(all_meanings_dict)
+        write_meanings_dict_to_file(all_generated_meanings_dict)
 
     return bulk_notes_op(
         message,
