@@ -1138,7 +1138,8 @@ _Current sentence_: {sentence}"""
             if meanings:
                 largest_meaning_index += 1
             if note_to_copy:
-                create_new_note_from_matched_note(
+                return await asyncio.to_thread(
+                    create_new_note_from_matched_note,
                     config=config,
                     note_to_copy=note_to_copy,
                     matching_notes=matching_notes,
@@ -1518,7 +1519,7 @@ def match_words_to_notes(
         task: asyncio.Task = asyncio.create_task(
             process_word_tuple(
                 # task_index is consumed by process_op in make_inner_bulk_op and not passed back!
-                task_index=i,
+                task_index=len(tasks) - 1,
                 notes_to_add_dict=notes_to_add_dict,
                 notes_to_update_dict=notes_to_update_dict,
                 # the below kwargs are passed back to the match_op function (and any more if we were

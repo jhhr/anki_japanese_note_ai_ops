@@ -641,6 +641,37 @@ class AsyncTaskProgressUpdater:
             title = "Processing asynchronous tasks..."
         self.set_title(title)
 
+        # Periodic updater (started when an event loop is running)
+        self.autoupdate_task: Optional[asyncio.Task] = None
+        self._autoupdate_started = False
+        self._autoupdate_deferred = False
+        self.start_autoupdate()
+
+    def start_autoupdate(self):
+        """Start periodic progress updates if an event loop is running."""
+        if self.autoupdate_task and not self.autoupdate_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop yet; allow caller to retry later from async context
+            self._autoupdate_deferred = True
+            return
+        self.autoupdate_task = loop.create_task(self._periodic_update_progress())
+        self._autoupdate_started = True
+        self._autoupdate_deferred = False
+
+    async def _periodic_update_progress(self):
+        while True:
+            self.update_progress()
+            await asyncio.sleep(1)
+
+    def stop_autoupdate(self):
+        """Stop the periodic progress update task."""
+        if self.autoupdate_task:
+            self.autoupdate_task.cancel()
+            self.autoupdate_task = None
+
     def set_total_notes(self, total_notes: int):
         self.total_notes = total_notes
 
@@ -770,23 +801,28 @@ def make_inner_bulk_op(
     handle_op_error: Callable[[Exception], None],
     handle_op_result: Callable[[bool], None],
     cancel_state: Optional[CancelState] = None,
+    one_task_per_op: bool = False,
 ) -> Callable[..., Coroutine[Any, Any, bool]]:
     """
     Creates an asynchronous operation processor for bulk operations with rate limiting and progress
     tracking.
-    Args:
-        config (dict): Addon config
-        op (Callable[[dict, ...], bool]): The operation function to execute for each item. It
+
+    :param config (dict): Addon config
+    :param op (Callable[[dict, ...], bool]): The operation function to execute for each item. It
             accepts the config dictionary as the first argument, followed by additional arguments.
-        rate_limit (int): The maximum number of operations to perform per minute.
-        get_total_tasks (Callable[[], int]): Callback to retrieve total number of tasks to process.
-        increment_done_tasks (Callable[..., None]): Callback to increment count of completed tasks.
-        increment_in_progress_tasks (Callable[..., None]): Callback to increment the count of tasks
+    :param rate_limit (int): The maximum number of operations to perform per minute.
+    :param get_total_tasks (Callable[[], int]): Callback to retrieve total number of tasks to process.
+    :param increment_done_tasks (Callable[..., None]): Callback to increment count of completed tasks.
+    :param increment_in_progress_tasks (Callable[..., None]): Callback to increment the count of tasks
             currently in progress.
-        get_progress (Callable[..., str]): Callback to retrieve the current progress message.
-        handle_op_error (Callable[[Exception], None]): Callback to handle exceptions raised during
+    :param get_progress (Callable[..., str]): Callback to retrieve the current progress message.
+    :param handle_op_error (Callable[[Exception], None]): Callback to handle exceptions raised during
             operation execution.
-        handle_op_result (Callable[[bool], None]): Callback to handle the result of each operation.
+    :param handle_op_result (Callable[[bool], None]): Callback to handle the result of each operation.
+    :param cancel_state (Optional[CancelState]): Shared cancellation state.
+    :param one_task_per_op (bool): Whether each operation corresponds to a single task for progress
+            tracking. If False, the caller is responsible for updating done note counts.
+
     Returns:
         Callable[[int, ...], None]: An asynchronous function that processes a single
             operation, given its index and additional arguments.
@@ -883,6 +919,7 @@ def make_inner_bulk_op(
                         tasks_done=1,
                         tasks_in_progress=-1,
                         cumulative_task_time=task_time,
+                        notes_done=1 if one_task_per_op else 0,
                     )
                     progress_updater.update_progress()
 
@@ -934,6 +971,8 @@ async def bulk_nested_notes_op(
     rate_limit = config["rate_limits"].get(model, None)
 
     progress_updater.set_total_notes(len(notes))
+    # Can start auto updater now that we're in an async context with a running loop
+    progress_updater.start_autoupdate()
 
     if not rate_limit:
         logger.error("No rate limit set for model, can't run nested async op")
@@ -988,10 +1027,12 @@ async def bulk_nested_notes_op(
             logger.debug("Bulk operation was cancelled, returning results so far")
             if on_end:
                 on_end()
+            progress_updater.stop_autoupdate()
             return pos, notes_to_add_dict, notes_to_update_dict
 
     if on_end:
         on_end()
+    progress_updater.stop_autoupdate()
     return pos, notes_to_add_dict, notes_to_update_dict
 
 
@@ -1120,6 +1161,8 @@ async def bulk_notes_op(
 
     progress_updater.set_total_notes(len(notes))
     progress_updater.set_total_tasks(len(notes))
+    # Can start auto updater now that we're in an async context with a running loop
+    progress_updater.start_autoupdate()
 
     def handle_op_success(
         note: Note,
@@ -1155,6 +1198,7 @@ async def bulk_notes_op(
             handle_op_error=handle_op_error,
             handle_op_result=handle_op_result,
             cancel_state=cancel_state,
+            one_task_per_op=True,
         )
         if mw.progress.want_cancel():
             logger.debug("Bulk notes op cancelled before starting tasks")
@@ -1210,12 +1254,16 @@ async def bulk_notes_op(
             cancel_manager.monitor_task.cancel()
         if on_end:
             on_end()
+
+        progress_updater.stop_autoupdate()
         return pos, notes_to_add_dict, notes_to_update_dict
 
     logger.debug("Bulk notes op completed successfully, updating notes")
 
     if on_end:
         on_end()
+
+    progress_updater.stop_autoupdate()
     return pos, notes_to_add_dict, notes_to_update_dict
 
 
@@ -1300,7 +1348,7 @@ def selected_notes_op(
             for nid in res_notes_to_update_dict.keys():
                 if nid not in edited_nids_set:
                     edited_other_nids.append(nid)
-            edited_nids = list(edited_nids)
+            edited_nids = list(filter(lambda x: x in nids, notes_to_update_dict.keys()))
 
             # Remove note.id=0 notes from updated_notes
             all_updated_notes_dict: dict[NoteId, Note] = {}
