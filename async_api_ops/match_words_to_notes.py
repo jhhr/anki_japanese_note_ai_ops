@@ -30,8 +30,10 @@ from ..configuration import (
     RawOneMeaningWordType,
     RawMultiMeaningWordType,
     MatchedWordType,
+    GeneratedMeaningType,
     GeneratedMeaningsDictType,
     MEANINGS_DICT_FILE,
+    MEANING_MAPPED_TAG,
 )
 from ..sync_local_ops.jp_text_processing.kana.kana_highlight import kana_highlight, WithTagsDef
 from ..sync_local_ops.jp_text_processing.kana.check_word_reading_type import (
@@ -787,7 +789,7 @@ async def match_single_word_in_word_tuple(
 
         hiragana_reading = to_hiragana(reading)
         hiragana_reading_suru = to_hiragana(reading + "する")
-        matching_notes = []
+        matching_notes: list[Note] = []
 
         def compare_readings(note_reading: str) -> bool:
             note_hiragana_reading = to_hiragana(note_reading)
@@ -806,6 +808,35 @@ async def match_single_word_in_word_tuple(
             if note and word_reading_field in note:
                 if compare_readings(note[word_reading_field]):
                     matching_notes.append(note)
+        for i in range(len(matching_notes)):
+            # Check if the note needs to have its meaning mapped to generated meanings first as
+            # we want the matching op to only have existing notes that match generated meanings
+            # Because clean_meaning_note can modify multiple notes in one call, re-acquire the
+            # note from notes_to_update_dict if it's there
+            note_id = matching_notes[i].id
+            note = (
+                matching_notes[i]
+                if note_id not in notes_to_update_dict
+                else notes_to_update_dict[note_id]
+            )
+            if not note.has_tag(MEANING_MAPPED_TAG):
+                # The op will add the note to notes_to_update_dict if it edits it
+                logger.debug(
+                    f"{log_prefix}Cleaning meaning in note {note[word_sort_field]} before matching"
+                )
+                await asyncio.to_thread(
+                    clean_meaning_in_note,
+                    config=config,
+                    note=note,
+                    notes_to_add_dict=notes_to_add_dict,
+                    notes_to_update_dict=notes_to_update_dict,
+                    all_generated_meanings_dict=all_generated_meanings_dict,
+                    allow_update_all_meanings=True,
+                    allow_reupdate_existing=True,
+                )
+            # Replace note in list each time, this will include the cases where an earlier op
+            # modified notes coming later in the list
+            matching_notes[i] = note
 
         logger.debug(
             f"{log_prefix}Found matching notes:"
@@ -824,7 +855,8 @@ async def match_single_word_in_word_tuple(
 
         # Create a new note if there are no existing matches in DB AND no pending notes to add
         if not matching_notes and not matching_new_notes:
-            return create_new_note_without_matching(
+            return await asyncio.to_thread(
+                create_new_note_without_matching,
                 config=config,
                 log_prefix=log_prefix,
                 match_op_args=match_op_args,
@@ -840,6 +872,9 @@ async def match_single_word_in_word_tuple(
         # meaning is a tuple of (jp_meaning, meaning_number, note_id, example_sentence, en_meaning)
         largest_meaning_index = 0
         note_to_copy = None
+        has_existing_note_meanings = False
+        en_meaning_in_meanings: set[str] = set()
+        jp_meaning_in_meanings: set[str] = set()
         for note in matching_notes:
             logger.debug(
                 f"{log_prefix}Processing note {note.id} for word {word} with reading {reading},"
@@ -867,6 +902,9 @@ async def match_single_word_in_word_tuple(
                         if matched_meaning_number > largest_meaning_index:
                             largest_meaning_index = matched_meaning_number
                             note_to_copy = note
+                    en_meaning_in_meanings.add(english_meaning)
+                    jp_meaning_in_meanings.add(meaning)
+                    has_existing_note_meanings = True
                     meanings.append((
                         meaning,
                         matched_meaning_number,
@@ -879,6 +917,30 @@ async def match_single_word_in_word_tuple(
                     logger.debug(f"{log_prefix}Note {note.id} has empty meaning field")
             else:
                 logger.debug(f"{log_prefix}Note {note.id} is missing meaning field")
+
+        # Add meanings from all_generated_meanings_dict as well, if any remain that aren't in the
+        # existing notes
+        word_key = make_meaning_dict_key(word, reading)
+        gen_meaning_by_index: dict[int, GeneratedMeaningType] = {}
+        if word_key in all_generated_meanings_dict:
+            possible_meanings: list[GeneratedMeaningType] = all_generated_meanings_dict[word_key]
+            for gen_meaning in possible_meanings:
+                if (
+                    gen_meaning["jp_meaning"] not in jp_meaning_in_meanings
+                    and gen_meaning["en_meaning"] not in en_meaning_in_meanings
+                ):
+                    meanings.append((
+                        gen_meaning["jp_meaning"],
+                        # Since these are not existing notes, we use the largest_meaning_index
+                        # so that selecting one of these will increment the meaning number correctly
+                        largest_meaning_index,
+                        None,
+                        "",
+                        gen_meaning["en_meaning"],
+                        word,
+                    ))
+                    gen_meaning_by_index[len(meanings) - 1] = gen_meaning
+
         if note_to_copy:
             # use the updated note if available
             if note_to_copy.id in notes_to_update_dict:
@@ -902,14 +964,14 @@ async def match_single_word_in_word_tuple(
             meanings_str += f"""Meaning number {i + 1}:
 - *match_word*: {match_word}
 - *jp_meaning*: {jp_meaning}
-- *example_sentence*: {example_sentence}
 - *en_meaning*: {en_meaning}
+- *example_sentence*: {example_sentence or ('(no example sentence)')}
 """
 
         instructions = """You are an expert Japanese lexicographer. Your task is to analyze how a Japanese word is used in a _current sentence_ and compare it to a list of existing dictionary meanings. You are designed to output JSON.
 
 **Primary Goal: Minimize creation of new meanings**
-Your main goal is to try to contain all closely related nuances in a single meaning. Always modify one of the existing meanings, if it somewhat matches the current context and could be adjusted to fit the current and previous contexts. However, do not refer to specific phrases in a meaning, to avoid overfitting; to fit more contexts, try to explain the meaning in general terms using easy-to-understand language. Keep the meaning short, 3 sentences is already too long. Only if such modifications no longer make sense because the existings meanings are not close enough or further modification would make the meaning too long and/or complicated, you may consider the **CREATE NEW** action.
+Your main goal is to match to one of the existing meanings. If none fit, you may consider the **CREATE NEW** action.
 
 **Your Actions**
 You will generate a JSON object. This array will describe your actions. You must provide one of the two actions.
@@ -918,7 +980,6 @@ You will generate a JSON object. This array will describe your actions. You must
     -   Choose this if one existing meaning either accurately represents the word's usage in the sentence or can be modified to fit its previous meaning and the current context.
     -   In the JSON, create a object with `"is_matched_meaning": true`.
     -   Set `"meaning_number"` to the 1-based index of the matching meaning.
-    -   You can optionally provide improved `"jp_meaning"` or `"en_meaning"` in this same object if the original has minor flaws.
 
 2.  **CREATE NEW**
     -   Choose this **only if every existing meaning is unsuitable**.
@@ -926,22 +987,20 @@ You will generate a JSON object. This array will describe your actions. You must
     -   You MUST provide a new `"jp_meaning"` and `"en_meaning"`.
 
 **JSON OUTPUT RULES:**
-- The output is a single JSON object with 3-4 properties:
+- The output is a single JSON object with 2-4 properties:
 - "is_matched_meaning": A boolean indicating whether you are matching an existing meaning (true) or creating a new one (false).
 - "meaning_number": An integer (1-based index) indicating which existing meaning you are matching, or null if creating a new meaning.
-- "jp_meaning": (optional) A string with the improved Japanese meaning if matching, or the new Japanese meaning if creating a new one.
-- "en_meaning": (optional) A string with the improved English meaning if matching, or the new English meaning if creating a new one.
+- "jp_meaning": (optional) A string with the new Japanese meaning, if creating a new one.
+- "en_meaning": (optional) A string with the new English meaning, if creating a new one.
 - **CRITICAL**: `meaning_number` must be a valid 1-based index from the provided list. Do not invent numbers.
 
 ---
-**Example 1: MATCH with an improvement to the matched meaning**
-The first meaning is a good match, but its English and Japanese are modified to match the current usage.
+**Example 1: MATCH
+The first meaning is a good match.
 ```json
 {
     "is_matched_meaning": true,
     "meaning_number": 1,
-    "jp_meaning": "改善された日本語の定義。",
-    "en_meaning": "A new, improved English definition for the matched meaning."
 }
 ```
 
@@ -1135,7 +1194,7 @@ _Current sentence_: {sentence}"""
         )
         if not is_matched_meaning and meaning_number is None and (jp_meaning or en_meaning):
             # Action CREATE NEW. duplicate the note with the biggest meaning number, incrementing it by 1
-            if meanings:
+            if has_existing_note_meanings:
                 largest_meaning_index += 1
             if note_to_copy:
                 return await asyncio.to_thread(
@@ -1161,6 +1220,32 @@ _Current sentence_: {sentence}"""
                 f" {word} with reading {reading}, meaning number {meaning_number}, meanings:"
                 f" {meanings}"
             )
+            logger.debug(
+                "gen_meaning_by_index:"
+                f" {json.dumps(gen_meaning_by_index, ensure_ascii=False, indent=2)}"
+            )
+            if meaning_number in gen_meaning_by_index:
+                # If the matched meaning came from generated meanings, we are actually creating
+                # a new note instead
+                gen_meaning = gen_meaning_by_index[meaning_number]
+                logger.debug(
+                    f"{log_prefix}Matched meaning came from generated meanings, creating new"
+                    f" note for word {word} with reading {reading}"
+                )
+                if has_existing_note_meanings:
+                    largest_meaning_index += 1
+                return await asyncio.to_thread(
+                    create_new_note_from_matched_note,
+                    config=config,
+                    note_to_copy=note_to_copy,
+                    matching_notes=matching_notes,
+                    largest_meaning_index=largest_meaning_index,
+                    jp_meaning=gen_meaning["jp_meaning"],
+                    en_meaning=gen_meaning["en_meaning"],
+                    log_prefix=log_prefix,
+                    match_op_args=match_op_args,
+                )
+
             # We have a match, so we can update the note with the matched meaning
             matched_note = None
 
@@ -1191,19 +1276,19 @@ _Current sentence_: {sentence}"""
             )
             processed_word_tuples[word_index] = new_word_tuple
             # Now we need to update the meaning in the note
-            if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
-                matched_note[meaning_field] = jp_meaning.strip()
-                matched_note.add_tag("updated_jp_meaning")
-                if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
-                    notes_to_update_dict[matched_note.id] = matched_note
-            if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
-                matched_note[english_meaning_field] = en_meaning.strip()
-                if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
-                    notes_to_update_dict[matched_note.id] = matched_note
-            logger.debug(
-                f"{log_prefix}Updated note {matched_note.id} with new meaning '{jp_meaning}'"
-                f" and english meaning '{en_meaning}'"
-            )
+            # if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
+            #     matched_note[meaning_field] = jp_meaning.strip()
+            #     matched_note.add_tag("updated_jp_meaning")
+            #     if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
+            #         notes_to_update_dict[matched_note.id] = matched_note
+            # if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
+            #     matched_note[english_meaning_field] = en_meaning.strip()
+            #     if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
+            #         notes_to_update_dict[matched_note.id] = matched_note
+            # logger.debug(
+            #     f"{log_prefix}Updated note {matched_note.id} with new meaning '{jp_meaning}'"
+            #     f" and english meaning '{en_meaning}'"
+            # )
             return True
         else:
             logger.debug(

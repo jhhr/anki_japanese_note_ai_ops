@@ -1,6 +1,5 @@
 import logging
 import json
-from enum import Enum
 from pathlib import Path
 
 from anki.notes import Note, NoteId
@@ -15,6 +14,8 @@ from ..configuration import (
     NO_DICTIONARY_ENTRY_TAG,
     MEANINGS_GENERATED_TAG,
     GeneratedMeaningsDictType,
+    WordAndSentences,
+    MakeMeaningsResult,
 )
 
 from .base_ops import (
@@ -29,18 +30,15 @@ from ..utils import get_field_config
 logger = logging.getLogger(__name__)
 
 
-class MakeMeaningsResult(Enum):
-    SUCCESS = 1
-    NO_DICTIONARY_ENTRY = 2
-    ERROR = 3
-
-
 def make_meaning_dict_key(word: str, reading: str) -> str:
     return f"{word}_{reading}"
 
 
 def make_all_meanings_for_word(
-    config: dict[str, str], word: str, reading: str, all_meanings_dict: GeneratedMeaningsDictType
+    config: dict[str, str],
+    word: str,
+    reading: str,
+    all_meanings_dict: GeneratedMeaningsDictType,
 ) -> MakeMeaningsResult:
     """
     Receive a word and its reading, and get an LLM to split all the meanings for that word found
@@ -56,8 +54,6 @@ def make_all_meanings_for_word(
     """
     mdx_helper.load_mdx_dictionaries_if_needed(config, show_progress=True, finish_progress=False)
 
-    # We won't necessarily have a dictionary entry for the word so the prompt will differ slightly
-    # depending on whether we have one or not
     dict_meaning_for_word = mdx_helper.get_definition_text(
         word=word,
         reading=reading,
@@ -74,13 +70,13 @@ def make_all_meanings_for_word(
 
 Definition rules:
 - Create a Japanese meaning and English meaning.
+- AGGRESSIVELY minimize the number of separate meanings by combining meanings that are related.
+- BE CONCISE: Each meaning should be concise, ideally a single sentence but more if absolutely necessary to combine multiple related meanings.
 - The English meaning should almost always be a short list of equivalent words or phrases separated by semicolons. Only explain in sentences when equivalents do not exist; e.g. the word is "untranslatable".
-- Each meaning should be concise, ideally a single sentence but more if absolutely necessary.
-- Try to minimize the number of separate meanings by combining those that are closely related.
 
 Combination rules:
-- If the dictionary entries describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
-- If the dictionary entries includes multiple meanings that are similar, combine them into one. Avoid grouping too many meanings together; prioritize short and clear definitions.
+- Most of all, if the dictionary entries includes multiple meanings that are similar, combine them into one.
+- However also combine dissimilar meanings that that are of the type one literal and one metaphorical - those should become one meaning where each is described shortly.
 
 Information extraction rules:
 - Make sure to analyze the different dictionary entries carefully and identify the same meanings expressed in different ways. The aim is to compress all the information into a minimal set of distinct meanings.
@@ -122,21 +118,21 @@ Dictionary entry:
     result = get_response(model, prompt, response_schema=response_schema)
     if result is None:
         logger.error("No response from model when making all meanings")
-        return False
+        return MakeMeaningsResult.ERROR
     if not isinstance(result, dict):
         logger.error(f"Response from model was not a dictionary: {result}")
-        return False
+        return MakeMeaningsResult.ERROR
     if "meanings" not in result:
         logger.error(f"Response from model did not contain 'meanings' field: {result}")
-        return False
+        return MakeMeaningsResult.ERROR
     if not isinstance(result["meanings"], list):
         logger.error(f"Response from model 'meanings' field was not a list: {result}")
-        return False
+        return MakeMeaningsResult.ERROR
     if not all(isinstance(m, dict) for m in result["meanings"]):
         logger.error(
             f"Response from model 'meanings' field did not contain all dictionaries: {result}"
         )
-        return False
+        return MakeMeaningsResult.ERROR
     if not all(jp_meaning_field in m and en_meaning_field in m for m in result["meanings"]):
         logger.error(
             f"Response from model 'meanings' field missing required keys in some meanings: {result}"
@@ -144,7 +140,149 @@ Dictionary entry:
         return MakeMeaningsResult.ERROR
 
     all_meanings = result["meanings"]
-    all_meanings_dict[make_meaning_dict_key(word, reading)] = all_meanings
+    all_meanings_dict[f"{word}_{reading}"] = all_meanings
+
+    return MakeMeaningsResult.SUCCESS
+
+
+def revise_meanings_for_word(
+    config: dict[str, str],
+    word: str,
+    reading: str,
+    bad_note_meanings_dict: dict[NoteId, WordAndSentences],
+    all_meanings_dict: GeneratedMeaningsDictType,
+) -> MakeMeaningsResult:
+    """
+    Receive a previously generated meanings, a list of words and sentences that could not matched
+    to any of those meanings for a word and its reading, and get an LLM to revise those meanings
+    so that the meanings better cover the word usages.
+
+    :param config: Addon configuration dictionary.
+    :param word: The word or phrase being defined.
+    :param reading: The reading of the word or phrase.
+    :param bad_note_meanings_dict: Dict of note IDs to WordAndSentences for notes that could not
+            be matched to any of the previously generated meanings.
+    :param all_generated_meanings_dict: Dict of all generated meanings
+            for reuse across multiple calls. Provided to avoid doing file operations during
+            async operations and to avoid doing file reading in every op.
+    :return: The revised list of meanings when successful, None otherwise. Will also mutate
+            all_meanings_dict to include the revised meanings.
+    """
+    mdx_helper.load_mdx_dictionaries_if_needed(config, show_progress=True, finish_progress=False)
+
+    meanings_and_sentences = ""
+    for i, word_and_sentences in enumerate(list(bad_note_meanings_dict.values())):
+        sentences_formatted = ""
+        for sen in word_and_sentences["sentences"]:
+            sentences_formatted += f"  - JP: {sen['jp_sentence']} -- EN: {sen['en_sentence']}\n"
+        meanings_and_sentences += f"""
+UNMATCHED USAGE {i + 1}:
+- Description of usage in Japanese: {word_and_sentences['jp_meaning'] or '(empty)'}
+- English description: {word_and_sentences['en_meaning'] or '(empty)'}
+- Sentences:
+{sentences_formatted}
+"""
+    word_key = make_meaning_dict_key(word, reading)
+    existing_meanings = all_meanings_dict.get(word_key, [])
+
+    dict_meaning_for_word = mdx_helper.get_definition_text(
+        word=word,
+        reading=reading,
+        # use all dictionaries to get the most comprehensive entry possible
+        pick_dictionary="all",
+    )
+    if not dict_meaning_for_word:
+        logger.debug(f"No dictionary entry found for word '{word}' ({reading})")
+        return MakeMeaningsResult.NO_DICTIONARY_ENTRY
+
+    jp_meaning_field = "jp_meaning"
+    en_meaning_field = "en_meaning"
+    prompt = f"""Below are dictionary entries from multiple different dictionaries for a word or phrase. From this, a single list of all distinct meanings was previously created. The list was meant to be comprehensive enough to match all possible usages of the word but some usages of the word were encountered that did not match any of the meanings. Your task is to revise the previous list of meanings to better cover all the usages expressed in the usages and the dictionary entry. Follow these rules:
+
+Definition rules:
+- Create a Japanese meaning and English meaning.
+- AGGRESSIVELY minimize the number of separate meanings by combining meanings that are related.
+- BE CONCISE: Each meaning should be concise, ideally a single sentence but more if absolutely necessary to combine multiple related meanings.
+- The English meaning should almost always be a short list of equivalent words or phrases separated by semicolons. Only explain in sentences when equivalents do not exist; e.g. the word is "untranslatable".
+- If an unmatched usage is something that no dictionary entry covers, add a new meaning to cover that usage. Create the meaning based on the description and sentences provided following the same rules as above.
+
+Combination rules:
+- Most of all, if the dictionary entries includes multiple meanings that are similar, combine them into one.
+- However also combine dissimilar meanings that that are of the type one literal and one metaphorical - those should become one meaning where each is described shortly.
+- Especially, if an unmatched usage is a combination of two meanings then follow its example, and make just one meaning that covers both.
+
+Information extraction rules:
+- Make sure to analyze the different dictionary entries carefully and identify the same meanings expressed in different ways. The aim is to compress all the information into a minimal set of distinct meanings.
+- Note that the dictionary entries may include information about additinal phrases that use the word. These would usually come after the list of main meanings per dictionary. Ignore these additional phrases and only focus on the main meanings of the word or phrase itself.
+- Exclude any example sentences, usage notes, or extraneous information.
+- When creating new meanings based on unmatched usages, focus on the core meaning being expressed and avoid referencing anything about the example sentences directly.
+
+Return a JSON object with one `meanings` field containing an array of objects, each with `{jp_meaning_field}` and `{en_meaning_field}` keys for each distinct meaning.
+
+WORD OR PHRASE (READING):
+{word} ({reading})
+
+---
+PREVIOUSLY GENERATED MEANINGS:
+{{{json.dumps(existing_meanings, ensure_ascii=False, indent=2)}}}
+---
+WORD USAGES NOT COVERED BY PREVIOUS MEANINGS:
+{meanings_and_sentences}
+---
+DICTIONARY ENTRIES:
+{dict_meaning_for_word}
+---
+"""
+    logger.debug(f"Prompt for revising possible meanings: {prompt}")
+
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "meanings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        jp_meaning_field: {"type": "string"},
+                        en_meaning_field: {"type": "string"},
+                    },
+                    "required": [jp_meaning_field, en_meaning_field],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["meanings"],
+        "additionalProperties": False,
+    }
+
+    model = config.get("make_meanings_model", "")
+    result = get_response(model, prompt, response_schema=response_schema)
+    if result is None:
+        logger.error("No response from model when making all meanings")
+        return MakeMeaningsResult.ERROR
+    if not isinstance(result, dict):
+        logger.error(f"Response from model was not a dictionary: {result}")
+        return MakeMeaningsResult.ERROR
+    if "meanings" not in result:
+        logger.error(f"Response from model did not contain 'meanings' field: {result}")
+        return MakeMeaningsResult.ERROR
+    if not isinstance(result["meanings"], list):
+        logger.error(f"Response from model 'meanings' field was not a list: {result}")
+        return MakeMeaningsResult.ERROR
+    if not all(isinstance(m, dict) for m in result["meanings"]):
+        logger.error(
+            f"Response from model 'meanings' field did not contain all dictionaries: {result}"
+        )
+        return MakeMeaningsResult.ERROR
+    if not all(jp_meaning_field in m and en_meaning_field in m for m in result["meanings"]):
+        logger.error(
+            f"Response from model 'meanings' field missing required keys in some meanings: {result}"
+        )
+        return MakeMeaningsResult.ERROR
+
+    revised_meanings = result["meanings"]
+    logger.debug(f"Revised meanings: {json.dumps(revised_meanings, ensure_ascii=False, indent=2)}")
+    all_meanings_dict[f"{word}_{reading}"] = revised_meanings
 
     return MakeMeaningsResult.SUCCESS
 

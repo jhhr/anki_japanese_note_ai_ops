@@ -1,4 +1,5 @@
 import os
+from enum import Enum
 from typing import TypedDict, Union
 from anki.notes import NoteId
 
@@ -40,3 +41,20 @@ GeneratedMeaningsDictType = dict[str, list[GeneratedMeaningType]]
 NO_DICTIONARY_ENTRY_TAG = "2-no-dictionary-entry"
 MEANINGS_GENERATED_TAG = "2-meanings-generated-to-json"
 MEANING_MAPPED_TAG = "2-note-mapped-to-generated-meaning"
+
+
+class EnAndJPSentence(TypedDict):
+    jp_sentence: str
+    en_sentence: str
+
+
+class WordAndSentences(TypedDict):
+    jp_meaning: str
+    en_meaning: str
+    sentences: list[EnAndJPSentence]
+
+
+class MakeMeaningsResult(Enum):
+    SUCCESS = 1
+    NO_DICTIONARY_ENTRY = 2
+    ERROR = 3

@@ -1,7 +1,7 @@
 import logging
 import json
 from pathlib import Path
-from typing import Optional, TypedDict, Union
+from typing import Optional, Union
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -22,10 +22,18 @@ from ..configuration import (
     MEANING_MAPPED_TAG,
     GeneratedMeaningsDictType,
     GeneratedMeaningType,
+    EnAndJPSentence,
+    WordAndSentences,
+    MakeMeaningsResult,
 )
-from .make_all_meanings import write_meanings_dict_to_file, make_meaning_dict_key
+from .make_all_meanings import (
+    write_meanings_dict_to_file,
+    make_meaning_dict_key,
+    revise_meanings_for_word,
+)
 
 from ..utils import get_field_config
+from ..html_stripping import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -34,37 +42,37 @@ def get_sentences_for_note(
     config: dict[str, str],
     note: Note,
     exclude_self: bool = False,
-) -> list[str]:
+) -> list[EnAndJPSentence]:
     note_type = note.note_type()
     if not note_type:
         logger.error(f"note_type() call failed for note {note.id}")
         return []
     word_list_field = get_field_config(config, "word_list_field", note_type)
     sentence_field = get_field_config(config, "sentence_field", note_type)
+    translated_sentence_field = get_field_config(config, "translated_sentence_field", note_type)
+
+    def make_en_and_jp_sentence(note: Note) -> EnAndJPSentence:
+        return EnAndJPSentence(
+            jp_sentence=strip_html(note[sentence_field]),
+            en_sentence=strip_html(note[translated_sentence_field]),
+        )
+
+    cur_note_sentence = make_en_and_jp_sentence(note)
     if note.id == 0:
         # New note, can't search for others using its ID
         if exclude_self:
             return []
-        return [note[sentence_field]]
+        return [cur_note_sentence]
     query = f'"{word_list_field}:*{note.id}*" -nid:{note.id}'
     logger.debug(f"Getting sentences for note {note.id} with query: {query}")
     other_sentence_note_ids = mw.col.find_notes(query)
-    other_sentences = [] if exclude_self else [note[sentence_field]]
+    other_sentences = [] if exclude_self else [cur_note_sentence]
     for onid in other_sentence_note_ids:
         onote = mw.col.get_note(onid)
         if sentence_field in onote and onote[sentence_field] not in other_sentences:
-            other_sentences.append(onote[sentence_field])
+            other_sentences.append(make_en_and_jp_sentence(onote))
     return other_sentences
 
-
-WordAndSentences = TypedDict(
-    "WordAndSentences",
-    {
-        "jp_meaning": str,
-        "en_meaning": str,
-        "sentences": list[str],
-    },
-)
 
 UpdateAllMeaningsResultType = dict[NoteId, tuple[str, str]]
 
@@ -102,13 +110,13 @@ def update_all_meanings_for_word(
         sentences_formatted = ""
         if len(ws["sentences"]) > 0:
             for sen in ws["sentences"]:
-                sentences_formatted += f"- {sen}\n"
+                sentences_formatted += f"- JP: {sen['jp_sentence']} -- EN: {sen['en_sentence']}\n"
         else:
             sentences_formatted = ""
         meanings_and_sentences += f"""---
 Meaning index {i + 1}:
-Japanese meaning: {ws['jp_meaning']}
-English meaning: {ws['en_meaning']}
+Japanese meaning: {ws['jp_meaning'] or '(empty)'}
+English meaning: {ws['en_meaning'] or '(empty)'}
 
 Sentences:
 {sentences_formatted}
@@ -121,7 +129,7 @@ Sentences:
 
     prompt = f"""{f'''Below is the dictionary entry for a word or phrase, along with currently used meanings for groups of sentences containing that word or phrase. Your task is to rework the meanings to better fit the usage in the sentences, using the dictionary entry as reference.
 For each meaning, either extract the relevant parts from the dictionary entry and rephrase those to better fit the sentences. Follow these rules:
-- DO NOT OVERFIT the definitions to the sentences. Especially when the number of examples is a single sentence. Pick as many meanings as possible than can broadly fit the theme of the sentences. 
+- DO NOT OVERFIT the definitions to the sentences. Especially when the number of examples is a single sentence. Pick as many meanings as possible than can broadly fit the theme of the sentences.
 - If the dictionary entry describes two usage patterns for this word or phrase - for example, one literal and one figurative - those should become one meaning where each is described shortly.
 - If there are more than two usage patterns for this word or phrase, describe the one used in the sentences.
 - Aggressively shorten and simplify the picked meanings as much as possible, ideally into 1 sentence and at most 2 (if describing both a literal and figurative usage), with more complex meanings being allowed more explanation.
@@ -235,7 +243,8 @@ def match_meanings_to_generated_meanings(
     word: str,
     reading: str,
     existing_note_meanings_dict: dict[NoteId, WordAndSentences],
-    generated_meanings: Union[list[GeneratedMeaningType], None],
+    all_generated_meanings_dict: GeneratedMeaningsDictType,
+    depth: int = 0,
 ) -> MatchMeaningsResultType:
     """
     Receive a list of current meanings and sentences for a word, and have an AI model rework the
@@ -246,15 +255,17 @@ def match_meanings_to_generated_meanings(
     :param reading: The reading of the word or phrase.
     :param existing_note_meanings_dict: A dictionary mapping note IDs to their meanings and example sentences.
     :param jp_mdx_dict_entry: The dictionary entry for the word or phrase. None, if not available.
-    :param generated_meanings: An entry for the word from the generated meanings json file. None,
-            if not available.
-    return: A dictionary mapping note IDs to tuples of (new_japanese_meaning, new_english_meaning)
-        and the possibly updated generated meanings list.
+    :param generated_meanings: An entry for the word from the generated meanings json file.
+    :param depth: The recursion depth, used to stop endlessly looping the meanings revision.
+    return: A dictionary mapping note IDs to tuples of (new_japanese_meaning, new_english_meaning,
+        mapping_score).
     """
     if not existing_note_meanings_dict:
         return {}
+    word_key = make_meaning_dict_key(word, reading)
+    generated_meanings = all_generated_meanings_dict.get(word_key, None)
     if not generated_meanings:
-        logger.error("match_meanings_to_generated_meanings called without generated_meanings")
+        logger.error("match_meanings_to_generated_meanings called with missing generated meanings")
         return {}
     # Turn generated meanings to dict by note id for easy access
     generated_meanings_by_en_meaning: dict[str, GeneratedMeaningType] = {}
@@ -282,13 +293,13 @@ def match_meanings_to_generated_meanings(
         sentences_formatted = ""
         if len(ws["sentences"]) > 0:
             for sen in ws["sentences"]:
-                sentences_formatted += f"- {sen}\n"
+                sentences_formatted += f"- JP: {sen['jp_sentence']} -- EN: {sen['en_sentence']}\n"
         else:
             sentences_formatted = ""
         meanings_and_sentences += f"""---
 Meaning index {i + 1}{f" (ALREADY MAPPED to possible meaning index {to_generated_meaning_index + 1})" if to_generated_meaning_index is not None else ""}:
-Japanese meaning: {ws['jp_meaning']}
-English meaning: {ws['en_meaning']}
+Japanese meaning: {ws['jp_meaning'] or '(empty)'}
+English meaning: {ws['en_meaning'] or '(empty)'}
 
 Sentences:
 {sentences_formatted}
@@ -435,15 +446,65 @@ CURRENT MEANINGS AND SENTENCES:
                 mapping_score,
             )
 
-    logger.debug(f"Updated meanings: {updated_meanings}")
-    return updated_meanings
+    # If some meanings got a bad score, revise the meanings and try again
+    existing_note_meanings_bad_score_ws: dict[NoteId, WordAndSentences] = {}
+    for nid in updated_meanings.keys():
+        # A threshold of 3 sometimes leads to a loop of revisions with the score given being 3 again
+        # so we'll reduce the revision attempts to just 1 in such cases
+        if updated_meanings[nid][2] <= 3:
+            existing_note_meanings_bad_score_ws[nid] = existing_note_meanings_dict[nid]
+    # Prepare the good meanings to return if no revision is done
+    # We'll return meanings with scores >2 instead of >3 as the most common case of stopping
+    # revision is that the score couldn't be improved beyond 3, 3 is still an acceptable mapping
+    updated_good_meanings: MatchMeaningsResultType = {}
+    for nid in updated_meanings.keys():
+        # Only include meanings with good mapping score
+        if updated_meanings[nid][2] > 2:
+            updated_good_meanings[nid] = updated_meanings[nid]
+    if len(existing_note_meanings_bad_score_ws) > 0 and depth == 0:
+        logger.debug(
+            f"Some meanings for word='{word}', reading='{reading}' got a bad mapping score,"
+            f" revising meanings again, depth={depth}"
+        )
+        revise_result = revise_meanings_for_word(
+            config,
+            word,
+            reading,
+            existing_note_meanings_bad_score_ws,
+            all_generated_meanings_dict,
+        )
+        if revise_result == MakeMeaningsResult.SUCCESS:
+            # Re-run the matching with the revised meanings, the all_generated_meanings_dict
+            # has been updated
+            return match_meanings_to_generated_meanings(
+                config,
+                word,
+                reading,
+                existing_note_meanings_dict,
+                all_generated_meanings_dict,
+                depth=depth + 1,
+            )
+        # If some error happened during revise, return just the good mappings
+        logger.debug(
+            f"Error during meanings revision, returning only good mappings: {updated_good_meanings}"
+        )
+        return updated_good_meanings
+    if depth >= 1:
+        logger.debug(
+            f"Max recursion depth reached for matching meanings for word='{word}',"
+            f" reading='{reading}', returning good mappings: {updated_good_meanings}"
+        )
+        return updated_good_meanings
+
+    logger.debug(f"Updated meanings: {updated_good_meanings}")
+    return updated_good_meanings
 
 
 def get_single_meaning_from_mdx_dict_entry(
     config: dict[str, str],
     word: str,
     reading: str,
-    sentences: list[str],
+    sentences: list[EnAndJPSentence],
     jp_mdx_dict_entry: str,
 ):
     jp_meaning_return_field = "cleaned_meaning"
@@ -452,9 +513,11 @@ def get_single_meaning_from_mdx_dict_entry(
     sentences_formatted = ""
     if len(sentences) > 1:
         for sen in sentences:
-            sentences_formatted += f"- {sen}\n"
+            sentences_formatted += f"- JP: {sen['jp_sentence']} -- EN: {sen['en_sentence']}\n"
     else:
-        sentences_formatted = sentences[0]
+        sentences_formatted = (
+            f"JP: {sentences[0]['jp_sentence']} -- EN: {sentences[0]['en_sentence']}"
+        )
     prompt = f"""Below, the dictionary entry for the word or phrase may contain multiple meanings. Your task is to either 1) extract the one meaning 2) or combine and rephrase meanings matching the usage of the word in the sentence{'s' if len(sentences) > 1 else ''}.
 
 Selection criteria:
@@ -757,7 +820,7 @@ def clean_meaning_in_note(
                 note[word_field],
                 note[word_reading_field],
                 meaning_sentences_dict,
-                word_generated_meanings,
+                all_generated_meanings_dict,
             )
             any_changed = update_all_meanings_from_result_dict(updated_meanings_dict)
             return any_changed
