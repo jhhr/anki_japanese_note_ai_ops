@@ -684,16 +684,16 @@ def create_new_note_from_matched_note(
 
 async def match_single_word_in_word_tuple(
     config: dict,
-    word_locks_lock: asyncio.Lock,
-    word_locks: dict[str, asyncio.Lock],
+    word_lock: asyncio.Lock,
+    word_locks_dict: dict[str, asyncio.Lock],
     log_prefix: str,
     match_op_args: MatchOpArgs,
 ) -> bool:
     """Process a single word tuple to match it with notes in the collection.
 
     :param config: The addon configuration dictionary.
-    :param word_locks_lock: An asyncio lock to protect access to the word_locks dictionary.
-    :param word_locks: A dictionary mapping words to their respective asyncio locks.
+    :param word_lock: An asyncio lock to protect access to the word_locks_dict dictionary.
+    :param word_locks_dict: A dictionary mapping words to their respective asyncio locks.
     :param log_prefix: A prefix string for logging.
     :param match_op_args: A dict of common args needed in this function and called functions.
     :return: True if the operation was successful, False otherwise.
@@ -733,17 +733,17 @@ async def match_single_word_in_word_tuple(
         reading = reading[:-2]
 
     # Get or create a lock for this specific word to prevent race conditions
-    async with word_locks_lock:
-        if word not in word_locks:
-            word_locks[word] = asyncio.Lock()
+    async with word_lock:
+        if word not in word_locks_dict:
+            word_locks_dict[word] = asyncio.Lock()
 
     # Acquire the lock for this word before checking/modifying notes_to_add_dict
-    async with word_locks[word]:
+    async with word_locks_dict[word]:
         # If meanings haven't been generated yet for this note, do that now so that
         # the generated meanings dict is up to date for the matching process and calling
         # clean_meaning_in_note later
         # This can mutate a "word_**" key in all_generated_meanings_dict which would be bad
-        # if other tasks trying to access it at the same time, however the word_locks is also
+        # if other tasks trying to access it at the same time, however the word_locks_dict is also
         # protecting this
         word_key = make_meaning_dict_key(word, reading)
         if word_key not in all_generated_meanings_dict:
@@ -1227,6 +1227,8 @@ def match_words_to_notes(
     all_generated_meanings_dict: GeneratedMeaningsDictType,
     update_word_list_in_dict: Callable[[list[ProcessedWordTuple]], None],
     note_type: NotetypeDict,
+    word_locks_dict: dict[str, asyncio.Lock],
+    word_lock: asyncio.Lock,
     replace_existing: bool = False,
 ):
     """
@@ -1250,6 +1252,10 @@ def match_words_to_notes(
             clean_meaning_in_note
     :param update_word_list_in_dict (Callable): Function to update the word list in a note. Should
             be called async when the task actually finishes.
+    :param note_type (NotetypeDict): The note type dict for the current note.
+    :param word_locks_dict (dict): A dict of asyncio locks for each word being processed. Used to avoid
+            two match_ops don't create new duplicate words
+    :param word_lock (asyncio.Lock): A lock to protect access to the word_locks_dict dict.
     :param replace_existing (bool): If True, replace existing matched words with new matches.
             Otherwise, words that already have a note match will be skipped during processing and
             returned as is.
@@ -1321,10 +1327,6 @@ def match_words_to_notes(
 
     processed_word_tuples = cast(list[ProcessedWordTuple], word_tuples.copy())
 
-    # Dictionary to track locks per word to prevent race conditions
-    word_locks: dict[str, asyncio.Lock] = {}
-    word_locks_lock = asyncio.Lock()  # Lock to safely create new word locks
-
     # This is the op function run in inner_bulk_op
     async def match_op(
         _,
@@ -1338,8 +1340,8 @@ def match_words_to_notes(
     ) -> bool:
         return await match_single_word_in_word_tuple(
             config=config,
-            word_locks_lock=word_locks_lock,
-            word_locks=word_locks,
+            word_lock=word_lock,
+            word_locks_dict=word_locks_dict,
             log_prefix=log_prefix,
             match_op_args=MatchOpArgs(
                 config=config,
@@ -1583,6 +1585,8 @@ def match_words_to_notes_for_note(
     progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
     all_generated_meanings_dict: GeneratedMeaningsDictType,
+    word_locks_dict: dict[str, asyncio.Lock],
+    word_lock: asyncio.Lock,
 ) -> None:
     """
     Match words to notes for a single note.
@@ -1604,6 +1608,10 @@ def match_words_to_notes_for_note(
         all_generated_meanings_dict (GeneratedMeaningsDictType): Dict of all generated meanings
             for reuse across multiple calls. Provided to avoid doing file operations during
             async operations and to avoid doing file reading in every op.
+        word_locks_dict (dict): A dict of asyncio locks for each word being processed. Used to avoid
+            two tasks simultaneously accessing notes_to_add_dict (which is keyed by word) so that
+            two match_ops don't create new duplicate words
+        word_lock (asyncio.Lock): A lock to protect access to the word_locks_dict dict.
     """
     if not note:
         logger.error("Error: No note provided for matching words")
@@ -1735,6 +1743,8 @@ def match_words_to_notes_for_note(
                 all_generated_meanings_dict=all_generated_meanings_dict,
                 update_word_list_in_dict=update_word_list_in_dict,
                 note_type=note_type,
+                word_locks_dict=word_locks_dict,
+                word_lock=word_lock,
                 replace_existing=replace_existing,
             )
         if note_tasks:
@@ -1788,6 +1798,10 @@ def bulk_match_words_to_notes(
         with open(all_meanings_dict_path, "r", encoding="utf-8") as f:
             all_generated_meanings_dict = json.load(f)
 
+    # Dictionary to track locks per word to prevent race conditions
+    word_locks_dict: dict[str, asyncio.Lock] = {}
+    word_lock = asyncio.Lock()  # Lock to safely create new word locks
+
     def inner_op(
         config: dict,
         note: Note,
@@ -1809,6 +1823,8 @@ def bulk_match_words_to_notes(
             progress_updater=progress_updater,
             cancel_state=cancel_state,
             all_generated_meanings_dict=all_generated_meanings_dict,
+            word_locks_dict=word_locks_dict,
+            word_lock=word_lock,
         )
 
     def on_end():
