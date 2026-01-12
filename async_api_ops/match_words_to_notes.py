@@ -1797,22 +1797,30 @@ def match_words_to_notes_for_note(
         for word_list_key in word_list_keys:
             # Go through each list and replace the key in the dict with the result
             word_tuples = word_list_dict.get(word_list_key, [])
-            # Check if any words have already been encountered
-            for wt in word_tuples:
-                word = wt[0]
-                reading = wt[1]
-                word_key = f"{word}_{reading}"
-                if word_key in encountered_words:
-                    # remove word from word_tuples
-                    word_tuples.remove(wt)
-                else:
-                    encountered_words.add(word_key)
             if not isinstance(word_tuples, list):
                 logger.error(
                     f"{log_prefix}Error: Invalid word list format for key '{word_list_key}' in the"
                     " note"
                 )
                 continue
+            # Check if any words have already been encountered
+            for wt in word_tuples:
+                try:
+                    word = wt[0]
+                    reading = wt[1]
+                    word_key = f"{word}_{reading}"
+                    if word_key in encountered_words:
+                        # remove word from word_tuples
+                        word_tuples.remove(wt)
+                    else:
+                        encountered_words.add(word_key)
+                except Exception as e:
+                    logger.error(
+                        f"{log_prefix}Error processing word tuple {wt} in word list"
+                        f" '{word_list_key}': {e}"
+                    )
+                    print_error_traceback(e, logger)
+                    continue
             update_word_list_in_dict = make_word_list_updater(word_list_key)
             match_words_to_notes(
                 config=config,
