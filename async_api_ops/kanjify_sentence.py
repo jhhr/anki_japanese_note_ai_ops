@@ -23,6 +23,7 @@ K_WORD_REC = re.compile(r"<k>([^<]*)</k>")
 K_INNER_REC = re.compile(r"( [\d々\u4e00-\u9faf\u3400-\u4dbf]+\[[^[]*\][^>[]*?)")
 
 SO_WITHOUT_NO = re.compile(r"<k> 其\[そ\]</k>の?")
+SO_INSIDE_NO = re.compile(r" <k> 其\[その\]</k>")
 
 K_INNER_REVERSING_REC = re.compile(r" [\d々\u4e00-\u9faf\u3400-\u4dbf]+\[([^[]*)\]([^>[]*?)")
 
@@ -115,7 +116,8 @@ Do not kanjify:
 - もっと as it is not truly component in もっとも which does have a kanjified form as 最も or 尤も
 - そんな, こんな, あんな, どんな
 - The expression として should be considered to not contain する and should be left as is.
-― Gikun-type, reading-as-meaning conversions. Only perform kanjification if there is some evidence of usage in literature, online texts or dictionaries.
+― Gikun-type, reading-as-meaning conversions. Only perform kanjification, if there is some evidence of usage in dictionaries.
+
 Do kanjify:
 - ない when used as a standalone word, including conjugated forms like なかった, なくて. 無い is even currently used in modern text, but is simply often written in hiragana.
 - いる and いく when is used as a standalone verb, for example 彼は家にいる, あっちにいく
@@ -262,6 +264,8 @@ def kanjify_sentence_in_note(
                 )
                 # Sometimes when kanjifying その it leaves out the の --> <k> 其[そ]</k>
                 kanjified_sentence = SO_WITHOUT_NO.sub("<k> 其[そ]の</k>", kanjified_sentence)
+                # Or puts the の inside the furigana tags -->  <k> 其[その]</k>
+                kanjified_sentence = SO_INSIDE_NO.sub(" <k> 其[そ]の</k>", kanjified_sentence)
                 # Sometimes it wraps the sentence in 「」when the original sentence wasn't
                 if not (sentence.startswith("「") and sentence.endswith("」")) and (
                     kanjified_sentence.startswith("「") and kanjified_sentence.endswith("」")
