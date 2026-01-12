@@ -183,8 +183,8 @@ def update_fake_note_ids(
             for referencing_note in referencing_notes:
                 if new_note_id_field in referencing_note:
                     # Update the word_list_field to point to the actual new note ID
-                    referencing_note[word_list_field] = referencing_note[word_list_field].replace(
-                        str(fake_note_id), str(new_note.id)
+                    referencing_note[word_list_field] = re.sub(
+                        rf'"?{fake_note_id}"?', f"{new_note.id}", referencing_note[word_list_field]
                     )
                     if referencing_note.id not in notes_to_update_dict:
                         # Note was updated, add it to the updated notes dict, if not already there
