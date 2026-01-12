@@ -360,7 +360,7 @@ Example result 8:
   "pronouns": [],
   "suffixes": [],
   "prefixes": [],
-  "expressions": [["二隻","にせき"],["同時に","どうじに"]],
+  "expressions": [["同時に","どうじに"]],
   "yojijukugo": []
 }}
 
