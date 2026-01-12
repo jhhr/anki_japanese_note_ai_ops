@@ -66,11 +66,11 @@ def make_all_meanings_for_word(
 
     jp_meaning_field = "jp_meaning"
     en_meaning_field = "en_meaning"
-    prompt = f"""Below are dictionary entries from multiple different dictionaries for a word or phrase. Your task is to create a single comprehensive list of all distinct meanings expressed in these. Follow these rules:
+    prompt = f"""Below are dictionary entries from multiple different dictionaries for a word or phrase. Your task is to compress this information into a comprehensive list of distinct meanings expressed in these. The objective is to create a partitioning of all possible usages that is useful for an English-speaking Japanese learner. Follow these rules:
 
 Definition rules:
 - Create a Japanese meaning and English meaning.
-- AGGRESSIVELY minimize the number of separate meanings by combining meanings that are related.
+- MINIMIZE DIFFERENT MEANINGS: Make as a few separate meanings as possible by combining meanings that are related. Extremely common words like 見る, 行く, 来る, 有る, etc. have a large number of meanings which should be especially aggressively combined into as few meanings as possible.
 - BE CONCISE: Each meaning should be concise, ideally a single sentence but more if absolutely necessary to combine multiple related meanings.
 - The English meaning should almost always be a short list of equivalent words or phrases separated by semicolons. Only explain in sentences when equivalents do not exist; e.g. the word is "untranslatable".
 
@@ -197,11 +197,11 @@ UNMATCHED USAGE {i + 1}:
 
     jp_meaning_field = "jp_meaning"
     en_meaning_field = "en_meaning"
-    prompt = f"""Below are dictionary entries from multiple different dictionaries for a word or phrase. From this, a single list of all distinct meanings was previously created. The list was meant to be comprehensive enough to match all possible usages of the word but some usages of the word were encountered that did not match any of the meanings. Your task is to revise the previous list of meanings to better cover all the usages expressed in the usages and the dictionary entry. Follow these rules:
+    prompt = f"""Below are dictionary entries from multiple different dictionaries for a word or phrase. From this, a single list of all distinct meanings was previously created. The list was meant to be comprehensive enough to match all possible usages of the word but some usages of the word were encountered that did not match any of the meanings. Your task is to revise the previous list of meanings to better cover all the usages expressed in the usages and the dictionary entry. The objective is to create a partitioning of all possible usages that is useful for an English-speaking Japanese learner. Follow these rules:
 
 Definition rules:
 - Create a Japanese meaning and English meaning.
-- AGGRESSIVELY minimize the number of separate meanings by combining meanings that are related.
+- MINIMIZE DIFFERENT MEANINGS: Make as a few separate meanings as possible by combining meanings that are related. Extremely common words like 見る, 行く, 来る, 有る, etc. have a large number of meanings which should be especially aggressively combined into as few meanings as possible.
 - BE CONCISE: Each meaning should be concise, ideally a single sentence but more if absolutely necessary to combine multiple related meanings.
 - The English meaning should almost always be a short list of equivalent words or phrases separated by semicolons. Only explain in sentences when equivalents do not exist; e.g. the word is "untranslatable".
 - If an unmatched usage is something that no dictionary entry covers, add a new meaning to cover that usage. Create the meaning based on the description and sentences provided following the same rules as above.
