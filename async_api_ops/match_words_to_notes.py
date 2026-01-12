@@ -297,7 +297,9 @@ def create_new_note_without_matching(
     new_note[kanjified_sentence_field] = current_note[kanjified_sentence_field]
     new_note_furigana = make_furigana_from_reading(word, reading)
     new_note[word_furigana_field] = new_note_furigana
-    logger.debug(f"{log_prefix}New note furigana from MeCab for word {word}: {new_note_furigana}")
+    logger.debug(
+        f"{log_prefix}New note furigana from kana_highlight for word {word}: {new_note_furigana}"
+    )
     new_note_processed_furigana = kana_highlight(
         kanji_to_highlight="",
         text=new_note_furigana,
