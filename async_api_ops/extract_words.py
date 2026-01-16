@@ -259,7 +259,7 @@ Example result 3:
   "pronouns": [["此れ","これ"]],
   "suffixes": [],
   "prefixes": [],
-  "expressions": [["天高く馬肥ゆる秋", "てんたかくうまこゆるあき"]],
+  "expressions": [["天高く馬肥ゆる秋","てんたかくうまこゆるあき"]],
   "yojijukugo": [],
 }}
 
@@ -276,7 +276,7 @@ Example result 4:
   "adjectives": [],
   "adjectivals": [],
   "adverbs": [["頃","ごろ"]],
-  "particles": [["から","から"],["等", "など"],["の","の"],["が","が"],["に","に"]],
+  "particles": [["から","から"],["等","など"],["の","の"],["が","が"],["に","に"]],
   "conjunctions": [],
   "pronouns",[],
   "suffixes": [],
@@ -440,21 +440,21 @@ This example includes expression handling with all its individual components add
 Example sentence 12: <b> 鳥肌[とりはだ]</b>が 立[た]つ<k> 位[くらい]</k><k> 痺[しび]れる</k> 演奏[えんそう] 聴[き]かせて<k> 遣[や]っから</k>
 Example results 12:
 {{
-  "nouns": [["鳥肌", "とりはだ"], ["演奏", "えんそう"], ["位", "くらい"]],
+  "nouns": [["鳥肌","とりはだ"], ["演奏","えんそう"], ["位","くらい"]],
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
-  "verbs": [["立つ", "たつ"], ["痺れる", "しびれる"], ["聴く", "きく"], ["遣る", "やる"]],
+  "verbs": [["立つ","たつ"], ["痺れる","しびれる"], ["聴く","きく"], ["遣る","やる"]],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
   "adjectivals": [],
-  "particles": [["が", "が"], ["から", "から"]],
+  "particles": [["が","が"], ["から","から"]],
   "conjunctions": [],
   "pronouns": [],
   "suffixes": [],
   "prefixes": [],
-  "expressions": [["鳥肌が立つ", "とりはだがたつ"]],
+  "expressions": [["鳥肌が立つ","とりはだがたつ"]],
   "yojijukugo": []
 }}
 
@@ -462,39 +462,39 @@ This example includes expression handling when not all its components are added:
 Example sentence 13: 私[わたし]<k> 達[たち]</k>は 今[いま] 生徒会[せいとかい]に<b> 頭[あたま]ごなし</b>に 出展[しゅってん] 拒否[きょひ]<k> 為[さ]れている</k> 状況[じょうきょう]で 。
 Example results 13:
 {{
-  "nouns": [["生徒会", "せいとかい"], ["頭", "あたま"], ["出展", "しゅってん"], ["拒否", "きょひ"], ["状況", "じょうきょう"]],
+  "nouns": [["生徒会","せいとかい"], ["頭","あたま"], ["出展","しゅってん"], ["拒否","きょひ"], ["状況","じょうきょう"]],
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
   "verbs": [["為れる","される"]],
   "compound_verbs": [],
   "adjectives": [],
-  "adverbs": [["今", "いま"]],
+  "adverbs": [["今","いま"]],
   "adjectivals": [],
-  "particles": [["は", "は"], ["に", "に"], ["で", "で"]],
+  "particles": [["は","は"], ["に","に"], ["で","で"]],
   "conjunctions": [],
-  "pronouns": [["私", "わたし"]],
-  "suffixes": [["達", "たち"]],
+  "pronouns": [["私","わたし"]],
+  "suffixes": [["達","たち"]],
   "prefixes": [],
-  "expressions": [["頭ごなし", "あたまごなし"]],
+  "expressions": [["頭ごなし","あたまごなし"]],
   "yojijukugo": []
 }}
 
 Example sentence 14: 私[わたし]には 生徒会[せいとかい]の<b> 総意[そうい]</b>を 覆[くつがえ]す<k> 様[よう]な</k> 力[ちから]は<k> 有[あ]りません</k>よ！ 前[まえ]も 言[い]いましたが<k> 先[ま]ずは</k> 証拠[しょうこ]！
 Example results 14:
 {{
-  "nouns": [["生徒会", "せいとかい"], ["総意", "そうい"], ["力", "ちから"], ["前", "まえ"], ["証拠", "しょうこ"], ["様", "よう"]],
+  "nouns": [["生徒会","せいとかい"], ["総意","そうい"], ["力","ちから"], ["前","まえ"], ["証拠","しょうこ"], ["様","よう"]],
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
-  "verbs": [["覆す", "くつがえす"], ["有る", "ある"], ["言う", "いう"]],
+  "verbs": [["覆す","くつがえす"], ["有る","ある"], ["言う","いう"]],
   "compound_verbs": [],
   "adjectives": [],
-  "adverbs": [["先ず", "まず"]],
+  "adverbs": [["先ず","まず"]],
   "adjectivals": [],
-  "particles": [["に", "に"], ["は", "は"], ["の", "の"], ["を", "を"], ["も", "も"], ["よ", "よ"]],
+  "particles": [["に","に"], ["は","は"], ["の","の"], ["を","を"], ["も","も"], ["よ","よ"]],
   "conjunctions": [],
-  "pronouns": [["私", "わたし"]],
+  "pronouns": [["私","わたし"]],
   "suffixes": [],
   "prefixes": [],
   "expressions": [],
@@ -504,16 +504,16 @@ Example results 14:
 Example sentence 15: 人一倍[ひといちばい]<b> 照[て]れ 屋[や]</b>だった 父[ちち]は、 酒[さけ]<k> 無[な]し</k>には 人[ひと]と 話[はなし]も<k> 出来[でき]</k>なかった。
 Example results 15:
 {{
-  "nouns": [["人", "ひと"], ["無し", "なし"], ["照れ屋", "てれや"], ["父", "ちち"], ["話", "はなし"], ["酒", "さけ"]],
+  "nouns": [["人","ひと"], ["無し","なし"], ["照れ屋","てれや"], ["父","ちち"], ["話","はなし"], ["酒","さけ"]],
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
-  "verbs": [["出来る", "できる"]],
+  "verbs": [["出来る","できる"]],
   "compound_verbs": [],
   "adjectives": [],
-  "adverbs": [["人一倍", "ひといちばい"]],
+  "adverbs": [["人一倍","ひといちばい"]],
   "adjectivals": [],
-  "particles": [["だ", "だ"], ["は", "は"], ["に", "に"], ["と", "と"], ["も", "も"]],
+  "particles": [["だ","だ"], ["は","は"], ["に","に"], ["と","と"], ["も","も"]],
   "conjunctions": [],
   "pronouns": [],
   "suffixes": [],
@@ -525,17 +525,17 @@ Example results 15:
 Example sentence 16: どんな 手段[しゅだん]を<k> 持[も]って</k>も、<k> 俺[おれ]</k>を 殺[ころ]さずには<b> 措[お]かない</b> 気[き]でいるに<k> 違[ちが]い 無[な]い</k>。
 Example results 16:
 {{
-  "nouns": [["手段", "しゅだん"], ["気", "き"], ["違い", "ちがい"]],
+  "nouns": [["手段","しゅだん"], ["気","き"], ["違い","ちがい"]],
   "proper_nouns": [],
-  "verbs": [["持つ", "もつ"], ["措く", "おく"], ["殺す", "ころ"], ["殺す", "ころす"]],
+  "verbs": [["持つ","もつ"], ["措く","おく"], ["殺す","ころ"], ["殺す","ころす"]],
   "compound_verbs": [],
-  "adjectives": [["無い", "ない"]],
+  "adjectives": [["無い","ない"]],
   "adverbs": [],
-  "adjectivals": [["どんな", "どんな"]],
-  "particles": [["で", "で"], ["に", "に"], ["も", "も"], ["を", "を"]],
-  "pronouns": [["俺", "おれ"]],
+  "adjectivals": [["どんな","どんな"]],
+  "particles": [["で","で"], ["に","に"], ["も","も"], ["を","を"]],
+  "pronouns": [["俺","おれ"]],
   "suffixes": [],
-  "expressions": [["に違いない", "にちがいない"]],
+  "expressions": [["に違いない","にちがいない"]],
   "yojijukugo": [],
   "numbers": [],
   "counters": [],
@@ -547,17 +547,17 @@ This example includes multiple expression handling:
 Example sentence 17: 見[み]た 目[め]は 私[わたし]より<k> 余程[よっぽど]</k> 悪役[あくやく] 令嬢[れいじょう]っぽい。 声[こえ] 高々[たかだか]に<b> 配役[はいやく]</b>ミスを 主張[しゅちょう]<k> 為[し]たい</k>。
 example results 17:
 {{
-  "nouns": [["ミス", "みす"], ["主張", "しゅちょう"], ["令嬢", "れいじょう"], ["声", "こえ"], ["悪役", "あくやく"], ["目", "め"], ["配役", "はいやく"]],
-  "proper_nouns": [["私", "わたし"]],
-  "verbs": [["為る", "する"], ["見る", "みる"]],
+  "nouns": [["ミス","みす"], ["主張","しゅちょう"], ["令嬢","れいじょう"], ["声","こえ"], ["悪役","あくやく"], ["目","め"], ["配役","はいやく"]],
+  "proper_nouns": [["私","わたし"]],
+  "verbs": [["為る","する"], ["見る","みる"]],
   "compound_verbs": [],
   "adjectives": [],
-  "adverbs": [["余程", "よっぽど"], ["高々", "たかだか"]],
+  "adverbs": [["余程","よっぽど"], ["高々","たかだか"]],
   "adjectivals": [],
-  "particles": [["に", "に"], ["は", "は"], ["より", "より"], ["を", "を"]],
-  "pronouns": [["私", "わたし"]],
-  "suffixes": [["っぽい", "っぽい"]],
-  "expressions": [["声高々", "こえたかだか"], ["悪役令嬢", "あくやくれいじょう"], ["見た目", "みため"], ["配役ミス", "はいやくみす"]],
+  "particles": [["に","に"], ["は","は"], ["より","より"], ["を","を"]],
+  "pronouns": [["私","わたし"]],
+  "suffixes": [["っぽい","っぽい"]],
+  "expressions": [["声高々","こえたかだか"], ["悪役令嬢","あくやくれいじょう"], ["見た目","みため"], ["配役ミス","はいやくみす"]],
   "yojijukugo": [],
   "numbers": [],
   "counters": [],
@@ -569,14 +569,14 @@ This example includes omitting a compound verb (竦んで仕舞う) that does no
 Example sentence 18: <k> 蛇[ヘビ]</k>を 見[み]て 足[あし]が<b><k> 竦[すく]んで</k><k> 仕舞[しま]った</k></b>。
 Example results 18:
 {{
-  "nouns": [["蛇", "へび"], ["足", "あし"]],
+  "nouns": [["蛇","へび"], ["足","あし"]],
   "proper_nouns": [],
-  "verbs": [["仕舞う", "しまう"], ["竦む", "すくむ"], ["見る", "みる"]],
+  "verbs": [["仕舞う","しまう"], ["竦む","すくむ"], ["見る","みる"]],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
   "adjectivals": [],
-  "particles": [["が", "が"], ["を", "を"]],
+  "particles": [["が","が"], ["を","を"]],
   "pronouns": [],
   "suffixes": [],
   "expressions": [],
@@ -591,18 +591,18 @@ This example includes not splitting a yojijukugo (自由自在) into its compone
 Example sentence 19: 自由自在[じゆうじざい]な 人物[じんぶつ]、 大空[おおぞら]を<b>翔[かけ]る</b> 奔馬[ほんば]だ。
 Example results 19:
 {{
-  "nouns": [["人物", "じんぶつ"], ["大空", "おおぞら"], ["奔馬", "ほんば"]],
+  "nouns": [["人物","じんぶつ"], ["大空","おおぞら"], ["奔馬","ほんば"]],
   "proper_nouns": [],
-  "verbs": [["翔る", "かける"]],
+  "verbs": [["翔る","かける"]],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
   "adjectivals": [],
-  "particles": [["な", "な"], ["を", "を"]],
+  "particles": [["な","な"], ["を","を"]],
   "pronouns": [],
   "suffixes": [],
   "expressions": [],
-  "yojijukugo": [["自由自在", "じゆうじざい"]],
+  "yojijukugo": [["自由自在","じゆうじざい"]],
   "numbers": [],
   "counters": [],
   "conjunctions": [],
@@ -613,16 +613,16 @@ This example includes suffix handling with correct base reading:
 Example sentence 20:  世界中[せかいじゅう]の 言語[げんご]は<k> 幾[いく]つ</k>かの<b> 類型[るいけい]</b>に 分類[ぶんるい]<k> 為[さ]れる</k>。
 Example results 20:
 {{
-  "nouns": [["世界", "せかい"], ["分類", "ぶんるい"], ["言語", "げんご"], ["類型", "るいけい"]],
+  "nouns": [["世界","せかい"], ["分類","ぶんるい"], ["言語","げんご"], ["類型","るいけい"]],
   "proper_nouns": [],
   "verbs": [["為れる","される"]],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
   "adjectivals": [],
-  "particles": [["に", "に"], ["の", "の"], ["は", "は"]],
+  "particles": [["に","に"], ["の","の"], ["は","は"]],
   "pronouns": [],
-  "suffixes": [["中", "ちゅう"]],
+  "suffixes": [["中","ちゅう"]],
   "expressions": [],
   "yojijukugo": [],
   "numbers": [],
@@ -657,20 +657,20 @@ This example includes including noun form verbs as just verbs:
 Example sentence 22: <k> 籤[くじ]</k> 入[い]りカプセル<k> 掬[すく]い</k>だよ！ 一等[いっとう]は<b> 甘[あま]やかし</b><k> 御[お]</k> 姉[ねえ]さんか 罵倒[ばとう]<k> 御[お]</k> 姉[ねえ]さんの 耳元[みみもと]<k> 囁[ささや]き</k>だよ
 Example results 22:
 {{
-  "nouns": [["籤", "くじ"], ["カプセル", "かぷせる"], ["一等", "いっとう"], ["罵倒", "ばとう"], ["姉", "あね"], ["耳元", "みみもと"], ["耳", "みみ"], ["元", "もと"]],
+  "nouns": [["籤","くじ"], ["カプセル","かぷせる"], ["一等","いっとう"], ["罵倒","ばとう"], ["姉","あね"], ["耳元","みみもと"], ["耳","みみ"], ["元","もと"]],
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
-  "verbs": [["入る", "はいる"], ["掬う", "すくう"], ["甘やかす", "あまやかす"], ["囁く", "ささやく"]],
+  "verbs": [["入る","はいる"], ["掬う","すくう"], ["甘やかす","あまやかす"], ["囁く","ささやく"]],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
   "adjectivals": [],
-  "particles": [["だ", "だ"], ["よ", "よ"], ["は", "は"], ["か", "か"], ["の", "の"]],
+  "particles": [["だ","だ"], ["よ","よ"], ["は","は"], ["か","か"], ["の","の"]],
   "conjunctions": [],
   "pronouns": [],
-  "suffixes": [["さん", "さん"]],
-  "prefixes": [["御", "お"]],
+  "suffixes": [["さん","さん"]],
+  "prefixes": [["御","お"]],
   "expressions": [],
   "yojijukugo": []
 }}
