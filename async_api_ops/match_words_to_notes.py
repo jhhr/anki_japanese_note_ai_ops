@@ -29,7 +29,8 @@ from ..utils import copy_into_new_note, get_field_config, print_error_traceback
 from ..configuration import (
     RawOneMeaningWordType,
     RawMultiMeaningWordType,
-    MatchedWordType,
+    OneMeaningMatchedWordType,
+    MultiMeaningMatchedWordType,
     GeneratedMeaningType,
     GeneratedMeaningsDictType,
     MEANINGS_DICT_FILE,
@@ -125,8 +126,19 @@ def make_new_note_id(note: Note) -> int:
     return -random.randint(1000000, 9999999)
 
 
-ProcessedWordTuple = Union[RawOneMeaningWordType, RawMultiMeaningWordType, MatchedWordType, None]
-FinalWordTuple = Union[RawOneMeaningWordType, RawMultiMeaningWordType, MatchedWordType]
+ProcessedWordTuple = Union[
+    RawOneMeaningWordType,
+    RawMultiMeaningWordType,
+    OneMeaningMatchedWordType,
+    MultiMeaningMatchedWordType,
+    None,
+]
+FinalWordTuple = Union[
+    RawOneMeaningWordType,
+    RawMultiMeaningWordType,
+    OneMeaningMatchedWordType,
+    MultiMeaningMatchedWordType,
+]
 
 
 def update_fake_note_ids(
@@ -219,6 +231,7 @@ class MatchOpArgs(TypedDict):
     note_type: NotetypeDict
     word_index: int
     word_list_key: str
+    multi_meaning_index: Optional[int]
     word: str
     reading: str
     sentence: str
@@ -260,6 +273,7 @@ def create_new_note_without_matching(
     word = match_op_args["word"]
     reading = match_op_args["reading"]
     sentence = match_op_args["sentence"]
+    multi_meaning_index = match_op_args.get("multi_meaning_index")
     log_prefix = f"{log_prefix}--create_new_note_without_matching--"
     logger.debug(f"{log_prefix} Starting")
 
@@ -546,10 +560,20 @@ def create_new_note_without_matching(
         # With the threading lock in place other tasks processing the same word can find it
         notes_to_add_dict.setdefault(word, []).append(new_note)
         processed_word_tuples[word_index] = (
-            word,
-            reading,
-            new_note[word_sort_field],
-            new_note_id,
+            (
+                word,
+                reading,
+                multi_meaning_index,
+                new_note[word_sort_field],
+                new_note_id,
+            )
+            if multi_meaning_index is not None
+            else (
+                word,
+                reading,
+                new_note[word_sort_field],
+                new_note_id,
+            )
         )
     return create_meaning_result
 
@@ -582,6 +606,7 @@ def create_new_note_from_matched_note(
     word_index = match_op_args["word_index"]
     word = match_op_args["word"]
     reading = match_op_args["reading"]
+    multi_meaning_index = match_op_args.get("multi_meaning_index")
     current_note = match_op_args["current_note"]
     notes_to_add_dict = match_op_args["notes_to_add_dict"]
     notes_to_update_dict = match_op_args["notes_to_update_dict"]
@@ -677,11 +702,22 @@ def create_new_note_from_matched_note(
     new_note[word_sort_field] = new_note[word_sort_field].replace(") (", ")(").replace("  ", " ")
     # Note, new_note.id will be 0 here, we'll instead use the sort field value to
     # find it after insertion and then update the processed_word_tuples
+    logger.debug(f"{log_prefix} Created new note with multi-meaning index {multi_meaning_index}")
     processed_word_tuples[word_index] = (
-        word,
-        reading,
-        new_note[word_sort_field],
-        new_note_id,
+        (
+            word,
+            reading,
+            multi_meaning_index,
+            new_note[word_sort_field],
+            new_note_id,
+        )
+        if multi_meaning_index is not None
+        else (
+            word,
+            reading,
+            new_note[word_sort_field],
+            new_note_id,
+        )
     )
     return True
 
@@ -705,6 +741,7 @@ async def match_single_word_in_word_tuple(
     word_index = match_op_args["word_index"]
     word = match_op_args["word"]
     reading = match_op_args["reading"]
+    multi_meaning_index = match_op_args.get("multi_meaning_index")
     sentence = match_op_args["sentence"]
     processed_word_tuples = match_op_args["processed_word_tuples"]
     all_generated_meanings_dict = match_op_args["all_generated_meanings_dict"]
@@ -880,7 +917,7 @@ async def match_single_word_in_word_tuple(
         for note in matching_notes:
             logger.debug(
                 f"{log_prefix}Processing note {note.id} for word {word} with reading {reading},"
-                f" sort field {note[word_sort_field]}"
+                f" sort field {note[word_sort_field]}, multi-meaning index: {multi_meaning_index}"
             )
             if meaning_field in note:
                 meaning = note[meaning_field]
@@ -1271,26 +1308,16 @@ _Current sentence_: {sentence}"""
             matched_note_id = (
                 matched_note.id if matched_note.id > 0 else matched_note[new_note_id_field]
             )
-            new_word_tuple = (word, reading, matched_note[word_sort_field], matched_note_id)
+            new_word_tuple = (
+                (word, reading, multi_meaning_index, matched_note[word_sort_field], matched_note_id)
+                if multi_meaning_index is not None
+                else (word, reading, matched_note[word_sort_field], matched_note_id)
+            )
             logger.debug(
                 f"{log_prefix}Setting processed word tuple at index {word_index}, with tuple"
                 f" {new_word_tuple}"
             )
             processed_word_tuples[word_index] = new_word_tuple
-            # Now we need to update the meaning in the note
-            # if jp_meaning and matched_note[meaning_field] != jp_meaning.strip():
-            #     matched_note[meaning_field] = jp_meaning.strip()
-            #     matched_note.add_tag("updated_jp_meaning")
-            #     if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
-            #         notes_to_update_dict[matched_note.id] = matched_note
-            # if en_meaning and matched_note[english_meaning_field] != en_meaning.strip():
-            #     matched_note[english_meaning_field] = en_meaning.strip()
-            #     if matched_note.id > 0 and matched_note.id not in notes_to_update_dict:
-            #         notes_to_update_dict[matched_note.id] = matched_note
-            # logger.debug(
-            #     f"{log_prefix}Updated note {matched_note.id} with new meaning '{jp_meaning}'"
-            #     f" and english meaning '{en_meaning}'"
-            # )
             return True
         else:
             logger.debug(
@@ -1303,7 +1330,14 @@ _Current sentence_: {sentence}"""
 def match_words_to_notes(
     config: dict,
     current_note: Note,
-    word_tuples: list[Union[RawOneMeaningWordType, RawMultiMeaningWordType, MatchedWordType]],
+    word_tuples: list[
+        Union[
+            RawOneMeaningWordType,
+            RawMultiMeaningWordType,
+            OneMeaningMatchedWordType,
+            MultiMeaningMatchedWordType,
+        ]
+    ],
     word_list_key: str,
     sentence: str,
     tasks: list[asyncio.Task],
@@ -1425,6 +1459,7 @@ def match_words_to_notes(
         word_index: int,
         word: str,
         reading: str,
+        multi_meaning_index: Optional[int] = None,
     ) -> bool:
         return await match_single_word_in_word_tuple(
             config=config,
@@ -1437,6 +1472,7 @@ def match_words_to_notes(
                 note_type=note_type,
                 word_index=word_index,
                 word_list_key=word_list_key,
+                multi_meaning_index=multi_meaning_index,
                 word=word,
                 reading=reading,
                 sentence=sentence,
@@ -1491,13 +1527,19 @@ def match_words_to_notes(
         if not isinstance(word_tuple, (tuple, list)):
             logger.debug(f"{log_prefix}Error: Invalid word tuple at index {i}: {word_tuple}")
             continue
-        word = ""
-        reading = ""
-        if len(word_tuple) == 4:
+        word: str = ""
+        reading: str = ""
+        multi_meaning_index: Optional[int] = None
+        if len(word_tuple) in [3, 5]:
+            multi_meaning_index = word_tuple[2]
+        if len(word_tuple) in [4, 5]:
             # If this the id is a negative number, it means the word was added as a new note
             # and should try to set the id to an actual note.id, if the note was created
             try:
-                fake_note_id = int(word_tuple[3])
+                if len(word_tuple) == 5:
+                    fake_note_id = int(word_tuple[4])
+                else:
+                    fake_note_id = int(word_tuple[3])
             except Exception as e:
                 logger.debug(
                     f"{log_prefix}Error: Invalid third value in word tuple: {word_tuple}, {e}"
@@ -1547,7 +1589,16 @@ def match_words_to_notes(
                         continue
                 if unfake_note is not None:
                     # Set the new note ID to the actual note ID
-                    word_tuple = (word_tuple[0], word_tuple[1], word_tuple[2], unfake_note.id)
+                    if len(word_tuple) == 5:
+                        word_tuple = (
+                            word_tuple[0],
+                            word_tuple[1],
+                            word_tuple[2],
+                            word_tuple[3],
+                            unfake_note.id,
+                        )
+                    else:
+                        word_tuple = (word_tuple[0], word_tuple[1], word_tuple[2], unfake_note.id)
                     # Update the processed word tuples with the new note ID
                     processed_word_tuples[i] = word_tuple
                     logger.debug(
@@ -1572,9 +1623,11 @@ def match_words_to_notes(
                 # Not replacing existing word links
                 continue
             else:
-                word, reading, _, _ = word_tuple
-        elif len(word_tuple) == 2:
-            word, reading = word_tuple
+                word = word_tuple[0]
+                reading = word_tuple[1]
+        elif len(word_tuple) in [2, 3]:
+            word = word_tuple[0]
+            reading = word_tuple[1]
         else:
             logger.debug(f"{log_prefix}Error: Invalid word tuple length at index {i}: {word_tuple}")
             continue
@@ -1614,6 +1667,7 @@ def match_words_to_notes(
                 word=word,
                 reading=reading,
                 word_index=i,
+                multi_meaning_index=multi_meaning_index,
             )
         )
         progress_updater.increment_counts(
@@ -1811,9 +1865,15 @@ def match_words_to_notes_for_note(
                     word = wt[0]
                     reading = wt[1]
                     word_key = f"{word}_{reading}"
-                    if word_key in encountered_words:
+                    # if the word is a multi-meaning type, then duplicates are intended
+                    multi_meaning_index = wt[2] if len(wt) >= 3 else None
+                    if word_key in encountered_words and not isinstance(multi_meaning_index, int):
                         # remove word from word_tuples
                         word_tuples.remove(wt)
+                        logger.debug(
+                            f"{log_prefix}Removing duplicate word '{word}' with reading"
+                            f"'{reading}' from word list '{word_list_key}'"
+                        )
                     else:
                         encountered_words.add(word_key)
                 except Exception as e:
@@ -1823,6 +1883,10 @@ def match_words_to_notes_for_note(
                     )
                     print_error_traceback(e, logger)
                     continue
+            logger.debug(
+                f"{log_prefix}Processing word list '{word_list_key}' with word tuples:"
+                f" {word_tuples}"
+            )
             update_word_list_in_dict = make_word_list_updater(word_list_key)
             match_words_to_notes(
                 config=config,
@@ -1853,6 +1917,11 @@ def match_words_to_notes_for_note(
                         updated_word_list_dict=word_list_dict,
                     )
                 )
+            )
+        else:
+            # No tasks were created, update progress to mark this note as done
+            progress_updater.increment_counts(
+                notes_done=1,
             )
         return
     else:

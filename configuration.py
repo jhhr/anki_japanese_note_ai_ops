@@ -24,7 +24,8 @@ RawMultiMeaningWordType = tuple[str, str, int]
 # so it is used to distinguish between them
 # The note_id references the exact note that the word is matched to, it can be a real note ID
 # or a placeholder ID used to identify new note that is to be created but hasn't yet
-MatchedWordType = tuple[str, str, str, Union[NoteId, int]]
+OneMeaningMatchedWordType = tuple[str, str, str, Union[NoteId, int]]
+MultiMeaningMatchedWordType = tuple[str, str, int, str, Union[NoteId, int]]
 
 MEANINGS_DICT_FILE = "_all_meanings_dict.json"
 KANJI_STORY_COMPONENT_WORDS_LOG = "_kanji_story_component_words.json"
