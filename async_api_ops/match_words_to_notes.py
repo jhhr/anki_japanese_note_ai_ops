@@ -801,12 +801,17 @@ async def match_single_word_in_word_tuple(
         # query for both
         go_word_query = ""
         if word.startswith("御"):
-            o_word = "お" + word[1:]
-            go_word = "ご" + word[1:]
-            go_word_query = (
-                f' OR "{word_kanjified_field}:{o_word}" OR "{word_normal_field}:{o_word}" OR'
-                f' "{word_kanjified_field}:{go_word}" OR "{word_normal_field}:{go_word}"'
-            )
+            go_word_query = ""
+            if reading[0] == "お":
+                o_word = "お" + word[1:]
+                go_word_query = (
+                    f' OR "{word_kanjified_field}:{o_word}" OR "{word_normal_field}:{o_word}"'
+                )
+            elif reading[0] == "ご":
+                go_word = "ご" + word[1:]
+                go_word_query = (
+                    f' OR "{word_kanjified_field}:{go_word}" OR "{word_normal_field}:{go_word}"'
+                )
         alt_reading_query = ""
         # If word contains no kanji, we can search for a match using only its reading
         if not re.search(r"[一-龯]", word):
