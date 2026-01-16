@@ -377,6 +377,8 @@ def make_meanings_in_note(
 def write_meanings_dict_to_file(all_meanings_dict: dict[str, list[dict]]):
     media_path = Path(mw.pm.profileFolder(), "collection.media")
     all_meanings_dict_path = Path(media_path, MEANINGS_DICT_FILE)
+    # Sort the dictionary by keys before writing to file for consistency
+    all_meanings_dict = dict(sorted(all_meanings_dict.items()))
     with open(all_meanings_dict_path, "w", encoding="utf-8") as f:
         json.dump(all_meanings_dict, f, ensure_ascii=False, indent=2)
 
