@@ -164,12 +164,12 @@ def get_extracted_words_from_model(
     # Instructions on modifying the current lists:
     # - Linked words are word arrays that have 4 elements: 3 strings and one positive or negative long integer may only be moved to another list, not modified and definitely not removed.
     #   - The most common case is that the linked multi-meaning word's 3rd string is the same as the 1st string. For example ["上る","のぼる",上る", 1378555077520]
-    #   - When there are more than one multi-meaning words in this form will have the two first strings be identical but the 3rd string and final integer will differ. For example: ["控える","おさえる","控える (m1)", 1378555133370] and [控える","おさえる","控える (m2)", 1616058016685]
+    #   - When there are more than one multi-meaning words in this form will have the two first strings be identical but the 3rd string and final integer will differ. For example: ["控える","おさえる"] and [控える","おさえる"]
     # - Generally you should only add more words, not remove any. Removal can be considered for compound verbs or expressions that are sufficiently accounted for by their individual components that are already listed in other word categories. Or, if there appears to be too many multi-meaning words, when one less meaning may suffice to account for each usage of the word. However, if the multi-meaning words are already linked, they should not be touched.
     # - If there is a case of a pair or more of homophone+homograph words occurring in the sentence but the current list does not list the word enough times, the to-be-added additional multi-meaning words' meaning index number depends on whether the current words are linked or not.
-    #   a. If there is only a single 2-element non-linked word, you should modify it to add the meaning index number to it, starting from 1, and add new word(s) with meanings number incrementing from there. For example, there being ["上がる","あがる"] only but 2 meanings of 上がる used in the sentence --> the result would contain ["上がる","あがる", 1] and ["上がる","あがる", 2]
-    #   b. If there is more than one 2-element word - which should contain meaning numbers already - continue adding more words with meaning numbers beginning from the highest index + 1 of the current words. For example, ["上がる","あがる", 1] and ["上がる","あがる", 2] being present but 3 meanings of 上がる are used in the sentence --> add one more, so ["上がる","あがる", 3]
-    #   c. If there are any 4-element linked words, the meaning numbers you use for the new word or words you add do not need count the linked word(s). For example, there is ["当て","あて","当て (m1)", 1744043020707] and 2 meanings of 当て used --> only add ["当て","あて", 1]. If there is ["当て","あて","当て (m5)", 1744043020711] and ["当て","あて", 1] but 3 meanings of 当て used --> only add ["当て","あて", 2]
+    #   a. If there is only a single 2-element non-linked word, you should modify it to add the meaning index number to it, starting from 1, and add new word(s) with meanings number incrementing from there. For example, there being ["上がる","あがる"] only but 2 meanings of 上がる used in the sentence --> the result would contain ["上がる"] and ["上がる"]
+    #   b. If there is more than one 2-element word - which should contain meaning numbers already - continue adding more words with meaning numbers beginning from the highest index + 1 of the current words. For example, ["上がる"] and ["上がる"] being present but 3 meanings of 上がる are used in the sentence --> add one more, so ["上がる"]
+    #   c. If there are any 4-element linked words, the meaning numbers you use for the new word or words you add do not need count the linked word(s). For example, there is ["当て","あて"] and 2 meanings of 当て used --> only add ["当て"]. If there is ["当て","あて"] and ["当て"] but 3 meanings of 当て used --> only add ["当て"]
 
     # Current word lists: {current_lists}
 
@@ -186,6 +186,7 @@ More details on the categorization
 - Don't list verbs in たい, たくない, せる or other non-base forms, except when such a form has a special meaning. Examples of special meanings, 食えない "shrewd" vs literal "cannot eat", 唸らせる "to impress" vs literal "to make someone groan". Example of non-special meaning: 齧らせる is simply "to make someone bite"
 - Don't list adjectives in さ form, list them in their い-form. Avoid listing adjectives in く-form as well, excpect when they have a meaning that isn't merely adverbial; for example, 大きく has the meaning "on a grand scale / extensively"
 - Don't list nouns which may take the genitive case の with the particle, list them in their plain form. For example, 上の should be listed as just 上.
+- Don't list noun form verbs, list them as verbs. For example. For example 冷やかし should be listed as 冷やかす.
 - Only list proper nouns a single time, ignoring their component nouns.
 - Don't list words in two categories, e.g. an adjective yojijukugo should only be listed in yojijukugo, a compound verb should only be listed in compound verbs and not expressions.
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
@@ -650,6 +651,28 @@ Example results 21:
   "prefixes":[],
   "expressions":[["方が良い","ほうがいい"]],
   "yojijukugo":[]
+}}
+
+This example includes including noun form verbs as just verbs:
+Example sentence 22: <k> 籤[くじ]</k> 入[い]りカプセル<k> 掬[すく]い</k>だよ！ 一等[いっとう]は<b> 甘[あま]やかし</b><k> 御[お]</k> 姉[ねえ]さんか 罵倒[ばとう]<k> 御[お]</k> 姉[ねえ]さんの 耳元[みみもと]<k> 囁[ささや]き</k>だよ
+Example results 22:
+{{
+  "nouns": [["籤", "くじ"], ["カプセル", "かぷせる"], ["一等", "いっとう"], ["罵倒", "ばとう"], ["姉", "あね"], ["耳元", "みみもと"], ["耳", "みみ"], ["元", "もと"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters": [],
+  "verbs": [["入る", "はいる"], ["掬う", "すくう"], ["甘やかす", "あまやかす"], ["囁く", "ささやく"]],
+  "compound_verbs": [],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [],
+  "particles": [["だ", "だ"], ["よ", "よ"], ["は", "は"], ["か", "か"], ["の", "の"]],
+  "conjunctions": [],
+  "pronouns": [],
+  "suffixes": [["さん", "さん"]],
+  "prefixes": [["御", "お"]],
+  "expressions": [],
+  "yojijukugo": []
 }}
 
 
