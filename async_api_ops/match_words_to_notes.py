@@ -957,6 +957,36 @@ async def match_single_word_in_word_tuple(
             else:
                 logger.debug(f"{log_prefix}Note {note.id} is missing meaning field")
 
+        # Check if any notes aren't yet mapped to generated meanings and map them if not
+        for i in range(len(matching_notes)):
+            # Re-acquire the note from notes_to_update_dict if it's there, thus as the
+            # clean_meaning_in_note op adds the MEANING_MAPPED_TAG we can avoid doing extra calls
+            note_id = matching_notes[i].id
+            note = (
+                matching_notes[i]
+                if note_id not in notes_to_update_dict
+                else notes_to_update_dict[note_id]
+            )
+            if not note.has_tag(MEANING_MAPPED_TAG):
+                logger.debug(
+                    f"{log_prefix}Mapping meanings for note {note[word_sort_field]} before matching"
+                )
+                await asyncio.to_thread(
+                    clean_meaning_in_note,
+                    config=config,
+                    note=note,
+                    notes_to_add_dict=notes_to_add_dict,
+                    notes_to_update_dict=notes_to_update_dict,
+                    all_generated_meanings_dict=all_generated_meanings_dict,
+                    allow_update_all_meanings=True,
+                    allow_reupdate_existing=True,
+                )
+            # Replace note in list each time, this will include the cases where an earlier op
+            # modified notes coming later in the list and we didn't call clean_meaning_in_note again
+            matching_notes[i] = (
+                note if note_id not in notes_to_update_dict else notes_to_update_dict[note_id]
+            )
+
         # Add meanings from all_generated_meanings_dict as well, if any remain that aren't in the
         # existing notes
         word_key = make_meaning_dict_key(word, reading)
