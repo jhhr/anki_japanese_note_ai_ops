@@ -1104,6 +1104,9 @@ def sync_bulk_notes_op(
     return pos, notes_to_add_dict, notes_to_update_dict
 
 
+BulkOpResult = tuple[int, dict[str, list[Note]], dict[NoteId, Note]]
+
+
 async def bulk_notes_op(
     message,
     config,
@@ -1116,7 +1119,7 @@ async def bulk_notes_op(
     notes_to_update_dict: dict[NoteId, Note] = {},
     model: str = "",
     on_end: Optional[Callable[..., None]] = None,
-) -> tuple[int, dict[str, list[Note]], dict[NoteId, Note]]:
+) -> BulkOpResult:
     """
     Perform a simple async or sync bulk operation on a sequence of notes. Will run the operation
     function on each note, updating the progress dialog and collecting edited note IDs.
@@ -1314,7 +1317,7 @@ NewNotesOp = Callable[[list[Note], dict, AsyncTaskProgressUpdater], dict[NoteId,
 
 def selected_notes_op(
     done_text: str,
-    bulk_op,
+    bulk_op: Callable[..., Coroutine[Any, Any, BulkOpResult]],
     nids: Sequence[NoteId],
     parent: Browser,
     progress_updater: AsyncTaskProgressUpdater,

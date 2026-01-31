@@ -41,7 +41,9 @@ from .async_api_ops.extract_words import (  # noqa: E402
 )
 from .async_api_ops.match_words_to_notes import (  # noqa: E402
     match_words_to_notes_from_selected,
+    match_single_word_to_notes_from_selected,
 )
+
 from .async_api_ops.make_all_meanings import (  # noqa: E402
     make_meanings_selected_notes,
 )
@@ -118,35 +120,59 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     component_words_action = QAction("Kanjify sentence", mw)
     extract_words_action = QAction("Extract words", mw)
     match_words_action = QAction("Match extracted words to notes", mw)
+    rematch_single_word_action = QAction("Rematch all single word to notes", mw)
+    rematch_processed_single_word_action = QAction("Rematch processed single words to notes", mw)
+    match_remaining_single_word_action = QAction(
+        "Match remaining unprocessed single words to notes", mw
+    )
     make_all_meanings_action = QAction("Generate all meanings for selected notes", mw)
     # Connect the action to the operation
+    selected_nids = browser.selectedNotes()
     qconnect(
         meaning_action.triggered,
-        lambda: clean_selected_notes(browser.selectedNotes(), parent=browser),
+        lambda: clean_selected_notes(selected_nids, parent=browser),
     )
     qconnect(
         translation_action.triggered,
-        lambda: translate_selected_notes(browser.selectedNotes(), parent=browser),
+        lambda: translate_selected_notes(selected_nids, parent=browser),
     )
     qconnect(
         kanji_story_action.triggered,
-        lambda: make_stories_for_selected_notes(browser.selectedNotes(), parent=browser),
+        lambda: make_stories_for_selected_notes(selected_nids, parent=browser),
     )
     qconnect(
         component_words_action.triggered,
-        lambda: kanjify_selected_notes(browser.selectedNotes(), parent=browser),
+        lambda: kanjify_selected_notes(selected_nids, parent=browser),
     )
     qconnect(
         extract_words_action.triggered,
-        lambda: extract_words_from_selected_notes(browser.selectedNotes(), parent=browser),
+        lambda: extract_words_from_selected_notes(selected_nids, parent=browser),
     )
     qconnect(
         match_words_action.triggered,
-        lambda: match_words_to_notes_from_selected(browser.selectedNotes(), parent=browser),
+        lambda: match_words_to_notes_from_selected(selected_nids, parent=browser),
+    )
+    qconnect(
+        rematch_single_word_action.triggered,
+        lambda: match_single_word_to_notes_from_selected(
+            selected_nids, parent=browser, reprocess_words="both"
+        ),
+    )
+    qconnect(
+        rematch_processed_single_word_action.triggered,
+        lambda: match_single_word_to_notes_from_selected(
+            selected_nids, parent=browser, reprocess_words="only_processed"
+        ),
+    )
+    qconnect(
+        match_remaining_single_word_action.triggered,
+        lambda: match_single_word_to_notes_from_selected(
+            selected_nids, parent=browser, reprocess_words="only_unprocessed"
+        ),
     )
     qconnect(
         make_all_meanings_action.triggered,
-        lambda: make_meanings_selected_notes(browser.selectedNotes(), parent=browser),
+        lambda: make_meanings_selected_notes(selected_nids, parent=browser),
     )
 
     ai_menu = menu.addMenu("AI helper")
@@ -160,6 +186,9 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     ai_menu.addAction(component_words_action)
     ai_menu.addAction(extract_words_action)
     ai_menu.addAction(match_words_action)
+    ai_menu.addAction(rematch_single_word_action)
+    ai_menu.addAction(rematch_processed_single_word_action)
+    ai_menu.addAction(match_remaining_single_word_action)
     ai_menu.addAction(make_all_meanings_action)
 
 
