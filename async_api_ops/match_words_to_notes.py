@@ -1965,54 +1965,6 @@ def match_words_to_notes_for_note(
 
             return update_function
 
-        # def make_word_list_updater(current_key):
-        #     # If we're processing single_word_only, this task will have update a single tuple and
-        #     # possibly another task will update another tuple, so we need to combined changes
-        #     # from the two
-        #     other_updated_tuples: list[ProcessedWordTuple] = None
-        #     if limit_words_and_readings and note.id > 0 and note.id in notes_to_update_dict:
-        #         updated_note = notes_to_update_dict[note.id]
-        #         try:
-        #             existing_word_list_dict = json.loads(updated_note[word_list_field])
-        #             if isinstance(existing_word_list_dict, dict):
-        #                 other_updated_tuples = existing_word_list_dict.get(current_key, [])
-        #         except Exception as e:
-        #             logger.error(
-        #                 f"{log_prefix}Error loading existing word list dict for note"
-        #                 f" {updated_note.id}: {e}"
-        #             )
-
-        #     def update_function(
-        #         updated_tuples: list[ProcessedWordTuple], original_tuples: list[ProcessedWordTuple]
-        #     ):
-        #         logger.debug(
-        #             f"{log_prefix}Updating word list for key '{current_key}' with tuples:"
-        #             f" {updated_tuples}"
-        #         )
-        #         if other_updated_tuples is not None:
-        #             # Combine the two lists, finding changed tuples by comparing to original_tuples
-        #             # and using the updated version from updated_tuples first and then the
-        #             # other_updated_tuples second
-        #             combined_tuples: list[ProcessedWordTuple] = []
-
-        #             def is_updated_tuple(word_tuple: ProcessedWordTuple, index: int) -> bool:
-        #                 if index < len(original_tuples):
-        #                     return word_tuple != original_tuples[index]
-        #                 return True
-
-        #             for index, updated_word_tuple in enumerate(updated_tuples):
-        #                 if is_updated_tuple(updated_word_tuple, index):
-        #                     combined_tuples.append(updated_word_tuple)
-        #                 elif index < len(other_updated_tuples) and is_updated_tuple(
-        #                     other_updated_tuples[index], index
-        #                 ):
-        #                     combined_tuples.append(other_updated_tuples[index])
-        #             word_list_dict[current_key] = [wt for wt in combined_tuples if wt is not None]
-        #         else:
-        #             word_list_dict[current_key] = [wt for wt in updated_tuples if wt is not None]
-
-        #     return update_function
-
         encountered_words = set()
         logger.debug(
             f"{log_prefix}Processing word lists with limit_words_and_readings="
