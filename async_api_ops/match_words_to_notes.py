@@ -3,6 +3,7 @@ import json
 import re
 import asyncio
 import logging
+from json_repair import repair_json  # type: ignore
 from pathlib import Path
 from typing import (
     Generator,
@@ -22,6 +23,7 @@ from aqt import mw
 from anki.notes import Note, NoteId
 from anki.models import NotetypeDict
 from anki.collection import Collection
+
 
 from .base_ops import (
     get_response,
@@ -78,6 +80,34 @@ WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
     "yojijukugo": "Idiom",
 }
 WORD_LISTS = list(WORD_LIST_TO_PART_OF_SPEECH.keys())
+
+
+def decode_word_list_field(
+    note: Note, word_list_field: str, notes_to_update_dict: dict[int, Note], log_prefix: str = ""
+) -> Union[dict[str, Any], None]:
+    word_list_dict, json_repair_log = repair_json(
+        note[word_list_field],
+        ensure_ascii=False,
+        logging=True,
+    )
+    json_repair_log: list[dict[str, str]]
+    if not isinstance(word_list_dict, dict):
+        logger.error(
+            f"{log_prefix}Failed to decode valid dict from word list field, original:"
+            f" {note[word_list_field]}\ndecoded: {json.dumps(word_list_dict, ensure_ascii=False)}"
+            f"\njson_repair_log: {json.dumps(json_repair_log, ensure_ascii=False, indent=2)}"
+        )
+        # tag note
+        note.add_tag("invalid_word_list_json")
+        if note.id > 0 and note.id not in notes_to_update_dict:
+            notes_to_update_dict[note.id] = note
+        return None
+    logger.debug(
+        f"{log_prefix}Decoded word list field, original: {note[word_list_field]}\ndecoded:"
+        f" {json.dumps(word_list_dict, ensure_ascii=False)}\njson_repair_log:"
+        f" {json.dumps(json_repair_log, ensure_ascii=False, indent=2)}"
+    )
+    return word_list_dict
 
 
 def check_note_processed_furigana_field(
@@ -1911,16 +1941,13 @@ def match_words_to_notes_for_note(
     # Get the word tuples from the note
     word_list_field = get_field_config(config, "word_list_field", note_type)
     if word_list_field in note:
-        try:
-            word_list_dict = json.loads(note[word_list_field])
-        except json.JSONDecodeError as e:
-            logger.error(f"{log_prefix}Error decoding JSON from word list field: {e}")
-            # tag note
-            note.add_tag("invalid_word_list_json")
-            if note.id > 0 and note.id not in notes_to_update_dict:
-                notes_to_update_dict[note.id] = note
-            word_list_dict = {}
-        if not isinstance(word_list_dict, dict):
+        word_list_dict = decode_word_list_field(
+            note,
+            word_list_field,
+            notes_to_update_dict,
+            log_prefix,
+        )
+        if not word_list_dict:
             logger.error(
                 f"{log_prefix}Error: Invalid word list format in the note, expected a dictionary"
             )
@@ -2301,21 +2328,11 @@ def match_single_word_to_notes_from_selected(
                 return len(matching_notes) == 1 and matching_notes[0].id == cur_note.id
 
             if word_list_field in cur_note:
-                try:
-                    word_list_dict = json.loads(cur_note[word_list_field])
-                except json.JSONDecodeError as e:
-                    logger.error(f"{log_prefix}Error decoding JSON from word list field: {e}")
-                    # tag note
-                    cur_note.add_tag("invalid_word_list_json")
-                    if cur_note.id > 0 and cur_note.id not in notes_to_update_dict:
-                        notes_to_update_dict[cur_note.id] = cur_note
+                word_list_dict = decode_word_list_field(
+                    cur_note, word_list_field, notes_to_update_dict, log_prefix
+                )
+                if not word_list_dict:
                     word_list_dict = {}
-                if not isinstance(word_list_dict, dict):
-                    logger.error(
-                        f"{log_prefix}Error: Invalid word list format in the note, expected a"
-                        " dictionary"
-                    )
-                    return
 
             encountered_words = set()
             single_word_and_reading: Optional[RawOneMeaningWordType] = None

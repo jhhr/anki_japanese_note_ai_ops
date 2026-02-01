@@ -1,5 +1,5 @@
 import logging
-import json
+
 from typing import Union, Sequence, Any
 
 from aqt import mw
@@ -9,6 +9,7 @@ from anki.models import NotetypeDict
 from aqt.utils import showWarning
 
 from anki.collection import Collection
+
 
 from ..configuration import (
     RawOneMeaningWordType,
@@ -24,7 +25,7 @@ from ..async_api_ops.base_ops import (
     selected_notes_op,
 )
 from ..async_api_ops.extract_words import word_lists_str_format
-from ..async_api_ops.match_words_to_notes import WORD_LISTS
+from ..async_api_ops.match_words_to_notes import WORD_LISTS, decode_word_list_field
 
 logger = logging.getLogger(__name__)
 
@@ -43,25 +44,22 @@ def find_missing_matched_note_ids_for_note(
         logger.error("Error: No word lists to process in the config")
     if not isinstance(word_lists_to_process, dict):
         logger.error("Error: Invalid word lists format in the config, expected a dictionary")
-        return
+        return False
     # Filter the WORD_LISTS based on the config
     word_list_keys = [wl for wl in WORD_LISTS if word_lists_to_process.get(wl, False)]
 
     if word_list_field in note:
-        try:
-            word_list_dict = json.loads(note[word_list_field])
-        except json.JSONDecodeError as e:
-            logger.error(f"{log_prefix}Error decoding JSON from word list field: {e}")
-            # tag note
-            note.add_tag("invalid_word_list_json")
-            if note.id > 0 and note.id not in notes_to_update_dict:
-                notes_to_update_dict[note.id] = note
-            word_list_dict = {}
-        if not isinstance(word_list_dict, dict):
+        word_list_dict = decode_word_list_field(
+            note,
+            word_list_field,
+            notes_to_update_dict,
+            log_prefix,
+        )
+        if not word_list_dict:
             logger.error(
                 f"{log_prefix}Error: Invalid word list format in the note, expected a dictionary"
             )
-            return
+            return False
 
         word_list_changed = False
         for word_list_key in word_list_keys:
@@ -125,6 +123,7 @@ def find_missing_matched_note_ids_for_note(
             note[word_list_field] = word_lists_str_format(word_list_dict)
             if note.id > 0 and note.id not in notes_to_update_dict:
                 notes_to_update_dict[note.id] = note
+    return True
 
 
 def bulk_find_missing_matched_note_ids_op(
