@@ -47,6 +47,9 @@ from .async_api_ops.match_words_to_notes import (  # noqa: E402
 from .async_api_ops.make_all_meanings import (  # noqa: E402
     make_meanings_selected_notes,
 )
+from .sync_local_ops.find_missing_matched_note_ids import (  # noqa: E402
+    find_missing_matched_note_ids_selected_notes,
+)
 
 
 # Initialize root logger for the addon at module load
@@ -125,7 +128,11 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     match_remaining_single_word_action = QAction(
         "Match remaining unprocessed single words to notes", mw
     )
+    find_missing_matched_note_ids_action = QAction(
+        "Find missing matched note ids for selected notes", mw
+    )
     make_all_meanings_action = QAction("Generate all meanings for selected notes", mw)
+
     # Connect the action to the operation
     selected_nids = browser.selectedNotes()
     qconnect(
@@ -174,12 +181,18 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
         make_all_meanings_action.triggered,
         lambda: make_meanings_selected_notes(selected_nids, parent=browser),
     )
+    qconnect(
+        find_missing_matched_note_ids_action.triggered,
+        lambda: find_missing_matched_note_ids_selected_notes(selected_nids, parent=browser),
+    )
 
     ai_menu = menu.addMenu("AI helper")
     if ai_menu is None:
         logger.error("Error: AI helper menu could not be created.")
         return
     # Add the action to the browser's card context menu
+
+    # Async ops
     ai_menu.addAction(meaning_action)
     ai_menu.addAction(translation_action)
     ai_menu.addAction(kanji_story_action)
@@ -190,6 +203,9 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     ai_menu.addAction(rematch_processed_single_word_action)
     ai_menu.addAction(match_remaining_single_word_action)
     ai_menu.addAction(make_all_meanings_action)
+    ai_menu.addSeparator()
+    # Sync ops
+    ai_menu.addAction(find_missing_matched_note_ids_action)
 
 
 def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):

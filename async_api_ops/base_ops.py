@@ -1043,6 +1043,7 @@ def sync_bulk_notes_op(
     op: Callable[..., bool],
     notes: Sequence[Note],
     edited_nids: list[NoteId],
+    message: str,
     notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
     notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
     on_end: Optional[Callable[..., None]] = None,
@@ -1053,24 +1054,24 @@ def sync_bulk_notes_op(
 
     Used as a fallback for when the async version is not needed or rate limits are not set.
 
-    Args:
-        pos: The position in the undo stack to add the operation.
-        col: The Anki collection object.
-        config: Addon config dict.
-        op: The operation function to apply to each note.
-        col: The Anki collection object.
-        notes: A sequence of Note objects to process.
-        edited_nids: A list to store the IDs of edited notes, to be mutated in place.
-        model: The AI model to use for the operation, to get rate limit from config.
-        on_end: An optional callback to run on completion of the bulk op. Should be running other
+    :param pos: The position in the undo stack to add the operation.
+    :param col: The Anki collection object.
+    :param config: Addon config dict.
+    :param op: The operation function to apply to each note.
+    :param col: The Anki collection object.
+    :param notes: A sequence of Note objects to process.
+    :param edited_nids: A list to store the IDs of edited notes, to be mutated in place.
+    :param message: A message to display in the progress dialog.
+    :param on_end: An optional callback to run on completion of the bulk op. Should be running other
             side effects that do not edit or add notes as those should be handled through
             notes_to_add_dict and notes_to_update_dict.
     """
     total_notes = len(notes)
     note_cnt = 0
+    start_time = time.time()
     for note in notes:
         try:
-            note_was_edited = op(
+            op(
                 config=config,
                 note=note,
                 notes_to_add_dict=notes_to_add_dict,
@@ -1078,23 +1079,24 @@ def sync_bulk_notes_op(
             )
         except Exception as e:
             logger.error("Sync bulk notes op: Error processing note %s: %s", note.id, e)
-            note_was_edited = False
         note_cnt += 1
 
+        elapsed_s = time.time() - start_time
+        elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_s))
+        time_msg = f"<br><code>Time: {elapsed_time}</code>"
+        if note_cnt > 3:
+            eta_s = (total_notes - note_cnt) * (elapsed_s / note_cnt)
+            eta_time = time.strftime("%H:%M:%S", time.gmtime(eta_s))
+            time_msg += f"""<br><code>ETA: {eta_time}</code>"""
         mw.taskman.run_on_main(
             lambda: mw.progress.update(
-                label=f"{note_cnt}/{total_notes} notes processed",
+                label=f"<b>{message}</b><br>{note_cnt}/{total_notes} notes processed{time_msg}",
                 value=note_cnt,
                 max=total_notes,
             )
         )
         if mw.progress.want_cancel():
             break
-        if note_was_edited and edited_nids is not None:
-            if notes_to_update_dict and note.id in notes_to_update_dict:
-                edited_nids.append(note.id)
-
-    logger.debug("Sync bulk notes op finished. editedNids %s", edited_nids)
 
     if on_end:
         on_end()
@@ -1119,6 +1121,7 @@ async def bulk_notes_op(
     notes_to_update_dict: dict[NoteId, Note] = {},
     model: str = "",
     on_end: Optional[Callable[..., None]] = None,
+    is_sync_op: bool = False,
 ) -> BulkOpResult:
     """
     Perform a simple async or sync bulk operation on a sequence of notes. Will run the operation
@@ -1139,14 +1142,7 @@ async def bulk_notes_op(
             notes_to_add_dict and notes_to_update_dict.
     """
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
-    config["rate_limits"] = config.get("rate_limits", {})
-    if not model:
-        logger.error("Model arg missing in bulk_notes_op, aborting")
-        return pos, notes_to_add_dict, notes_to_update_dict
-    rate_limit = config["rate_limits"].get(model, None)
-
-    if not rate_limit:
-        logger.debug(f"No rate limit set for model {model}, running sync op")
+    if is_sync_op:
         return sync_bulk_notes_op(
             pos=pos,
             col=col,
@@ -1154,6 +1150,26 @@ async def bulk_notes_op(
             op=op,
             notes=notes,
             edited_nids=edited_nids,
+            message=message,
+            notes_to_add_dict=notes_to_add_dict,
+            notes_to_update_dict=notes_to_update_dict,
+            on_end=on_end,
+        )
+    config["rate_limits"] = config.get("rate_limits", {})
+    if not model:
+        logger.error("Model arg missing in bulk_notes_op, aborting")
+        return pos, notes_to_add_dict, notes_to_update_dict
+    rate_limit = config["rate_limits"].get(model, None)
+    if not rate_limit or rate_limit <= 0:
+        logger.debug(f"No rate limit set for model {model}, running sync bulk notes op instead")
+        return sync_bulk_notes_op(
+            pos=pos,
+            col=col,
+            config=config,
+            op=op,
+            notes=notes,
+            edited_nids=edited_nids,
+            message=message,
             notes_to_add_dict=notes_to_add_dict,
             notes_to_update_dict=notes_to_update_dict,
             on_end=on_end,
@@ -1329,6 +1345,7 @@ def selected_notes_op(
     notes_to_add_dict: dict[str, list[Note]] = {}
     notes_to_update_dict: dict[NoteId, Note] = {}
     config = mw.addonManager.getConfig(__name__) or {}
+    nids_set = set(nids)
 
     # Create a wrapper function that handles the async operation
     def run_bulk_op(col: Collection) -> OpChanges:
@@ -1347,9 +1364,8 @@ def selected_notes_op(
             notes_to_add_dict.update(res_notes_to_add_dict)
             notes_to_update_dict.update(res_notes_to_update_dict)
             logger.debug(f"notes_to_update_dict keys: {notes_to_update_dict.keys()}")
-            edited_nids_set = set(edited_nids)
             for nid in res_notes_to_update_dict.keys():
-                if nid not in edited_nids_set:
+                if nid not in nids_set:
                     edited_other_nids.append(nid)
             edited_nids = list(filter(lambda x: x in nids, notes_to_update_dict.keys()))
 
