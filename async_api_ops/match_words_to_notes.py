@@ -85,12 +85,21 @@ WORD_LISTS = list(WORD_LIST_TO_PART_OF_SPEECH.keys())
 def decode_word_list_field(
     note: Note, word_list_field: str, notes_to_update_dict: dict[int, Note], log_prefix: str = ""
 ) -> Union[dict[str, Any], None]:
-    word_list_dict, json_repair_log = repair_json(
-        note[word_list_field],
-        ensure_ascii=False,
+    repair_res = repair_json(
+        json_str=note[word_list_field],
+        return_objects=True,
         logging=True,
+        ensure_ascii=False,
     )
-    json_repair_log: list[dict[str, str]]
+    # When the json is invalid, repair_json can returns a tuple with the repaired object and a log
+    # of the repairs it made
+    # When the json is valid, it returns just the decoded object
+    if isinstance(repair_res, tuple) and len(repair_res) == 2 and isinstance(repair_res[1], list):
+        word_list_dict = repair_res[0]
+        json_repair_log: list[dict[str, str]] = repair_res[1]
+    else:
+        word_list_dict = repair_res
+        json_repair_log = []
     if not isinstance(word_list_dict, dict):
         logger.error(
             f"{log_prefix}Failed to decode valid dict from word list field, original:"
