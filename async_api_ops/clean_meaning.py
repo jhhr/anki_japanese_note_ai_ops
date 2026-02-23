@@ -506,6 +506,7 @@ def get_single_meaning_from_mdx_dict_entry(
     reading: str,
     sentences: list[EnAndJPSentence],
     jp_mdx_dict_entry: str,
+    prev_en_meaning: str,
 ):
     jp_meaning_return_field = "cleaned_meaning"
     en_meaning_return_field = "english_meaning"
@@ -524,6 +525,8 @@ Selection criteria:
 - DO NOT overfit the definition to the sentence{'s' if len(sentences) > 1 else ''}, but rather pick as many meanings as possible that can broadly fit the theme of the sentence{'s' if len(sentences) > 1 else ''}.
 - Figurative uses of literal meanings should be one definition: When there is a pair of meanings for this word or phrase, one literal and one figurative, always pick both and shorten their respective descriptions. Do this even if the sentence{'s' if len(sentences) > 1 else ''} only uses one of the meanings.
 - In case there is only a single meaning, return that.
+- Exclude any dictionary entries from consideration that are for a different word. These may be included in the list of dictionary entries below due to matching the reading but not the word itself.
+- If all dictionary entries appear to be for different words, generate a new meaning following the simplification omission rules below.{' Use the current english meaning as reference for the new meaning.' if prev_en_meaning.strip() != "" else ''}
 
 Omission rules:
 - Omit any example sentences the matching meaning(s) included (often included within 「」 brackets).
@@ -546,6 +549,9 @@ Word or phrase (and its reading):
 ---
 Sentence{'s' if len(sentences) > 1 else ''}:
 {sentences_formatted}
+{f'''---
+Current English meaning:
+{prev_en_meaning}''' if prev_en_meaning.strip() != "" else ""}
 ---
 Japanese dictionary entry:
 {jp_mdx_dict_entry}
@@ -555,18 +561,15 @@ Japanese dictionary entry:
     result = get_response(model, prompt)
     if result is None:
         # Return original dict_entry unchanged if the cleaning failed
-        return jp_mdx_dict_entry, ""
+        return jp_mdx_dict_entry, prev_en_meaning
     try:
         return result[jp_meaning_return_field], result[en_meaning_return_field]
     except KeyError:
-        return jp_mdx_dict_entry, ""
+        return jp_mdx_dict_entry, prev_en_meaning
 
 
 def get_new_meaning_from_model(
-    config: dict[str, str],
-    word: str,
-    reading: str,
-    sentences: list[str],
+    config: dict[str, str], word: str, reading: str, sentences: list[str], prev_en_meaning: str
 ) -> tuple[str, str]:
     logger.debug(f"Getting new meaning with {len(sentences)} sentences")
     jp_meaning_return_field = "new_meaning"
@@ -585,14 +588,21 @@ def get_new_meaning_from_model(
 - If there are more than two usage patterns for this word or phrase, describe the one used in the sentence.
 - The word itself should not be used in the definition.
 
-The definition should be in the same language as the sentence. Also, generate a very short English translation of the meaning, ideally a list of equivalent words or phrases but explaining further, if necessary.
+The definition should be in the same language as the sentence. {'Use the current english meaning as reference for the new japanese meaning. Improve the english meaning  as well, if needed.' if prev_en_meaning.strip() != "" else 'Also, generate a very short English translation of the meaning, ideally a list of equivalent words or phrases but explaining further, if necessary.'}
+
 
 Return a JSON object with two fields:
 Return the meaning as the value of the key "{jp_meaning_return_field}".
 Return the English translation as the value of the key "{en_meaning_return_field}".
 
-Word or phrase (and its reading): {word} ({reading})
-Sentence{'s' if len(sentences) > 1 else ''}: {sentences_formatted}
+Word or phrase (and its reading):
+{word} ({reading})
+{f'''---
+Current English meaning:
+{prev_en_meaning}''' if prev_en_meaning.strip() != "" else ""}
+---
+Sentence{'s' if len(sentences) > 1 else ''}:
+{sentences_formatted}
 """
     logger.debug(f"Prompt for new meaning: {prompt}")
     model = config.get("word_meaning_model", "")
@@ -833,7 +843,7 @@ def clean_meaning_in_note(
         if jp_mdx_dict_entry:
             # Call API to get single meaning from the raw dictionary entry
             new_jp_meaning, new_en_meaning = get_single_meaning_from_mdx_dict_entry(
-                config, word, reading, sentences, jp_mdx_dict_entry
+                config, word, reading, sentences, jp_mdx_dict_entry, prev_en_meaning
             )
 
             # Update the note with the new value

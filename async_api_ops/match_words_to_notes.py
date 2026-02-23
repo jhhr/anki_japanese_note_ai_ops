@@ -2318,23 +2318,21 @@ def match_single_word_to_notes_from_selected(
             log_prefix = f"{log_prefix}--nid:{cur_note.id}--"
             word_list_field = get_field_config(config, "word_list_field", note_type)
             word_kanjified_field = get_field_config(config, "word_kanjified_field", note_type)
-            word_normal_field = get_field_config(config, "word_normal_field", note_type)
             word_reading_field = get_field_config(config, "word_reading_field", note_type)
-            word_sort_field = get_field_config(config, "word_sort_field", note_type)
-
-            def word_tuple_is_in_current_note(word: str, reading: str) -> bool:
-                matching_notes = get_matching_notes_for_word_and_reading(
-                    word=word,
-                    reading=reading,
-                    word_kanjified_field=word_kanjified_field,
-                    word_normal_field=word_normal_field,
-                    word_reading_field=word_reading_field,
-                    word_sort_field=word_sort_field,
-                    notes_to_update_dict=notes_to_update_dict,
-                    log_prefix=log_prefix,
-                    only_note_id=cur_note.id,
+            if word_kanjified_field not in cur_note or word_kanjified_field is None:
+                logger.error(
+                    f"{log_prefix}Error: Note is missing the word kanjified field"
+                    f" '{word_kanjified_field}'"
                 )
-                return len(matching_notes) == 1 and matching_notes[0].id == cur_note.id
+                continue
+            if word_reading_field not in cur_note or word_reading_field is None:
+                logger.error(
+                    f"{log_prefix}Error: Note is missing the word reading field"
+                    f" '{word_reading_field}'"
+                )
+                continue
+            target_word = cur_note[word_kanjified_field]
+            target_reading = cur_note[word_reading_field]
 
             if word_list_field in cur_note:
                 word_list_dict = decode_word_list_field(
@@ -2344,7 +2342,7 @@ def match_single_word_to_notes_from_selected(
                     word_list_dict = {}
 
             encountered_words = set()
-            single_word_and_reading: Optional[RawOneMeaningWordType] = None
+            single_word_and_reading: Optional[RawOneMeaningWordType] = (target_word, target_reading)
             for word_list_key in word_list_keys:
                 # Go through each list and replace the key in the dict with the result
                 word_tuples = word_list_dict.get(word_list_key, [])
@@ -2372,10 +2370,6 @@ def match_single_word_to_notes_from_selected(
                             )
                         else:
                             encountered_words.add(word_key)
-                            if single_word_and_reading is None and word_tuple_is_in_current_note(
-                                word, reading
-                            ):
-                                single_word_and_reading = (word, reading)
                     except Exception as e:
                         logger.error(
                             f"{log_prefix}Error processing word tuple {wt} in word list"
@@ -2383,15 +2377,6 @@ def match_single_word_to_notes_from_selected(
                         )
                         print_error_traceback(e, logger)
                         continue
-            if single_word_and_reading is None:
-                logger.debug(
-                    f"{log_prefix}No single word found in note to process in single-word-only mode"
-                    f" note word: {cur_note[word_list_field]}, note reading:"
-                    f" {cur_note[word_reading_field]}"
-                )
-                continue
-            target_word = single_word_and_reading[0]
-            target_reading = single_word_and_reading[1]
             target_word_regex = get_word_list_query_regex_for_word_and_reading(
                 word=target_word,
                 reading=target_reading,
