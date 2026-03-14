@@ -89,12 +89,9 @@ def compare_normalized_word_lists_for_test(
     original_word_lists: dict[str, list[tuple]],
     test_word_lists: dict[str, list[tuple]],
 ) -> tuple[bool, dict[str, dict[str, list[tuple]]]]:
-    """Compare normalized word lists and group diffs by missing/extra across categories."""
+    """Compare normalized word lists per key and per tuple, ignoring list order."""
     all_keys = sorted(set(original_word_lists.keys()) | set(test_word_lists.keys()))
-    diffs: dict[str, dict[str, list[tuple]]] = {
-        "missing_in_test": {},
-        "extra_in_test": {},
-    }
+    diffs: dict[str, dict[str, list[tuple]]] = {}
 
     for key in all_keys:
         original_counter = Counter(tuple(x) for x in original_word_lists.get(key, []))
@@ -109,13 +106,13 @@ def compare_normalized_word_lists_for_test(
             key=lambda t: tuple(str(x) for x in t),
         )
 
-        if missing_in_test:
-            diffs["missing_in_test"][key] = missing_in_test
-        if extra_in_test:
-            diffs["extra_in_test"][key] = extra_in_test
+        if missing_in_test or extra_in_test:
+            diffs[key] = {
+                "missing_in_test": missing_in_test,
+                "extra_in_test": extra_in_test,
+            }
 
-    is_match = not diffs["missing_in_test"] and not diffs["extra_in_test"]
-    return is_match, diffs
+    return len(diffs) == 0, diffs
 
 
 def word_tuple_sort_key(
@@ -229,6 +226,35 @@ def compared_word_lists(
     return combined_list
 
 
+def _format_word_list_dict(word_lists: dict) -> str:
+    """Format a word list dict with one compact per-category line. Returns '{}' for empty."""
+    if not word_lists:
+        return "{}"
+    return (
+        "{\n"
+        + ",\n".join(
+            f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k, v in word_lists.items()
+        )
+        + "\n}"
+    )
+
+
+def _format_test_diffs(diffs: dict) -> str:
+    """Format the test comparison diff dict for debug logging."""
+    parts = []
+    for outer_key in ("missing_in_test", "extra_in_test"):
+        inner = diffs.get(outer_key, {})
+        inner_str = _format_word_list_dict(inner)
+        # Indent all lines except the opening brace so they nest under the key
+        inner_lines = inner_str.split("\n")
+        if len(inner_lines) > 1:
+            indented = inner_lines[0] + "\n" + "\n".join("  " + line for line in inner_lines[1:])
+        else:
+            indented = inner_str
+        parts.append(f'  "{outer_key}": {indented}')
+    return "{\n" + ",\n".join(parts) + "\n}"
+
+
 def word_lists_str_format(
     word_lists: dict,
 ) -> Union[str, None]:
@@ -237,13 +263,7 @@ def word_lists_str_format(
     """
     if not word_lists:
         return None
-    return (
-        "{\n"
-        + ",\n".join(
-            [f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k, v in word_lists.items()]
-        )
-        + "\n}"
-    )
+    return _format_word_list_dict(word_lists)
 
 
 def get_extracted_words_from_model(
@@ -870,7 +890,7 @@ def extract_words_in_note(
                         # Use the compare func to validate the new list elements
                         cur_word_lists[key] = compared_word_lists([], word_lists[key])
                 # Finally, update the field value in the note
-                note[word_list_field] = json.dumps(cur_word_lists, ensure_ascii=False, indent=2)
+                note[word_list_field] = _format_word_list_dict(cur_word_lists)
                 if note.id != 0 and note.id not in notes_to_update_dict:
                     notes_to_update_dict[note.id] = note
                 return True
@@ -956,9 +976,9 @@ def extract_words_test_compare_in_note(
             "Extract words test mismatch for note %s\nDiff summary:\n%s\nOriginal normalized:\n%s"
             "\nTest normalized:\n%s",
             note.id,
-            json.dumps(diffs, ensure_ascii=False, indent=2),
-            json.dumps(normalized_original, ensure_ascii=False, indent=2),
-            json.dumps(normalized_test, ensure_ascii=False, indent=2),
+            _format_test_diffs(diffs),
+            _format_word_list_dict(normalized_original),
+            _format_word_list_dict(normalized_test),
         )
 
     if note.id != 0 and note.id not in notes_to_update_dict:
