@@ -91,7 +91,10 @@ def compare_normalized_word_lists_for_test(
 ) -> tuple[bool, dict[str, dict[str, list[tuple]]]]:
     """Compare normalized word lists per key and per tuple, ignoring list order."""
     all_keys = sorted(set(original_word_lists.keys()) | set(test_word_lists.keys()))
-    diffs: dict[str, dict[str, list[tuple]]] = {}
+    diffs: dict[str, dict[str, list[tuple]]] = {
+        "missing_in_test": {},
+        "extra_in_test": {},
+    }
 
     for key in all_keys:
         original_counter = Counter(tuple(x) for x in original_word_lists.get(key, []))
@@ -106,13 +109,13 @@ def compare_normalized_word_lists_for_test(
             key=lambda t: tuple(str(x) for x in t),
         )
 
-        if missing_in_test or extra_in_test:
-            diffs[key] = {
-                "missing_in_test": missing_in_test,
-                "extra_in_test": extra_in_test,
-            }
+        if missing_in_test:
+            diffs["missing_in_test"][key] = missing_in_test
+        if extra_in_test:
+            diffs["extra_in_test"][key] = extra_in_test
 
-    return len(diffs) == 0, diffs
+    is_match = not diffs["missing_in_test"] and not diffs["extra_in_test"]
+    return is_match, diffs
 
 
 def word_tuple_sort_key(
@@ -232,9 +235,7 @@ def _format_word_list_dict(word_lists: dict) -> str:
         return "{}"
     return (
         "{\n"
-        + ",\n".join(
-            f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k, v in word_lists.items()
-        )
+        + ",\n".join(f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k, v in word_lists.items())
         + "\n}"
     )
 
