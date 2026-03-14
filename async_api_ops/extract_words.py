@@ -190,7 +190,6 @@ More details on the categorization
 - Only list proper nouns a single time, ignoring their component nouns.
 - Don't list words in two categories, e.g. an adjective yojijukugo should only be listed in yojijukugo, a compound verb should only be listed in compound verbs and not expressions.
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
-- Take note of words withing <gikun> tags. The kanji used for words wrapped in <gikun> tags are to be ignored and the word listed in hiragana. For example: <k><gikun> 不埒[だら]し</gikun></k><k> 無[な]い</k> should be processed as if it was だらし 無[な]い
 - Otherwise ignore any HTML that may be in the text, leaving any HTML out of the word lists.
 - A word occuring twice or more with the same kanji form and reading needs to considered for homonymity. If it is a used in the same meaning, the word should be listed just once. If the meanings differ, the word listed once for each different meaning, with a 1-based index number included to differentiate them. For example, 行く as "physically move to a place" vs "participate in an activity" vs "reach a point (in an activity, not physical place)".
 - Note, homonym listing of individual words can only be done, if a word actually occurs more than once.
@@ -725,6 +724,10 @@ def extract_words_in_note(
             # Remove text within <i> tags, as it is not relevant for word extraction
             sentence = re.sub(r"<i>.*?</i>", "", sentence, flags=re.DOTALL)
             current_word_lists_raw = note[word_list_field]
+            logger.debug(
+                f"current_word_lists_raw: '{current_word_lists_raw}', ignore_current_word_lists:"
+                f" {ignore_current_word_lists}"
+            )
             current_word_lists = None
             # Reformat the current word lists to the same format so formatting differences do not
             # cause issues
@@ -742,7 +745,7 @@ def extract_words_in_note(
             logger.debug(f"result from API: {word_lists}")
 
             if word_lists is not None:
-                logger.debug("word_list_json", word_lists)
+                logger.debug(f"word_list_json: {word_lists}")
 
                 # Update the note with the new values
                 if not isinstance(word_lists, dict):
