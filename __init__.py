@@ -38,6 +38,7 @@ from .async_api_ops.kanjify_sentence import (  # noqa: E402
 from .async_api_ops.extract_words import (  # noqa: E402
     extract_words_from_selected_notes,
     extract_words_in_note,
+    extract_words_test_compare_from_selected_notes,
 )
 from .async_api_ops.match_words_to_notes import (  # noqa: E402
     match_words_to_notes_from_selected,
@@ -122,6 +123,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     kanji_story_action = QAction("Generate kanji story", mw)
     component_words_action = QAction("Kanjify sentence", mw)
     extract_words_action = QAction("Extract words", mw)
+    extract_words_test_compare_action = QAction("Test extract words prompt", mw)
     match_words_action = QAction("Match extracted words to notes", mw)
     rematch_single_word_action = QAction("Rematch all single word to notes", mw)
     rematch_processed_single_word_action = QAction("Rematch processed single words to notes", mw)
@@ -154,6 +156,10 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     qconnect(
         extract_words_action.triggered,
         lambda: extract_words_from_selected_notes(selected_nids, parent=browser),
+    )
+    qconnect(
+        extract_words_test_compare_action.triggered,
+        lambda: extract_words_test_compare_from_selected_notes(selected_nids, parent=browser),
     )
     qconnect(
         match_words_action.triggered,
@@ -198,6 +204,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     ai_menu.addAction(kanji_story_action)
     ai_menu.addAction(component_words_action)
     ai_menu.addAction(extract_words_action)
+    ai_menu.addAction(extract_words_test_compare_action)
     ai_menu.addAction(match_words_action)
     ai_menu.addAction(rematch_single_word_action)
     ai_menu.addAction(rematch_processed_single_word_action)

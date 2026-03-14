@@ -1,6 +1,7 @@
 import json
 import re
 import logging
+from collections import Counter
 from typing import Union
 from collections.abc import Sequence
 from anki.notes import Note, NoteId
@@ -23,6 +24,98 @@ from ..configuration import (
 )
 
 logger = logging.getLogger(__name__)
+
+EXTRACT_WORDS_TEST_MATCH_TAG = "1-extract-words-test-match"
+EXTRACT_WORDS_TEST_NO_MATCH_TAG = "1-extract-words-test-no-match"
+
+
+def normalize_word_tuple_for_test_comparison(
+    word_tuple: Sequence,
+) -> Union[RawOneMeaningWordType, RawMultiMeaningWordType, None]:
+    """Normalize one word tuple for test comparison.
+
+    Matched tuples can include metadata (sort word and note id) that is not produced by the
+    extraction prompt, so we strip that metadata for comparison.
+    """
+    if not isinstance(word_tuple, (list, tuple)) or len(word_tuple) < 2:
+        return None
+    word = word_tuple[0]
+    reading = word_tuple[1]
+    if not isinstance(word, str) or not isinstance(reading, str) or not word or not reading:
+        return None
+
+    # Keep a meaning index if present; otherwise compare by word + reading only.
+    if len(word_tuple) >= 3:
+        meaning_or_meta = word_tuple[2]
+        try:
+            meaning_number = int(str(meaning_or_meta).strip())
+            return (word, reading, meaning_number)
+        except ValueError:
+            # Non-numeric 3rd element is treated as metadata-like and ignored.
+            return (word, reading)
+
+    return (word, reading)
+
+
+def normalize_word_list_dict_for_test_comparison(word_lists: dict) -> dict[str, list[tuple]]:
+    """Normalize a word list dict for deterministic order-insensitive comparison."""
+    if not isinstance(word_lists, dict):
+        return {}
+
+    normalized: dict[str, list[tuple]] = {}
+    for key, value in word_lists.items():
+        if not isinstance(key, str):
+            continue
+        if not isinstance(value, list):
+            normalized[key] = []
+            continue
+
+        normalized_tuples: list[tuple] = []
+        for raw_tuple in value:
+            normalized_tuple = normalize_word_tuple_for_test_comparison(raw_tuple)
+            if normalized_tuple is not None:
+                normalized_tuples.append(tuple(normalized_tuple))
+
+        # Sort for stable debug output; comparison itself is order-insensitive.
+        normalized[key] = sorted(
+            normalized_tuples,
+            key=lambda t: tuple(str(x) for x in t),
+        )
+
+    return normalized
+
+
+def compare_normalized_word_lists_for_test(
+    original_word_lists: dict[str, list[tuple]],
+    test_word_lists: dict[str, list[tuple]],
+) -> tuple[bool, dict[str, dict[str, list[tuple]]]]:
+    """Compare normalized word lists and group diffs by missing/extra across categories."""
+    all_keys = sorted(set(original_word_lists.keys()) | set(test_word_lists.keys()))
+    diffs: dict[str, dict[str, list[tuple]]] = {
+        "missing_in_test": {},
+        "extra_in_test": {},
+    }
+
+    for key in all_keys:
+        original_counter = Counter(tuple(x) for x in original_word_lists.get(key, []))
+        test_counter = Counter(tuple(x) for x in test_word_lists.get(key, []))
+
+        missing_in_test = sorted(
+            list((original_counter - test_counter).elements()),
+            key=lambda t: tuple(str(x) for x in t),
+        )
+        extra_in_test = sorted(
+            list((test_counter - original_counter).elements()),
+            key=lambda t: tuple(str(x) for x in t),
+        )
+
+        if missing_in_test:
+            diffs["missing_in_test"][key] = missing_in_test
+        if extra_in_test:
+            diffs["extra_in_test"][key] = extra_in_test
+
+    is_match = not diffs["missing_in_test"] and not diffs["extra_in_test"]
+    return is_match, diffs
 
 
 def word_tuple_sort_key(
@@ -788,6 +881,92 @@ def extract_words_in_note(
     return False
 
 
+def extract_words_test_compare_in_note(
+    config: dict,
+    note: Note,
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
+) -> bool:
+    """Run extract-words prompt and compare with current list, tagging match/no-match only."""
+    note_type = note.note_type()
+    if not note_type:
+        logger.error(f"Missing note type for note {note.id}")
+        return False
+
+    try:
+        word_extraction_sentence_field = get_field_config(
+            config, "word_extraction_sentence_field", note_type
+        )
+        word_list_field = get_field_config(config, "word_list_field", note_type)
+    except Exception as e:
+        logger.error(str(e))
+        return False
+
+    ignore_current_word_lists = config.get("ignore_current_word_lists", False)
+
+    if word_extraction_sentence_field not in note or word_list_field not in note:
+        logger.error("note is missing fields")
+        return False
+
+    sentence = note[word_extraction_sentence_field]
+    if not sentence:
+        return False
+    sentence = re.sub(r"<i>.*?</i>", "", sentence, flags=re.DOTALL)
+
+    current_word_lists_raw = note[word_list_field]
+    current_word_lists_for_prompt = None
+    if current_word_lists_raw and not ignore_current_word_lists:
+        try:
+            current_word_lists_for_prompt = word_lists_str_format(
+                json.loads(current_word_lists_raw)
+            )
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding JSON from current word lists: {e}")
+            return False
+
+    test_word_lists = get_extracted_words_from_model(
+        sentence,
+        current_word_lists_for_prompt,
+        config,
+    )
+    if test_word_lists is None:
+        return False
+    if not isinstance(test_word_lists, dict):
+        logger.warning("Extract words test response is not a dictionary")
+        test_word_lists = {}
+
+    try:
+        current_word_lists = json.loads(current_word_lists_raw) if current_word_lists_raw else {}
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding current word lists for note {note.id}: {e}")
+        return False
+    if not isinstance(current_word_lists, dict):
+        current_word_lists = {}
+
+    normalized_original = normalize_word_list_dict_for_test_comparison(current_word_lists)
+    normalized_test = normalize_word_list_dict_for_test_comparison(test_word_lists)
+    is_match, diffs = compare_normalized_word_lists_for_test(normalized_original, normalized_test)
+
+    note.remove_tag(EXTRACT_WORDS_TEST_MATCH_TAG)
+    note.remove_tag(EXTRACT_WORDS_TEST_NO_MATCH_TAG)
+    note.add_tag(EXTRACT_WORDS_TEST_MATCH_TAG if is_match else EXTRACT_WORDS_TEST_NO_MATCH_TAG)
+
+    if not is_match:
+        logger.debug(
+            "Extract words test mismatch for note %s\nDiff summary:\n%s\nOriginal normalized:\n%s"
+            "\nTest normalized:\n%s",
+            note.id,
+            json.dumps(diffs, ensure_ascii=False, indent=2),
+            json.dumps(normalized_original, ensure_ascii=False, indent=2),
+            json.dumps(normalized_test, ensure_ascii=False, indent=2),
+        )
+
+    if note.id != 0 and note.id not in notes_to_update_dict:
+        notes_to_update_dict[note.id] = note
+
+    return True
+
+
 def bulk_extract_from_notes_op(
     col: Collection,
     notes: Sequence[Note],
@@ -821,4 +1000,40 @@ def extract_words_from_selected_notes(nids: Sequence[NoteId], parent: Browser):
     progress_updater = AsyncTaskProgressUpdater(title="Async AI op: Extracting words")
     done_text = "Updated word lists"
     bulk_op = bulk_extract_from_notes_op
+    return selected_notes_op(done_text, bulk_op, nids, parent, progress_updater)
+
+
+def bulk_extract_words_test_compare_from_notes_op(
+    col: Collection,
+    notes: Sequence[Note],
+    edited_nids: list[NoteId],
+    progress_updater: AsyncTaskProgressUpdater,
+    notes_to_add_dict: dict[str, list[Note]],
+    notes_to_update_dict: dict[NoteId, Note],
+):
+    config = mw.addonManager.getConfig(__name__)
+    if not config:
+        showWarning("Missing addon configuration")
+        return
+    model = config.get("extract_words_model", "")
+    message = "Testing extract words prompt"
+    op = extract_words_test_compare_in_note
+    return bulk_notes_op(
+        message,
+        config,
+        op,
+        col,
+        notes,
+        edited_nids,
+        progress_updater,
+        notes_to_add_dict,
+        notes_to_update_dict,
+        model,
+    )
+
+
+def extract_words_test_compare_from_selected_notes(nids: Sequence[NoteId], parent: Browser):
+    progress_updater = AsyncTaskProgressUpdater(title="Async AI op: Testing extracted words prompt")
+    done_text = "Tagged extract words test results"
+    bulk_op = bulk_extract_words_test_compare_from_notes_op
     return selected_notes_op(done_text, bulk_op, nids, parent, progress_updater)
