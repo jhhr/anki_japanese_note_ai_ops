@@ -1,31 +1,30 @@
-import logging
 import json
+import logging
+from collections.abc import Sequence
 from pathlib import Path
 
-from anki.notes import Note, NoteId
 from anki.collection import Collection
+from anki.notes import Note, NoteId
 from aqt import mw
 from aqt.browser import Browser
 from aqt.utils import showWarning
-from collections.abc import Sequence
 
 from ..configuration import (
     MEANINGS_DICT_FILE,
-    NO_DICTIONARY_ENTRY_TAG,
     MEANINGS_GENERATED_TAG,
+    NO_DICTIONARY_ENTRY_TAG,
     GeneratedMeaningsDictType,
-    WordAndSentences,
     MakeMeaningsResult,
-)
-
-from .base_ops import (
-    get_response,
-    bulk_notes_op,
-    selected_notes_op,
-    AsyncTaskProgressUpdater,
+    WordAndSentences,
 )
 from ..sync_local_ops.mdx_dictionary import mdx_helper
 from ..utils import get_field_config
+from .base_ops import (
+    AsyncTaskProgressUpdater,
+    bulk_notes_op,
+    get_response,
+    selected_notes_op,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,9 @@ def make_all_meanings_for_word(
             async operations and to avoid doing file reading in every op.
     :return: True when meanings were successfully made, False otherwise.
     """
-    mdx_helper.load_mdx_dictionaries_if_needed(config, show_progress=True, finish_progress=False)
+    mdx_helper.load_mdx_dictionaries_if_needed(
+        config, show_progress=True, finish_progress=False
+    )
 
     dict_meaning_for_word = mdx_helper.get_definition_text(
         word=word,
@@ -133,7 +134,9 @@ Dictionary entry:
             f"Response from model 'meanings' field did not contain all dictionaries: {result}"
         )
         return MakeMeaningsResult.ERROR
-    if not all(jp_meaning_field in m and en_meaning_field in m for m in result["meanings"]):
+    if not all(
+        jp_meaning_field in m and en_meaning_field in m for m in result["meanings"]
+    ):
         logger.error(
             f"Response from model 'meanings' field missing required keys in some meanings: {result}"
         )
@@ -168,17 +171,21 @@ def revise_meanings_for_word(
     :return: The revised list of meanings when successful, None otherwise. Will also mutate
             all_meanings_dict to include the revised meanings.
     """
-    mdx_helper.load_mdx_dictionaries_if_needed(config, show_progress=True, finish_progress=False)
+    mdx_helper.load_mdx_dictionaries_if_needed(
+        config, show_progress=True, finish_progress=False
+    )
 
     meanings_and_sentences = ""
     for i, word_and_sentences in enumerate(list(bad_note_meanings_dict.values())):
         sentences_formatted = ""
         for sen in word_and_sentences["sentences"]:
-            sentences_formatted += f"  - JP: {sen['jp_sentence']} -- EN: {sen['en_sentence']}\n"
+            sentences_formatted += (
+                f"  - JP: {sen['jp_sentence']} -- EN: {sen['en_sentence']}\n"
+            )
         meanings_and_sentences += f"""
 UNMATCHED USAGE {i + 1}:
-- Description of usage in Japanese: {word_and_sentences['jp_meaning'] or '(empty)'}
-- English description: {word_and_sentences['en_meaning'] or '(empty)'}
+- Description of usage in Japanese: {word_and_sentences["jp_meaning"] or "(empty)"}
+- English description: {word_and_sentences["en_meaning"] or "(empty)"}
 - Sentences:
 {sentences_formatted}
 """
@@ -274,14 +281,18 @@ DICTIONARY ENTRIES:
             f"Response from model 'meanings' field did not contain all dictionaries: {result}"
         )
         return MakeMeaningsResult.ERROR
-    if not all(jp_meaning_field in m and en_meaning_field in m for m in result["meanings"]):
+    if not all(
+        jp_meaning_field in m and en_meaning_field in m for m in result["meanings"]
+    ):
         logger.error(
             f"Response from model 'meanings' field missing required keys in some meanings: {result}"
         )
         return MakeMeaningsResult.ERROR
 
     revised_meanings = result["meanings"]
-    logger.debug(f"Revised meanings: {json.dumps(revised_meanings, ensure_ascii=False, indent=2)}")
+    logger.debug(
+        f"Revised meanings: {json.dumps(revised_meanings, ensure_ascii=False, indent=2)}"
+    )
     all_meanings_dict[f"{word}_{reading}"] = revised_meanings
 
     return MakeMeaningsResult.SUCCESS
@@ -374,7 +385,7 @@ def make_meanings_in_note(
     return False
 
 
-def write_meanings_dict_to_file(all_meanings_dict: dict[str, list[dict]]):
+def write_meanings_dict_to_file(all_meanings_dict: GeneratedMeaningsDictType):
     media_path = Path(mw.pm.profileFolder(), "collection.media")
     all_meanings_dict_path = Path(media_path, MEANINGS_DICT_FILE)
     # Sort the dictionary by keys before writing to file for consistency
