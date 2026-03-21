@@ -506,7 +506,7 @@ def get_single_meaning_from_mdx_dict_entry(
     reading: str,
     sentences: list[EnAndJPSentence],
     jp_mdx_dict_entry: str,
-    prev_en_meaning: str,
+    prev_en_meaning: str = "",
 ):
     jp_meaning_return_field = "cleaned_meaning"
     en_meaning_return_field = "english_meaning"
@@ -569,7 +569,11 @@ Japanese dictionary entry:
 
 
 def get_new_meaning_from_model(
-    config: dict[str, str], word: str, reading: str, sentences: list[str], prev_en_meaning: str
+    config: dict[str, str],
+    word: str,
+    reading: str,
+    sentences: list[str],
+    prev_en_meaning: str = "",
 ) -> tuple[str, str]:
     logger.debug(f"Getting new meaning with {len(sentences)} sentences")
     jp_meaning_return_field = "new_meaning"
@@ -857,7 +861,9 @@ def clean_meaning_in_note(
             return False
         else:
             # If there's no dict_entry, we'll let a model generate one from scratch
-            new_meaning, en_meaning = get_new_meaning_from_model(config, word, reading, sentences)
+            new_meaning, en_meaning = get_new_meaning_from_model(
+                config, word, reading, sentences, prev_en_meaning
+            )
             note[meaning_field] = new_meaning
             note[english_meaning_field] = en_meaning
             if new_meaning != "" or en_meaning != "":
