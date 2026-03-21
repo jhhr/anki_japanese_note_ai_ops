@@ -1329,6 +1329,7 @@ def on_bulk_success(
 
 
 NewNotesOp = Callable[[list[Note], dict, AsyncTaskProgressUpdater], dict[NoteId, Note]]
+FilterNewNotesOp = Callable[[list[Note], dict, AsyncTaskProgressUpdater], list[Note]]
 
 
 def selected_notes_op(
@@ -1338,6 +1339,7 @@ def selected_notes_op(
     parent: Browser,
     progress_updater: AsyncTaskProgressUpdater,
     new_notes_op: Optional[NewNotesOp] = None,
+    filter_new_notes_op: Optional[FilterNewNotesOp] = None,
     on_success: Optional[Callable] = None,
 ):
     edited_nids: list[NoteId] = []
@@ -1395,6 +1397,10 @@ def selected_notes_op(
             if notes_to_add_dict:
                 for note_list in notes_to_add_dict.values():
                     notes_to_add.extend(note_list)
+
+            if notes_to_add and filter_new_notes_op:
+                notes_to_add = filter_new_notes_op(notes_to_add, config, progress_updater)
+
             if notes_to_add:
                 logger.debug(
                     f"Adding {len(notes_to_add)} new notes to note_will_be_added hooks will be run"
