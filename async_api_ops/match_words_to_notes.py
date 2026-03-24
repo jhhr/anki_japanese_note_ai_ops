@@ -824,6 +824,8 @@ def create_new_note_from_matched_note(
     new_note[kanjified_sentence_field] = current_note[kanjified_sentence_field]
     new_note[meaning_field] = jp_meaning.strip() if jp_meaning else ""
     new_note[english_meaning_field] = en_meaning.strip() if en_meaning else ""
+    new_note_id = make_new_note_id(new_note)
+    new_note[new_note_id_field] = str(new_note_id)
     # Process the meaning again with clean_meaning_in_note to get the best possible
     # meaning
     # Provide other_meaning_notes to override fetching from DB again as the meanings
@@ -856,8 +858,6 @@ def create_new_note_from_matched_note(
                     # If we found a (mX) in the sort field,
                     # update the largest meaning index
                     largest_meaning_index = max(largest_meaning_index, int(mx_match.group(1)) + 1)
-    new_note_id = make_new_note_id(new_note)
-    new_note[new_note_id_field] = str(new_note_id)
     if prev_sort_field and mxRec.search(prev_sort_field):
         # Replace the existing (mX) with the new meaning number
         new_note[word_sort_field] = mxRec.sub(f"(m{largest_meaning_index})", prev_sort_field)

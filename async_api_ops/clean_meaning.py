@@ -1,5 +1,6 @@
 import logging
 import json
+import re
 from pathlib import Path
 from typing import Optional, Union
 from anki.notes import Note, NoteId
@@ -668,6 +669,7 @@ def clean_meaning_in_note(
         word_normal_field = get_field_config(config, "word_normal_field", note_type)
         word_reading_field = get_field_config(config, "word_reading_field", note_type)
         sentence_field = get_field_config(config, "sentence_field", note_type)
+        new_note_id_field = get_field_config(config, "new_note_id_field", note_type)
     except KeyError as e:
         logger.error(str(e))
         return False
@@ -681,6 +683,7 @@ def clean_meaning_in_note(
         and word_field in note
         and word_reading_field in note
         and sentence_field in note
+        and new_note_id_field in note
     ):
         logger.debug(
             f"allow_update_all_meanings: {allow_update_all_meanings}, allow_reupdate_existing:"
@@ -725,6 +728,29 @@ def clean_meaning_in_note(
                 )
                 for onid in other_meaning_note_ids
             ]
+            # Also include pending notes from notes_to_add_dict that haven't been added to DB yet
+            m_pattern = re.compile(r"m\d+")
+            x_pattern = re.compile(r"x\d+")
+            for pending_notes in notes_to_add_dict.values():
+                for pending_note in pending_notes:
+                    if id(pending_note) == id(note):
+                        continue
+                    if word_sort_field not in pending_note:
+                        continue
+                    pending_sort = pending_note[word_sort_field]
+                    if not m_pattern.search(pending_sort) or x_pattern.search(pending_sort):
+                        continue
+                    if word_reading_field not in pending_note:
+                        continue
+                    if pending_note[word_reading_field] != note[word_reading_field]:
+                        continue
+                    if (
+                        word_normal_field in pending_note
+                        and pending_note[word_normal_field] == note[word_normal_field]
+                    ) or (
+                        word_field in pending_note and pending_note[word_field] == note[word_field]
+                    ):
+                        inner_other_meaning_notes.append(pending_note)
             logger.debug(
                 f"Other meaning notes count: {len(inner_other_meaning_notes)}, query:"
                 f" {meaning_notes_query}"
@@ -737,7 +763,7 @@ def clean_meaning_in_note(
             all_meaning_notes = other_meaning_notes + [note]
 
         meaning_sentences_dict = {
-            n.id: WordAndSentences(
+            (n.id if n.id != 0 else int(n[new_note_id_field])): WordAndSentences(
                 jp_meaning=n[meaning_field],
                 en_meaning=n[english_meaning_field],
                 sentences=get_sentences_for_note(config, n),
@@ -750,14 +776,15 @@ def clean_meaning_in_note(
         ) -> bool:
             any_changed_inner = False
             for n in all_meaning_notes:
-                if n.id in update_dict:
+                note_key = n.id if n.id != 0 else int(n[new_note_id_field])
+                if note_key in update_dict:
                     mapping_score = None
                     # MatchMeaningsResultType
-                    if len(update_dict[n.id]) == 3:
-                        new_jp_meaning, new_en_meaning, mapping_score = update_dict[n.id]
+                    if len(update_dict[note_key]) == 3:
+                        new_jp_meaning, new_en_meaning, mapping_score = update_dict[note_key]
                     else:
                         # UpdateAllMeaningsResultType
-                        new_jp_meaning, new_en_meaning = update_dict[n.id]
+                        new_jp_meaning, new_en_meaning = update_dict[note_key]
                     prev_en_meaning = n[english_meaning_field]
                     prev_jp_meaning = n[meaning_field]
                     n[meaning_field] = new_jp_meaning
