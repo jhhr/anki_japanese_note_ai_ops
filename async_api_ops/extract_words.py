@@ -1013,7 +1013,7 @@ def bulk_extract_from_notes_op(
         progress_updater,
         notes_to_add_dict,
         notes_to_update_dict,
-        model,
+        model=model,
     )
 
 
@@ -1037,6 +1037,7 @@ def bulk_extract_words_test_compare_from_notes_op(
         showWarning("Missing addon configuration")
         return
     model = config.get("extract_words_model", "")
+    logger.debug(f"Model for extract words test compare: {model}")
     message = "Testing extract words prompt"
     op = extract_words_test_compare_in_note
     return bulk_notes_op(
@@ -1049,7 +1050,7 @@ def bulk_extract_words_test_compare_from_notes_op(
         progress_updater,
         notes_to_add_dict,
         notes_to_update_dict,
-        model,
+        model=model,
     )
 
 

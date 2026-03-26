@@ -55,6 +55,9 @@ from .sync_local_ops.find_missing_matched_note_ids import (  # noqa: E402
 from .sync_local_ops.tag_notes_matched_status import (  # noqa: E402
     tag_notes_matched_status_from_selected,
 )
+from .sync_local_ops.deduplicate_existing_meaning_notes import (  # noqa: E402
+    deduplicate_existing_meaning_notes_selected_notes,
+)
 
 
 # Initialize root logger for the addon at module load
@@ -138,6 +141,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
         "Find missing matched note ids for selected notes", mw
     )
     tag_notes_matched_status_action = QAction("Tag notes matched status", mw)
+    deduplicate_existing_meaning_notes_action = QAction("Deduplicate existing meaning notes", mw)
     make_all_meanings_action = QAction("Generate all meanings for selected notes", mw)
     merge_meanings_action = QAction("Merge existing meanings for selected notes", mw)
 
@@ -205,6 +209,10 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
         tag_notes_matched_status_action.triggered,
         lambda: tag_notes_matched_status_from_selected(selected_nids, parent=browser),
     )
+    qconnect(
+        deduplicate_existing_meaning_notes_action.triggered,
+        lambda: deduplicate_existing_meaning_notes_selected_notes(selected_nids, parent=browser),
+    )
 
     ai_menu = menu.addMenu("AI helper")
     if ai_menu is None:
@@ -229,6 +237,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     # Sync ops
     ai_menu.addAction(find_missing_matched_note_ids_action)
     ai_menu.addAction(tag_notes_matched_status_action)
+    ai_menu.addAction(deduplicate_existing_meaning_notes_action)
 
 
 def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):

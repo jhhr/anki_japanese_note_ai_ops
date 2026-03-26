@@ -351,7 +351,7 @@ def bulk_kanjify_notes_op(
         progress_updater,
         notes_to_add_dict,
         notes_to_update_dict,
-        model,
+        model=model,
     )
 
 

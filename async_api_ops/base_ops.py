@@ -943,9 +943,10 @@ async def bulk_nested_notes_op(
     progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: dict[str, list[Note]],
     notes_to_update_dict: dict[NoteId, Note],
+    notes_to_remove: Optional[list[NoteId]] = None,
     model: str = "",
     on_end: Optional[Callable[..., None]] = None,
-) -> tuple[int, dict[str, list[Note]], dict[NoteId, Note]]:
+) -> tuple[int, dict[str, list[Note]], dict[NoteId, Note], list[NoteId]]:
     """
     Perform a bulk operation on a sequence of notes, with multiple nested async operations occurring
     per note instead of just one. Otherwise similar to `bulk_notes_op` except this cannot be
@@ -964,9 +965,11 @@ async def bulk_nested_notes_op(
            side effects that do not edit or add notes as those should be handled through
     """
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
+    if notes_to_remove is None:
+        notes_to_remove = []
     if not model:
         logger.error("Model arg missing in bulk_nested_notes_op, aborting")
-        return pos, notes_to_add_dict, notes_to_update_dict
+        return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
     config["rate_limits"] = config.get("rate_limits", {})
     rate_limit = config["rate_limits"].get(model, None)
 
@@ -976,7 +979,7 @@ async def bulk_nested_notes_op(
 
     if not rate_limit:
         logger.error("No rate limit set for model, can't run nested async op")
-        return pos, notes_to_add_dict, notes_to_update_dict
+        return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
     else:
         tasks: list[asyncio.Task] = []
 
@@ -1028,12 +1031,12 @@ async def bulk_nested_notes_op(
             if on_end:
                 on_end()
             progress_updater.stop_autoupdate()
-            return pos, notes_to_add_dict, notes_to_update_dict
+            return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
     if on_end:
         on_end()
     progress_updater.stop_autoupdate()
-    return pos, notes_to_add_dict, notes_to_update_dict
+    return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
 
 def sync_bulk_notes_op(
@@ -1046,6 +1049,7 @@ def sync_bulk_notes_op(
     message: str,
     notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
     notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    notes_to_remove: Optional[list[NoteId]] = None,
     on_end: Optional[Callable[..., None]] = None,
 ):
     """
@@ -1067,6 +1071,8 @@ def sync_bulk_notes_op(
             notes_to_add_dict and notes_to_update_dict.
     """
     total_notes = len(notes)
+    if notes_to_remove is None:
+        notes_to_remove = []
     note_cnt = 0
     start_time = time.time()
     for note in notes:
@@ -1103,10 +1109,10 @@ def sync_bulk_notes_op(
 
     mw.taskman.run_on_main(lambda: mw.progress.finish())
 
-    return pos, notes_to_add_dict, notes_to_update_dict
+    return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
 
-BulkOpResult = tuple[int, dict[str, list[Note]], dict[NoteId, Note]]
+BulkOpResult = tuple[int, dict[str, list[Note]], dict[NoteId, Note], list[NoteId]]
 
 
 async def bulk_notes_op(
@@ -1119,6 +1125,7 @@ async def bulk_notes_op(
     progress_updater: AsyncTaskProgressUpdater,
     notes_to_add_dict: dict[str, list[Note]] = {},
     notes_to_update_dict: dict[NoteId, Note] = {},
+    notes_to_remove: Optional[list[NoteId]] = None,
     model: str = "",
     on_end: Optional[Callable[..., None]] = None,
     is_sync_op: bool = False,
@@ -1141,6 +1148,8 @@ async def bulk_notes_op(
             side effects that do not edit or add notes as those should be handled through
             notes_to_add_dict and notes_to_update_dict.
     """
+    if notes_to_remove is None:
+        notes_to_remove = []
     pos = col.add_custom_undo_entry(f"{message} for {len(notes)} notes.")
     if is_sync_op:
         return sync_bulk_notes_op(
@@ -1153,12 +1162,13 @@ async def bulk_notes_op(
             message=message,
             notes_to_add_dict=notes_to_add_dict,
             notes_to_update_dict=notes_to_update_dict,
+            notes_to_remove=notes_to_remove,
             on_end=on_end,
         )
     config["rate_limits"] = config.get("rate_limits", {})
     if not model:
         logger.error("Model arg missing in bulk_notes_op, aborting")
-        return pos, notes_to_add_dict, notes_to_update_dict
+        return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
     rate_limit = config["rate_limits"].get(model, None)
     if not rate_limit or rate_limit <= 0:
         logger.debug(f"No rate limit set for model {model}, running sync bulk notes op instead")
@@ -1172,6 +1182,7 @@ async def bulk_notes_op(
             message=message,
             notes_to_add_dict=notes_to_add_dict,
             notes_to_update_dict=notes_to_update_dict,
+            notes_to_remove=notes_to_remove,
             on_end=on_end,
         )
 
@@ -1275,7 +1286,7 @@ async def bulk_notes_op(
             on_end()
 
         progress_updater.stop_autoupdate()
-        return pos, notes_to_add_dict, notes_to_update_dict
+        return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
     logger.debug("Bulk notes op completed successfully, updating notes")
 
@@ -1283,7 +1294,7 @@ async def bulk_notes_op(
         on_end()
 
     progress_updater.stop_autoupdate()
-    return pos, notes_to_add_dict, notes_to_update_dict
+    return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
 
 def on_bulk_success(
@@ -1329,7 +1340,10 @@ def on_bulk_success(
 
 
 NewNotesOp = Callable[[list[Note], dict, AsyncTaskProgressUpdater], dict[NoteId, Note]]
-FilterNewNotesOp = Callable[[list[Note], dict, AsyncTaskProgressUpdater], list[Note]]
+FilterNewNotesOp = Callable[
+    [list[Note], dict, AsyncTaskProgressUpdater],
+    tuple[list[Note], dict[NoteId, Note]],
+]
 
 
 def selected_notes_op(
@@ -1346,6 +1360,7 @@ def selected_notes_op(
     edited_other_nids: list[NoteId] = []
     notes_to_add_dict: dict[str, list[Note]] = {}
     notes_to_update_dict: dict[NoteId, Note] = {}
+    notes_to_remove: set[NoteId] = set()
     config = mw.addonManager.getConfig(__name__) or {}
     nids_set = set(nids)
 
@@ -1361,15 +1376,50 @@ def selected_notes_op(
                 notes_to_add_dict=notes_to_add_dict,
                 notes_to_update_dict=notes_to_update_dict,
             )
-            pos, res_notes_to_add_dict, res_notes_to_update_dict = result
+            pos, res_notes_to_add_dict, res_notes_to_update_dict, res_notes_to_remove = result
+
+            sanitized_notes_to_remove: list[NoteId] = []
+            if isinstance(res_notes_to_remove, str):
+                logger.error("Invalid notes_to_remove payload type str: %s", res_notes_to_remove)
+            else:
+                try:
+                    for nid in res_notes_to_remove:
+                        if isinstance(nid, int):
+                            sanitized_notes_to_remove.append(nid)
+                        elif isinstance(nid, str) and nid.isdigit():
+                            sanitized_notes_to_remove.append(NoteId(int(nid)))
+                        else:
+                            logger.error(
+                                "Skipping invalid notes_to_remove nid type=%s value=%s",
+                                type(nid),
+                                nid,
+                            )
+                except TypeError:
+                    logger.error(
+                        "Invalid notes_to_remove payload non-iterable: %s",
+                        res_notes_to_remove,
+                    )
+
             logger.debug(f"res_notes_to_update_dict keys: {res_notes_to_update_dict.keys()}")
             notes_to_add_dict.update(res_notes_to_add_dict)
             notes_to_update_dict.update(res_notes_to_update_dict)
+            notes_to_remove.update(sanitized_notes_to_remove)
             logger.debug(f"notes_to_update_dict keys: {notes_to_update_dict.keys()}")
             for nid in res_notes_to_update_dict.keys():
                 if nid not in nids_set:
                     edited_other_nids.append(nid)
+            for nid in sanitized_notes_to_remove:
+                if nid not in nids_set:
+                    edited_other_nids.append(nid)
             edited_nids = list(filter(lambda x: x in nids, notes_to_update_dict.keys()))
+            edited_nids.extend(
+                [nid for nid in sanitized_notes_to_remove if nid in nids and nid not in edited_nids]
+            )
+
+            if notes_to_remove:
+                for removed_nid in notes_to_remove:
+                    if removed_nid in notes_to_update_dict:
+                        del notes_to_update_dict[removed_nid]
 
             # Remove note.id=0 notes from updated_notes
             all_updated_notes_dict: dict[NoteId, Note] = {}
@@ -1392,6 +1442,13 @@ def selected_notes_op(
                 logger.error(f"Error updating notes: {e}")
                 logger.error(f"Notes causing error: {[n.fields for n in all_updated_notes]}")
                 print_error_traceback(e, logger)
+            if notes_to_remove:
+                try:
+                    mw.col.remove_notes(sorted(notes_to_remove))
+                except Exception as e:
+                    logger.error(f"Error removing notes: {e}")
+                    logger.error(f"Note IDs causing error: {sorted(notes_to_remove)}")
+                    print_error_traceback(e, logger)
             op_changes = mw.col.merge_undo_entries(pos)
             notes_to_add = []
             if notes_to_add_dict:
@@ -1399,7 +1456,29 @@ def selected_notes_op(
                     notes_to_add.extend(note_list)
 
             if notes_to_add and filter_new_notes_op:
-                notes_to_add = filter_new_notes_op(notes_to_add, config, progress_updater)
+                notes_to_add, filtered_notes_to_update_dict = filter_new_notes_op(
+                    notes_to_add,
+                    config,
+                    progress_updater,
+                )
+                valid_filtered_notes = [
+                    note
+                    for note in filtered_notes_to_update_dict.values()
+                    if note.id != 0 and note.id not in notes_to_remove
+                ]
+                if valid_filtered_notes:
+                    try:
+                        mw.col.update_notes(valid_filtered_notes)
+                    except Exception as e:
+                        logger.error(f"Error updating notes after filter_new_notes_op: {e}")
+                        print_error_traceback(e, logger)
+                    op_changes = mw.col.merge_undo_entries(pos)
+                    for note in valid_filtered_notes:
+                        if note.id in nids_set:
+                            if note.id not in edited_nids:
+                                edited_nids.append(note.id)
+                        elif note.id not in edited_other_nids:
+                            edited_other_nids.append(note.id)
 
             if notes_to_add:
                 logger.debug(

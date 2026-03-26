@@ -21,13 +21,14 @@ from .base_ops import (
 logger = logging.getLogger(__name__)
 
 
-def get_component_words_section(
-    components: list[str], components_dict: dict[str, str]
-) -> str:
+def get_component_words_section(components: list[str], components_dict: dict[str, str]) -> str:
     component_words = ", ".join(
         [components_dict.get(component, component) for component in components]
     )
-    return f"  component_radicals_or_kanji: {components}\n  words_to_use_in_story_for_components: {component_words}"
+    return (
+        f"  component_radicals_or_kanji: {components}\n  words_to_use_in_story_for_components:"
+        f" {component_words}"
+    )
 
 
 def get_kanji_story_from_model(
@@ -38,9 +39,7 @@ def get_kanji_story_from_model(
 ) -> str:
     media_path = Path(mw.pm.profileFolder(), "collection.media")
     # Get stored dict of words used for component in the kanji_story_component_words.log file
-    with open(
-        Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), "r", encoding="utf-8"
-    ) as f:
+    with open(Path(media_path, KANJI_STORY_COMPONENT_WORDS_LOG), "r", encoding="utf-8") as f:
         try:
             component_words_dict = json.loads(f.read())
         except json.JSONDecodeError as e:
@@ -176,9 +175,7 @@ def make_story_for_note(
         current_story = note[story_field]
         # Check if the value is non-empty
         if components:
-            new_story = get_kanji_story_from_model(
-                config, kanji, components, current_story
-            )
+            new_story = get_kanji_story_from_model(config, kanji, components, current_story)
 
             # Update the note with the new value
             note[story_field] = new_story
@@ -220,14 +217,12 @@ def bulk_make_stories_op(
         progress_updater,
         notes_to_add_dict,
         notes_to_update_dict,
-        model,
+        model=model,
     )
 
 
 def make_stories_for_selected_notes(nids: Sequence[NoteId], parent: Browser):
-    progress_updater = AsyncTaskProgressUpdater(
-        title="Async AI op: Making kanji stories"
-    )
+    progress_updater = AsyncTaskProgressUpdater(title="Async AI op: Making kanji stories")
     done_text = "Updated stories"
     bulk_op = bulk_make_stories_op
     return selected_notes_op(done_text, bulk_op, nids, parent, progress_updater)

@@ -75,6 +75,83 @@ def get_sentences_for_note(
     return other_sentences
 
 
+def get_other_meaning_notes(
+    config: dict[str, str],
+    note: Note,
+    notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
+    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+    allow_reupdate_existing: bool = False,
+    include_pending_notes: bool = True,
+) -> list[Note]:
+    """Get notes in the same meaning group as ``note``, excluding ``note`` itself."""
+    note_type = note.note_type()
+    if not note_type:
+        logger.error(f"note_type() call failed for note {note.id}")
+        return []
+
+    word_sort_field = get_field_config(config, "word_sort_field", note_type)
+    word_normal_field = get_field_config(config, "word_normal_field", note_type)
+    word_reading_field = get_field_config(config, "word_reading_field", note_type)
+    word_field = get_field_config(config, "word_field", note_type)
+    if (
+        not word_sort_field
+        or not word_normal_field
+        or not word_reading_field
+        or not word_field
+        or word_reading_field not in note
+        or word_normal_field not in note
+        or word_field not in note
+    ):
+        logger.error(
+            f"Could not build meaning-group query for note {note.id}, missing fields in note"
+        )
+        return []
+
+    meaning_notes_query = (
+        f"{word_sort_field}:re:m\\d+ -{word_sort_field}:re:x\\d+"
+        f' -nid:{note.id} "{word_reading_field}:{note[word_reading_field]}"'
+        f' ("{word_normal_field}:{note[word_normal_field]}" OR'
+        f' "{word_field}:{note[word_field]}")'
+    )
+    other_meaning_note_ids = mw.col.find_notes(meaning_notes_query)
+    notes_to_update_dict = notes_to_update_dict or {}
+    other_meaning_notes = [
+        (
+            mw.col.get_note(onid)
+            if allow_reupdate_existing or onid not in notes_to_update_dict
+            else notes_to_update_dict[onid]
+        )
+        for onid in other_meaning_note_ids
+    ]
+
+    if include_pending_notes and notes_to_add_dict:
+        m_pattern = re.compile(r"m\d+")
+        x_pattern = re.compile(r"x\d+")
+        for pending_notes in notes_to_add_dict.values():
+            for pending_note in pending_notes:
+                if id(pending_note) == id(note):
+                    continue
+                if word_sort_field not in pending_note:
+                    continue
+                pending_sort = pending_note[word_sort_field]
+                if not m_pattern.search(pending_sort) or x_pattern.search(pending_sort):
+                    continue
+                if word_reading_field not in pending_note:
+                    continue
+                if pending_note[word_reading_field] != note[word_reading_field]:
+                    continue
+                if (
+                    word_normal_field in pending_note
+                    and pending_note[word_normal_field] == note[word_normal_field]
+                ) or (word_field in pending_note and pending_note[word_field] == note[word_field]):
+                    other_meaning_notes.append(pending_note)
+
+    logger.debug(
+        f"Other meaning notes count: {len(other_meaning_notes)}, query: {meaning_notes_query}"
+    )
+    return other_meaning_notes
+
+
 UpdateAllMeaningsResultType = dict[NoteId, tuple[str, str]]
 
 
@@ -665,8 +742,6 @@ def clean_meaning_in_note(
         meaning_field = get_field_config(config, "meaning_field", note_type)
         english_meaning_field = get_field_config(config, "english_meaning_field", note_type)
         word_field = get_field_config(config, "word_field", note_type)
-        word_sort_field = get_field_config(config, "word_sort_field", note_type)
-        word_normal_field = get_field_config(config, "word_normal_field", note_type)
         word_reading_field = get_field_config(config, "word_reading_field", note_type)
         sentence_field = get_field_config(config, "sentence_field", note_type)
         new_note_id_field = get_field_config(config, "new_note_id_field", note_type)
@@ -711,55 +786,16 @@ def clean_meaning_in_note(
         word_key = make_meaning_dict_key(note[word_field], note[word_reading_field])
         word_generated_meanings = all_generated_meanings_dict.get(word_key, None)
 
-        def get_other_meaning_notes():
-            inner_other_meaning_notes = []
-            meaning_notes_query = (
-                f"{word_sort_field}:re:m\\d+ -{word_sort_field}:re:x\\d+"
-                f' -nid:{note.id} "{word_reading_field}:{note[word_reading_field]}"'
-                f' ("{word_normal_field}:{note[word_normal_field]}" OR'
-                f' "{word_field}:{note[word_field]}")'
-            )
-            other_meaning_note_ids = mw.col.find_notes(meaning_notes_query)
-            inner_other_meaning_notes = [
-                (
-                    mw.col.get_note(onid)
-                    if allow_reupdate_existing or onid not in notes_to_update_dict
-                    else notes_to_update_dict[onid]
-                )
-                for onid in other_meaning_note_ids
-            ]
-            # Also include pending notes from notes_to_add_dict that haven't been added to DB yet
-            m_pattern = re.compile(r"m\d+")
-            x_pattern = re.compile(r"x\d+")
-            for pending_notes in notes_to_add_dict.values():
-                for pending_note in pending_notes:
-                    if id(pending_note) == id(note):
-                        continue
-                    if word_sort_field not in pending_note:
-                        continue
-                    pending_sort = pending_note[word_sort_field]
-                    if not m_pattern.search(pending_sort) or x_pattern.search(pending_sort):
-                        continue
-                    if word_reading_field not in pending_note:
-                        continue
-                    if pending_note[word_reading_field] != note[word_reading_field]:
-                        continue
-                    if (
-                        word_normal_field in pending_note
-                        and pending_note[word_normal_field] == note[word_normal_field]
-                    ) or (
-                        word_field in pending_note and pending_note[word_field] == note[word_field]
-                    ):
-                        inner_other_meaning_notes.append(pending_note)
-            logger.debug(
-                f"Other meaning notes count: {len(inner_other_meaning_notes)}, query:"
-                f" {meaning_notes_query}"
-            )
-            return inner_other_meaning_notes
-
         all_meaning_notes: list[Note] = [note]
         if other_meaning_notes is None and allow_update_all_meanings:
-            other_meaning_notes = get_other_meaning_notes()
+            other_meaning_notes = get_other_meaning_notes(
+                config=config,
+                note=note,
+                notes_to_add_dict=notes_to_add_dict,
+                notes_to_update_dict=notes_to_update_dict,
+                allow_reupdate_existing=allow_reupdate_existing,
+                include_pending_notes=True,
+            )
             all_meaning_notes = other_meaning_notes + [note]
 
         meaning_sentences_dict = {

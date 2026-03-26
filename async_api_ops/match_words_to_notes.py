@@ -280,34 +280,44 @@ def update_fake_note_ids(
     return notes_to_update_dict
 
 
-def deduplicate_new_notes(
-    new_notes_to_add: list[Note],
+def deduplicate_notes_list(
+    notes_to_filter: list[Note],
     config: dict,
-    progress_updater: AsyncTaskProgressUpdater,
-) -> list[Note]:
+    progress_updater: Optional[AsyncTaskProgressUpdater] = None,
+    notes_to_update_dict: Optional[dict[NoteId, Note]] = None,
+) -> tuple[list[Note], dict[NoteId, Note]]:
     """
-    Find duplicate unsaved notes and return a filtered list. This is needed because the process
-    of revising meanings still has a chance to fail to update a new note and instead add a close
-    duplicate meaning.
+    Find duplicate meaning notes and return a filtered list.
 
     Notes are first grouped by sort-field prefix (e.g. word before ``(mX)``). Inside each group,
     english meanings are matched with fuzzy prefix similarity, so shorter meanings can still match
     longer meanings when they approximately match the start of the longer text. Similar notes are
     clustered transitively. For each cluster, keep the note with the smallest meaning number, copy
     in the longest english meaning and its jp meaning, remove the other notes, and remap their
-    fake ID references in pending notes to the kept note.
+    references in both the processed notes and any other existing notes that point to them.
 
-    param: new_notes_to_add: New notes to add (all with note.id == 0).
+    param: notes_to_filter: Notes to filter (new or existing).
     param: config: The addon configuration.
     param: progress_updater: Progress reporter.
-    returns: The filtered list of new notes.
+    param: notes_to_update_dict: Optional dict of already-updated existing notes to reuse and fill.
+    returns: The filtered list of notes and a dict of existing notes updated by this process.
     """
-    if not new_notes_to_add or not config:
-        return list(new_notes_to_add)
+    if notes_to_update_dict is None:
+        notes_to_update_dict = {}
+    if not notes_to_filter or not config:
+        return list(notes_to_filter), notes_to_update_dict
 
     sort_field_re = re.compile(r"^(.*)\(m(\d+)\)$")
-    log_prefix = "--deduplicate_new_notes--"
+    log_prefix = "--deduplicate_notes_list--"
     fuzzy_match_threshold = 88.0
+
+    def get_note_reference(note: Note, reference_field: str) -> str:
+        """Return fake ID reference if present, otherwise fallback to real note.id."""
+        if reference_field in note and note[reference_field]:
+            return str(note[reference_field])
+        if note.id > 0:
+            return str(note.id)
+        return ""
 
     def fuzzy_similarity_score(text_a: str, text_b: str) -> float:
         """Return a fuzzy prefix similarity score in [0, 100]."""
@@ -344,7 +354,7 @@ def deduplicate_new_notes(
 
     # Group by word_sort_prefix -> [(meaning_num, note)]
     grouped: dict[str, list[tuple[int, Note]]] = {}
-    for note in new_notes_to_add:
+    for note in notes_to_filter:
         note_type = note.note_type()
         if not note_type:
             logger.error(f"{log_prefix} Note has no note type")
@@ -359,7 +369,7 @@ def deduplicate_new_notes(
         grouped.setdefault(match.group(1), []).append((int(match.group(2)), note))
 
     if not grouped:
-        return list(new_notes_to_add)
+        return list(notes_to_filter), notes_to_update_dict
 
     # (ref_to_replace, replacement_ref, word_list_field)
     merge_mappings: list[tuple[str, str, str]] = []
@@ -446,10 +456,10 @@ def deduplicate_new_notes(
             cluster.sort(key=lambda x: x[0])
             _keep_meaning_num, keep_note, _ = cluster[0]
 
-            keep_ref = keep_note[new_note_id_field] if new_note_id_field in keep_note else ""
+            keep_ref = get_note_reference(keep_note, new_note_id_field)
             if not keep_ref:
                 logger.error(
-                    f"{log_prefix} Missing fake ID field '{new_note_id_field}' for"
+                    f"{log_prefix} Missing reference ID (fake or real) for"
                     f" keep note in prefix '{prefix}'"
                 )
                 continue
@@ -472,10 +482,10 @@ def deduplicate_new_notes(
             ))
 
             for _meaning_num, dup_note, _ in cluster[1:]:
-                dup_ref = dup_note[new_note_id_field] if new_note_id_field in dup_note else ""
+                dup_ref = get_note_reference(dup_note, new_note_id_field)
                 if not dup_ref:
                     logger.error(
-                        f"{log_prefix} Missing fake ID field '{new_note_id_field}' for"
+                        f"{log_prefix} Missing reference ID (fake or real) for"
                         f" dup note in prefix '{prefix}'"
                     )
                     continue
@@ -488,7 +498,7 @@ def deduplicate_new_notes(
                 deleted_note_obj_ids.add(id(dup_note))
 
     if not merge_mappings and not meaning_overrides:
-        return list(new_notes_to_add)
+        return list(notes_to_filter), notes_to_update_dict
 
     # Apply meaning overrides to kept notes in-place before filtering
     for (
@@ -501,29 +511,49 @@ def deduplicate_new_notes(
         keep_note[en_field] = canonical_en_meaning
         if canonical_jp_meaning:
             keep_note[jp_field] = canonical_jp_meaning
+        if keep_note.id > 0:
+            notes_to_update_dict[keep_note.id] = keep_note
 
     if not merge_mappings:
-        return list(new_notes_to_add)
+        return list(notes_to_filter), notes_to_update_dict
 
     total = len(merge_mappings)
-    progress_updater.update_new_note_processing_progress(total_notes=total)
+    if progress_updater is not None:
+        progress_updater.update_new_note_processing_progress(total_notes=total)
 
-    filtered_new_notes = [note for note in new_notes_to_add if id(note) not in deleted_note_obj_ids]
+    filtered_notes = [note for note in notes_to_filter if id(note) not in deleted_note_obj_ids]
+    processed_note_ids = {note.id for note in notes_to_filter if note.id > 0}
     for index, (dup_ref, keep_ref, word_list_field) in enumerate(merge_mappings):
         dup_ref_pattern = rf'"?{re.escape(dup_ref)}"?'
-        for ref_note in filtered_new_notes:
+        for ref_note in filtered_notes:
             if word_list_field in ref_note and dup_ref in ref_note[word_list_field]:
                 ref_note[word_list_field] = re.sub(
                     dup_ref_pattern, keep_ref, ref_note[word_list_field]
                 )
+                if ref_note.id > 0:
+                    notes_to_update_dict[ref_note.id] = ref_note
 
-        progress_updater.update_new_note_processing_progress(
-            total_notes=total, new_notes_processed=index + 1
-        )
+        referencing_nids = mw.col.find_notes(f'"{word_list_field}:*{dup_ref}*"')
+        for ref_nid in referencing_nids:
+            if ref_nid in processed_note_ids:
+                continue
+            ref_note = notes_to_update_dict.get(ref_nid)
+            if ref_note is None:
+                ref_note = mw.col.get_note(ref_nid)
+            if word_list_field in ref_note and dup_ref in ref_note[word_list_field]:
+                ref_note[word_list_field] = re.sub(
+                    dup_ref_pattern, keep_ref, ref_note[word_list_field]
+                )
+                notes_to_update_dict[ref_note.id] = ref_note
+
+        if progress_updater is not None:
+            progress_updater.update_new_note_processing_progress(
+                total_notes=total, new_notes_processed=index + 1
+            )
 
     # After removals, compact meaning numbers per sort-field prefix so there are no gaps.
     renumber_groups: dict[tuple[str, str], list[tuple[int, Note]]] = {}
-    for note in filtered_new_notes:
+    for note in filtered_notes:
         note_type = note.note_type()
         if not note_type:
             continue
@@ -545,17 +575,10 @@ def deduplicate_new_notes(
         for offset, (_old_num, note) in enumerate(numbered_notes):
             new_num = start_num + offset
             note[word_sort_field] = f"{prefix}(m{new_num})"
+            if note.id > 0:
+                notes_to_update_dict[note.id] = note
 
-    return filtered_new_notes
-
-
-def update_fake_note_ids_and_deduplicate(
-    new_notes: Sequence[Note],
-    config: dict,
-    progress_updater: AsyncTaskProgressUpdater,
-) -> dict[NoteId, Note]:
-    """Deprecated wrapper. Kept for compatibility; now just updates fake note IDs."""
-    return update_fake_note_ids(new_notes, config, progress_updater)
+    return filtered_notes, notes_to_update_dict
 
 
 def json_result_corrector(json_result: str) -> str:
@@ -2547,7 +2570,7 @@ def match_words_to_notes_from_selected(
     done_text = "Matched words to notes"
     bulk_op = bulk_match_words_to_notes
     new_notes_op = update_fake_note_ids
-    filter_new_notes_op = deduplicate_new_notes
+    filter_new_notes_op = deduplicate_notes_list
     return selected_notes_op(
         done_text,
         bulk_op,
@@ -2743,7 +2766,7 @@ def match_single_word_to_notes_from_selected(
         )
 
     new_notes_op = update_fake_note_ids
-    filter_new_notes_op = deduplicate_new_notes
+    filter_new_notes_op = deduplicate_notes_list
     return selected_notes_op(
         done_text,
         bulk_op,
