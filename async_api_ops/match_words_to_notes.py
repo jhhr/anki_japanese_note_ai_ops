@@ -2581,6 +2581,36 @@ def get_word_list_query_regex_for_word_and_reading(
         return rf"\[{unprocessed_part}({processed_part})?\]"
 
 
+def get_note_word_match_query(
+    config: dict,
+    note: Note,
+    note_type: NotetypeDict,
+    log_prefix: str,
+) -> Optional[tuple[str, str, str]]:
+    """
+    Extract target word, reading, and word list field name from a note for word-match queries.
+
+    Returns:
+        (target_word, target_reading, word_list_field) or None on error.
+    """
+    word_list_field = get_field_config(config, "word_list_field", note_type)
+    word_kanjified_field = get_field_config(config, "word_kanjified_field", note_type)
+    word_reading_field = get_field_config(config, "word_reading_field", note_type)
+    if word_kanjified_field is None or word_kanjified_field not in note:
+        logger.error(
+            f"{log_prefix}Error: Note is missing the word kanjified field '{word_kanjified_field}'"
+        )
+        return None
+    if word_reading_field is None or word_reading_field not in note:
+        logger.error(
+            f"{log_prefix}Error: Note is missing the word reading field '{word_reading_field}'"
+        )
+        return None
+    target_word = note[word_kanjified_field]
+    target_reading = note[word_reading_field]
+    return target_word, target_reading, word_list_field
+
+
 def match_single_word_to_notes_from_selected(
     nids: Sequence[NoteId],
     parent: Any,
@@ -2623,23 +2653,10 @@ def match_single_word_to_notes_from_selected(
         for cur_note in notes:
             note_type = cur_note.note_type()
             log_prefix = f"{log_prefix}--nid:{cur_note.id}--"
-            word_list_field = get_field_config(config, "word_list_field", note_type)
-            word_kanjified_field = get_field_config(config, "word_kanjified_field", note_type)
-            word_reading_field = get_field_config(config, "word_reading_field", note_type)
-            if word_kanjified_field not in cur_note or word_kanjified_field is None:
-                logger.error(
-                    f"{log_prefix}Error: Note is missing the word kanjified field"
-                    f" '{word_kanjified_field}'"
-                )
+            note_word_info = get_note_word_match_query(config, cur_note, note_type, log_prefix)
+            if note_word_info is None:
                 continue
-            if word_reading_field not in cur_note or word_reading_field is None:
-                logger.error(
-                    f"{log_prefix}Error: Note is missing the word reading field"
-                    f" '{word_reading_field}'"
-                )
-                continue
-            target_word = cur_note[word_kanjified_field]
-            target_reading = cur_note[word_reading_field]
+            target_word, target_reading, word_list_field = note_word_info
 
             if word_list_field in cur_note:
                 word_list_dict = decode_word_list_field(
