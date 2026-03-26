@@ -22,6 +22,7 @@ from anki.models import NotetypeDict
 from anki.notes import Note, NoteId
 from aqt import mw
 from json_repair import repair_json  # type: ignore
+from rapidfuzz.distance import Levenshtein  # type: ignore
 
 from ..configuration import (
     MEANING_MAPPED_TAG,
@@ -285,12 +286,16 @@ def deduplicate_new_notes(
     progress_updater: AsyncTaskProgressUpdater,
 ) -> list[Note]:
     """
-    Find duplicate unsaved notes and return a filtered list.
+    Find duplicate unsaved notes and return a filtered list. This is needed because the process
+    of revising meanings still has a chance to fail to update a new note and instead add a close
+    duplicate meaning.
 
-    Notes are grouped by having the same vocab sort field but different meaning number, if any.
-    Within each prefix group, notes with identical english_meaning_field values are treated as
-    duplicates. The note with the smallest meaning number is kept and all references in
-    pending notes are remapped from duplicate fake IDs to keep fake IDs.
+    Notes are first grouped by sort-field prefix (e.g. word before ``(mX)``). Inside each group,
+    english meanings are matched with fuzzy prefix similarity, so shorter meanings can still match
+    longer meanings when they approximately match the start of the longer text. Similar notes are
+    clustered transitively. For each cluster, keep the note with the smallest meaning number, copy
+    in the longest english meaning and its jp meaning, remove the other notes, and remap their
+    fake ID references in pending notes to the kept note.
 
     param: new_notes_to_add: New notes to add (all with note.id == 0).
     param: config: The addon configuration.
@@ -302,6 +307,40 @@ def deduplicate_new_notes(
 
     sort_field_re = re.compile(r"^(.*)\(m(\d+)\)$")
     log_prefix = "--deduplicate_new_notes--"
+    fuzzy_match_threshold = 88.0
+
+    def fuzzy_similarity_score(text_a: str, text_b: str) -> float:
+        """Return a fuzzy prefix similarity score in [0, 100]."""
+        normalized_a = " ".join(text_a.strip().lower().split())
+        normalized_b = " ".join(text_b.strip().lower().split())
+        if not normalized_a or not normalized_b:
+            return 0.0
+        if normalized_a == normalized_b:
+            return 100.0
+
+        shorter, longer = (
+            (normalized_a, normalized_b)
+            if len(normalized_a) <= len(normalized_b)
+            else (normalized_b, normalized_a)
+        )
+        if longer.startswith(shorter):
+            return 100.0
+
+        # Compare the shorter text against prefixes of the longer text, allowing a modest
+        # amount of extra prefix length so longer canonical meanings are not penalized.
+        allowed_shortfall = max(2, len(shorter) // 10)
+        allowed_overrun = max(6, len(shorter) // 5)
+        min_prefix_len = max(1, len(shorter) - allowed_shortfall)
+        max_prefix_len = min(len(longer), len(shorter) + allowed_overrun)
+
+        best_score = 0.0
+        for prefix_len in range(min_prefix_len, max_prefix_len + 1):
+            prefix = longer[:prefix_len]
+            score = Levenshtein.normalized_similarity(shorter, prefix) * 100
+            if score > best_score:
+                best_score = score
+
+        return best_score
 
     # Group by word_sort_prefix -> [(meaning_num, note)]
     grouped: dict[str, list[tuple[int, Note]]] = {}
@@ -325,6 +364,8 @@ def deduplicate_new_notes(
     # (ref_to_replace, replacement_ref, word_list_field)
     merge_mappings: list[tuple[str, str, str]] = []
     deleted_note_obj_ids: set[int] = set()
+    # (keep_note, canonical_en_meaning, canonical_jp_meaning, en_field, jp_field)
+    meaning_overrides: list[tuple[Note, str, str, str, str]] = []
 
     for prefix, note_list in grouped.items():
         if len(note_list) <= 1:
@@ -337,42 +378,129 @@ def deduplicate_new_notes(
             logger.error(f"{log_prefix} Prefix '{prefix}' first note has no note type")
             continue
         english_meaning_field = get_field_config(config, "english_meaning_field", note_type)
+        jp_meaning_field = get_field_config(config, "meaning_field", note_type)
         word_list_field = get_field_config(config, "word_list_field", note_type)
         new_note_id_field = get_field_config(config, "new_note_id_field", note_type)
-        if not english_meaning_field or not word_list_field or not new_note_id_field:
+        if (
+            not english_meaning_field
+            or not jp_meaning_field
+            or not word_list_field
+            or not new_note_id_field
+        ):
             logger.error(f"{log_prefix} Prefix '{prefix}' is missing required fields")
             continue
 
-        seen_meanings: dict[str, Note] = {}
-        for _meaning_num, note in note_list:
+        # Collect valid (meaning_num, note, en_meaning) entries
+        valid_entries: list[tuple[int, Note, str]] = []
+        for meaning_num, note in note_list:
             if english_meaning_field not in note:
                 continue
             meaning = note[english_meaning_field]
             if not meaning:
                 continue
-            if meaning not in seen_meanings:
-                seen_meanings[meaning] = note
+            valid_entries.append((meaning_num, note, meaning))
+
+        if len(valid_entries) <= 1:
+            continue
+
+        # Build a similarity graph and extract connected components.
+        entry_count = len(valid_entries)
+        adjacency: list[set[int]] = [set() for _ in range(entry_count)]
+        for left_index in range(entry_count):
+            _, _, left_meaning = valid_entries[left_index]
+            for right_index in range(left_index + 1, entry_count):
+                _, _, right_meaning = valid_entries[right_index]
+                score = fuzzy_similarity_score(left_meaning, right_meaning)
+                logger.debug(
+                    f"{log_prefix} Prefix '{prefix}' comparing meaning {left_index} to"
+                    f" {right_index}, score {score:.2f}, left: '{left_meaning}', right:"
+                    f" '{right_meaning}'"
+                )
+                if score >= fuzzy_match_threshold:
+                    adjacency[left_index].add(right_index)
+                    adjacency[right_index].add(left_index)
+
+        visited: set[int] = set()
+        clusters: list[list[tuple[int, Note, str]]] = []
+        for start_index in range(entry_count):
+            if start_index in visited:
+                continue
+            stack = [start_index]
+            component_indices: list[int] = []
+            while stack:
+                index = stack.pop()
+                if index in visited:
+                    continue
+                visited.add(index)
+                component_indices.append(index)
+                for neighbor in adjacency[index]:
+                    if neighbor not in visited:
+                        stack.append(neighbor)
+            clusters.append([valid_entries[index] for index in component_indices])
+
+        for cluster in clusters:
+            if len(cluster) <= 1:
                 continue
 
-            keep_note = seen_meanings[meaning]
-            dup_note = note
+            # Keep the note with the smallest meaning number
+            cluster.sort(key=lambda x: x[0])
+            _keep_meaning_num, keep_note, _ = cluster[0]
 
-            # Pre-add dedup uses fake IDs only (notes are unsaved with id == 0).
-            dup_ref = dup_note[new_note_id_field] if new_note_id_field in dup_note else ""
             keep_ref = keep_note[new_note_id_field] if new_note_id_field in keep_note else ""
-            if not dup_ref or not keep_ref:
+            if not keep_ref:
                 logger.error(
                     f"{log_prefix} Missing fake ID field '{new_note_id_field}' for"
-                    f" dedup in prefix '{prefix}'"
+                    f" keep note in prefix '{prefix}'"
                 )
                 continue
 
-            logger.debug(
-                f"{log_prefix} Deduplicating notes in prefix '{prefix}':"
-                f" keep fake ID {keep_ref}, remove fake ID {dup_ref}"
+            # Find the note with the longest english meaning and copy that english/jp pair.
+            _canonical_num, canonical_note, canonical_meaning = max(
+                cluster,
+                key=lambda x: (len(x[2]), -x[0]),
             )
-            merge_mappings.append((dup_ref, keep_ref, word_list_field))
-            deleted_note_obj_ids.add(id(dup_note))
+            canonical_jp_meaning = (
+                canonical_note[jp_meaning_field] if jp_meaning_field in canonical_note else ""
+            )
+
+            meaning_overrides.append((
+                keep_note,
+                canonical_meaning,
+                canonical_jp_meaning,
+                english_meaning_field,
+                jp_meaning_field,
+            ))
+
+            for _meaning_num, dup_note, _ in cluster[1:]:
+                dup_ref = dup_note[new_note_id_field] if new_note_id_field in dup_note else ""
+                if not dup_ref:
+                    logger.error(
+                        f"{log_prefix} Missing fake ID field '{new_note_id_field}' for"
+                        f" dup note in prefix '{prefix}'"
+                    )
+                    continue
+
+                logger.debug(
+                    f"{log_prefix} Deduplicating notes in prefix '{prefix}':"
+                    f" keep fake ID {keep_ref}, remove fake ID {dup_ref}"
+                )
+                merge_mappings.append((dup_ref, keep_ref, word_list_field))
+                deleted_note_obj_ids.add(id(dup_note))
+
+    if not merge_mappings and not meaning_overrides:
+        return list(new_notes_to_add)
+
+    # Apply meaning overrides to kept notes in-place before filtering
+    for (
+        keep_note,
+        canonical_en_meaning,
+        canonical_jp_meaning,
+        en_field,
+        jp_field,
+    ) in meaning_overrides:
+        keep_note[en_field] = canonical_en_meaning
+        if canonical_jp_meaning:
+            keep_note[jp_field] = canonical_jp_meaning
 
     if not merge_mappings:
         return list(new_notes_to_add)
@@ -392,6 +520,31 @@ def deduplicate_new_notes(
         progress_updater.update_new_note_processing_progress(
             total_notes=total, new_notes_processed=index + 1
         )
+
+    # After removals, compact meaning numbers per sort-field prefix so there are no gaps.
+    renumber_groups: dict[tuple[str, str], list[tuple[int, Note]]] = {}
+    for note in filtered_new_notes:
+        note_type = note.note_type()
+        if not note_type:
+            continue
+        word_sort_field = get_field_config(config, "word_sort_field", note_type)
+        if not word_sort_field or word_sort_field not in note:
+            continue
+        match = sort_field_re.match(note[word_sort_field])
+        if not match:
+            continue
+        prefix = match.group(1)
+        meaning_num = int(match.group(2))
+        renumber_groups.setdefault((word_sort_field, prefix), []).append((meaning_num, note))
+
+    for (word_sort_field, prefix), numbered_notes in renumber_groups.items():
+        if len(numbered_notes) <= 1:
+            continue
+        numbered_notes.sort(key=lambda x: x[0])
+        start_num = numbered_notes[0][0]
+        for offset, (_old_num, note) in enumerate(numbered_notes):
+            new_num = start_num + offset
+            note[word_sort_field] = f"{prefix}(m{new_num})"
 
     return filtered_new_notes
 
