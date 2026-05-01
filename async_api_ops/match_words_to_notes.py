@@ -1711,17 +1711,23 @@ _Current sentence_: {sentence}"""
                 )
                 if has_existing_note_meanings:
                     largest_meaning_index += 1
-                return await asyncio.to_thread(
-                    create_new_note_from_matched_note,
-                    config=config,
-                    note_to_copy=note_to_copy,
-                    matching_notes=matching_notes,
-                    largest_meaning_index=largest_meaning_index,
-                    jp_meaning=gen_meaning["jp_meaning"],
-                    en_meaning=gen_meaning["en_meaning"],
-                    log_prefix=log_prefix,
-                    match_op_args=match_op_args,
-                )
+                if note_to_copy:
+                    return await asyncio.to_thread(
+                        create_new_note_from_matched_note,
+                        config=config,
+                        note_to_copy=note_to_copy,
+                        matching_notes=matching_notes,
+                        largest_meaning_index=largest_meaning_index,
+                        jp_meaning=gen_meaning["jp_meaning"],
+                        en_meaning=gen_meaning["en_meaning"],
+                        log_prefix=log_prefix,
+                        match_op_args=match_op_args,
+                    )
+                else:
+                    logger.debug(
+                        f"{log_prefix}Error: No note to copy for word {word} with reading {reading}"
+                    )
+                    return False
 
             # We have a match, so we can update the note with the matched meaning
             matched_note = None
