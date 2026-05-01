@@ -229,13 +229,20 @@ def compared_word_lists(
     return combined_list
 
 
-def _format_word_list_dict(word_lists: dict) -> str:
-    """Format a word list dict with one compact per-category line. Returns '{}' for empty."""
+def format_word_list_dict(word_lists: dict) -> str:
+    """Format a word list dict with one list element per row, per-category line. Returns '{}' for empty."""
     if not word_lists:
         return "{}"
     return (
         "{\n"
-        + ",\n".join(f'  "{k}": {json.dumps(v, ensure_ascii=False)}' for k, v in word_lists.items())
+        + ",\n".join(
+            f'  "{k}": ['
+            + (f"\n    " if v else "")
+            + ",\n    ".join(json.dumps(item, ensure_ascii=False) for item in v)
+            + (f"\n  " if v else "")
+            + "]"
+            for k, v in word_lists.items()
+        )
         + "\n}"
     )
 
@@ -245,7 +252,7 @@ def _format_test_diffs(diffs: dict) -> str:
     parts = []
     for outer_key in ("missing_in_test", "extra_in_test"):
         inner = diffs.get(outer_key, {})
-        inner_str = _format_word_list_dict(inner)
+        inner_str = format_word_list_dict(inner)
         # Indent all lines except the opening brace so they nest under the key
         inner_lines = inner_str.split("\n")
         if len(inner_lines) > 1:
@@ -264,7 +271,7 @@ def word_lists_str_format(
     """
     if not word_lists:
         return None
-    return _format_word_list_dict(word_lists)
+    return format_word_list_dict(word_lists)
 
 
 def get_extracted_words_from_model(
@@ -288,11 +295,11 @@ def get_extracted_words_from_model(
     # Current word lists: {current_lists}
 
     # """
-    prompt = f"""Below is a Japanese sentence that contains furigana in brackets after kanji words. Your task is to examine each word and phrase in the sentence, categorize each into either nouns, proper nouns, numbers, counters, verbs, compound verbs, adjectives, adverbs, adjectivals, particles (and copula), conjunctions, pronouns, suffixes, prefixes, idiomatic expressions or common phrases and 4-kanji idioms (yojijukugo). You will convert convert inflected words into their dictionary forms. When two or more words are both homophones and homographs a number is added to indicate that they are different meanings.
+    prompt = f"""Below is a Japanese sentence that contains furigana in brackets after kanji words. Your task is to examine each word and phrase in the sentence, categorize each into either nouns, proper nouns, numbers, counters, verbs, prefix verbs (leading verb component of compound verb constructions), suffix verbs (trailing verb component of compound verb constructions), adjectives, adverbs, adjectivals, particles (and copula), conjunctions, pronouns, suffixes, prefixes, idiomatic expressions or common phrases and 4-kanji idioms (yojijukugo). You will convert convert inflected words into their dictionary forms. When two or more words are both homophones and homographs a number is added to indicate that they are different meanings.
 
 More details on the categorization
 - Compound words, expressions or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ", "XY" and "Z" in the result.
-- This applies to compound verbs as well - include both the compound verb and its component verbs when they exist as separate valid words. For example: 飲[の]み 込[こ]まれた --> 飲み込む, 飲む and 込む
+- For compound verb constructions, list the leading verb component in prefix_verbs and the trailing verb component in suffix_verbs. Listt the compound verb as a whole, if it has a distinct enough meaning separate from its components. If a component also appears as a standalone verb elsewhere in the sentence, list it in verbs as well. For example: 飲[の]み 込[こ]まれた --> 飲む in prefix_verbs, 込む in suffix_verbs, 飲み込む in compound_verbs. And if 飲む also appears elsewhere in the sentence as a standalone verb, it should also be listed in verbs.
 - However, don't list compound words that do not form a significantly different meaning from their components. For example, from 委員会議長[いいんかいぎちょう] the words to list would be just 委員会 ("committee") and 議長 ("chairman") as the compound is simply "committee chairman" and thus perfectly described by the two components.
 - Don't list verbs いる, される or しまう when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
@@ -302,7 +309,7 @@ More details on the categorization
 - Don't list nouns which may take the genitive case の with the particle, list them in their plain form. For example, 上の should be listed as just 上.
 - Don't list noun form verbs, list them as verbs. For example. For example 冷やかし should be listed as 冷やかす.
 - Only list proper nouns a single time, ignoring their component nouns.
-- Don't list words in two categories, e.g. an adjective yojijukugo should only be listed in yojijukugo, a compound verb should only be listed in compound verbs and not expressions.
+- Don't list words in two categories, e.g. an adjective yojijukugo should only be listed in yojijukugo. Exception: a verb may appear in both verbs and prefix_verbs or suffix_verbs if it occurs both standalone and as a component of a compound verb construction in the same sentence.
 - List 4-kanji idioms only once as well, disregarding 2-kanji words that they may contain.
 - Otherwise ignore any HTML that may be in the text, leaving any HTML out of the word lists.
 - A word occuring twice or more with the same kanji form and reading needs to considered for homonymity. If it is a used in the same meaning, the word should be listed just once. If the meanings differ, the word listed once for each different meaning, with a 1-based index number included to differentiate them. For example, 行く as "physically move to a place" vs "participate in an activity" vs "reach a point (in an activity, not physical place)".
@@ -310,7 +317,7 @@ More details on the categorization
 - Additionally, a word occuring twice with the same meaning but, for some reason in kanji form and in hiragana, should result in one entry using the kanji form.
 - Ensure that you use the correct base reading for words, not a rendaku or otherwise altered reading. For example, 中 used as a suffix can often be じゅう but the base reading is ちゅう.
 
-This example includes compound verb handling:
+This example includes prefix and suffix verb handling for a compound verb that is also listed:
 Example sentence 1: 私[わたし]も<b> 連[つ]れて 行[い]って</b><k> 下[くだ]さい</k>。
 Example results 1:
 {{
@@ -318,7 +325,9 @@ Example results 1:
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
-  "verbs": [["連れる","つれる"],["行く","いく"]],
+  "verbs": [],
+  "prefix_verbs": [["連れる","つれる"]],
+  "suffix_verbs": [["行く","いく"]],
   "compound_verbs": [["連れて行く","つれていく"]],
   "adjectives": [],
   "adverbs": [],
@@ -341,6 +350,8 @@ Example results 2:
   "numbers": [],
   "counters": [],
   "verbs": [["為る","する"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [["無い","ない"]],
   "adverbs": [["間も無く","まもなく"]],
@@ -363,6 +374,8 @@ Example result 3:
   "numbers": [],
   "counters": [],
   "verbs": [["肥える","こえる"],["言う","いう"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [["高い","たかい"]],
   "adjectivals": [],
@@ -385,6 +398,8 @@ Example result 4:
   "numbers": [],
   "counters": [],
   "verbs": [["掲げる","かかげる"],["成る","なる"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adjectivals": [],
@@ -407,6 +422,8 @@ Example result 5:
   "numbers": [],
   "counters": [],
   "verbs": [["諫める","いさめる"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [["不甲斐ない","ふがいない"]],
   "adverbs": [],
@@ -429,6 +446,8 @@ Example result 6:
   "numbers": [],
   "counters": [],
   "verbs": [["騙す","だます"],["為る","する"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -451,6 +470,8 @@ Example results 7:
   "numbers": [],
   "counters": [],
   "verbs": [["越える","こえる"],["待つ","まつ"],["為る","する"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [["何時","いつ"]],
@@ -473,6 +494,8 @@ Example result 8:
   "numbers": [["二","に"]],
   "counters": [["隻","せき"]],
   "verbs": [["沈む","しずむ"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -494,6 +517,8 @@ Example result 9:
   "numbers": [],
   "counters": [],
   "verbs": [["行く","いく",1],["行く","いく",2]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [["最近","さいきん"]],
@@ -515,6 +540,8 @@ Example results 10:
   "numbers": [],
   "counters": [],
   "verbs": [["言う","いう"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -536,6 +563,8 @@ Example results 11:
   "numbers": [["3","さん"],["1","いち"],["2","に"]],
   "counters": [["月","がつ"],["日","にち"]],
   "verbs": [["定める","さだめる"],["為れる","される"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [["例えば","たとえば"]],
@@ -558,6 +587,8 @@ Example results 12:
   "numbers": [],
   "counters": [],
   "verbs": [["立つ","たつ"], ["痺れる","しびれる"], ["聴く","きく"], ["遣る","やる"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -580,6 +611,8 @@ Example results 13:
   "numbers": [],
   "counters": [],
   "verbs": [["為れる","される"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [["今","いま"]],
@@ -601,6 +634,8 @@ Example results 14:
   "numbers": [],
   "counters": [],
   "verbs": [["覆す","くつがえす"], ["有る","ある"], ["言う","いう"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [["先ず","まず"]],
@@ -622,6 +657,8 @@ Example results 15:
   "numbers": [],
   "counters": [],
   "verbs": [["出来る","できる"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [["人一倍","ひといちばい"]],
@@ -641,6 +678,8 @@ Example results 16:
   "nouns": [["手段","しゅだん"], ["気","き"], ["違い","ちがい"]],
   "proper_nouns": [],
   "verbs": [["持つ","もつ"], ["措く","おく"], ["殺す","ころ"], ["殺す","ころす"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [["無い","ない"]],
   "adverbs": [],
@@ -663,6 +702,8 @@ example results 17:
   "nouns": [["ミス","みす"], ["主張","しゅちょう"], ["令嬢","れいじょう"], ["声","こえ"], ["悪役","あくやく"], ["目","め"], ["配役","はいやく"]],
   "proper_nouns": [["私","わたし"]],
   "verbs": [["為る","する"], ["見る","みる"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [["余程","よっぽど"], ["高々","たかだか"]],
@@ -678,13 +719,15 @@ example results 17:
   "prefixes": []
 }}
 
-This example includes omitting a compound verb (竦んで仕舞う) that does not form a significantly different meaning from its components:
+This example includes compound verb handling where only 仕舞う in 竦んで仕舞う is considered a suffix verb. However, because it can be used with any verb, 竦む is listed under "verbs" not "prefix_verbs" and the compound itself is omitted:
 Example sentence 18: <k> 蛇[ヘビ]</k>を 見[み]て 足[あし]が<b><k> 竦[すく]んで</k><k> 仕舞[しま]った</k></b>。
 Example results 18:
 {{
   "nouns": [["蛇","へび"], ["足","あし"]],
   "proper_nouns": [],
-  "verbs": [["仕舞う","しまう"], ["竦む","すくむ"], ["見る","みる"]],
+  "verbs": [["見る","みる"], ["竦む","すくむ"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [["仕舞う","しまう"]],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -707,6 +750,8 @@ Example results 19:
   "nouns": [["人物","じんぶつ"], ["大空","おおぞら"], ["奔馬","ほんば"]],
   "proper_nouns": [],
   "verbs": [["翔る","かける"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -729,6 +774,8 @@ Example results 20:
   "nouns": [["世界","せかい"], ["分類","ぶんるい"], ["言語","げんご"], ["類型","るいけい"]],
   "proper_nouns": [],
   "verbs": [["為れる","される"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -753,7 +800,9 @@ Example results 21:
   "numbers":[],
   "counters":[],
   "verbs":[["向かう","むかう"]],
-  "compound_verbs":[],
+  "prefix_verbs":[],
+  "suffix_verbs":[],
+  "compound_verbs": [],
   "adjectives":[["良い","いい"]],
   "adverbs":[["そろそろ","そろそろ"]],
   "adjectivals":[],
@@ -775,6 +824,8 @@ Example results 22:
   "numbers": [],
   "counters": [],
   "verbs": [["入る","はいる"], ["掬う","すくう"], ["甘やかす","あまやかす"], ["囁く","ささやく"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
   "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
@@ -891,7 +942,7 @@ def extract_words_in_note(
                         # Use the compare func to validate the new list elements
                         cur_word_lists[key] = compared_word_lists([], word_lists[key])
                 # Finally, update the field value in the note
-                note[word_list_field] = _format_word_list_dict(cur_word_lists)
+                note[word_list_field] = format_word_list_dict(cur_word_lists)
                 if note.id != 0 and note.id not in notes_to_update_dict:
                     notes_to_update_dict[note.id] = note
                 return True
@@ -978,8 +1029,8 @@ def extract_words_test_compare_in_note(
             "\nTest normalized:\n%s",
             note.id,
             _format_test_diffs(diffs),
-            _format_word_list_dict(normalized_original),
-            _format_word_list_dict(normalized_test),
+            format_word_list_dict(normalized_original),
+            format_word_list_dict(normalized_test),
         )
 
     if note.id != 0 and note.id not in notes_to_update_dict:

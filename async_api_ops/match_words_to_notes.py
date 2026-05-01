@@ -71,6 +71,8 @@ WORD_LIST_TO_PART_OF_SPEECH: dict[str, str] = {
     "numbers": "Number",
     "counters": "Counter",
     "verbs": "Verb",
+    "prefix_verbs": "Verb",
+    "suffix_verbs": "Verb",
     "compound_verbs": "Verb",
     "adjectives": "Adjective",
     "adverbs": "Adverb",
