@@ -52,6 +52,9 @@ from .async_api_ops.make_all_meanings import (  # noqa: E402
     make_meanings_selected_notes,
     merge_meanings_selected_notes,
 )
+from .async_api_ops.new_note_all_ops import (  # noqa: E402
+    new_note_all_ops_selected_notes,
+)
 from .sync_local_ops.find_missing_matched_note_ids import (  # noqa: E402
     find_missing_matched_note_ids_selected_notes,
 )
@@ -148,6 +151,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     deduplicate_existing_meaning_notes_action = QAction("Deduplicate existing meaning notes", mw)
     make_all_meanings_action = QAction("Generate all meanings for selected notes", mw)
     merge_meanings_action = QAction("Merge existing meanings for selected notes", mw)
+    new_note_all_ops_action = QAction("Run all ops for new notes", mw)
 
     # Connect the action to the operation
     selected_nids = browser.selectedNotes()
@@ -210,6 +214,10 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
         lambda: merge_meanings_selected_notes(selected_nids, parent=browser),
     )
     qconnect(
+        new_note_all_ops_action.triggered,
+        lambda: new_note_all_ops_selected_notes(selected_nids, parent=browser),
+    )
+    qconnect(
         find_missing_matched_note_ids_action.triggered,
         lambda: find_missing_matched_note_ids_selected_notes(selected_nids, parent=browser),
     )
@@ -242,6 +250,7 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     ai_menu.addAction(match_remaining_single_word_action)
     ai_menu.addAction(make_all_meanings_action)
     ai_menu.addAction(merge_meanings_action)
+    ai_menu.addAction(new_note_all_ops_action)
     ai_menu.addSeparator()
     # Sync ops
     ai_menu.addAction(find_missing_matched_note_ids_action)

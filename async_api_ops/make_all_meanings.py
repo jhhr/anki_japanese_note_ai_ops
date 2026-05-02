@@ -521,6 +521,7 @@ def bulk_make_meanings_op(
         showWarning("Missing addon configuration")
         return
     model = config.get("make_meanings_model", "")
+    rate_limit = config.get("rate_limits", {}).get(model, None)
     message = "Making meanings"
     processed_words_set: set[str] = set()
 
@@ -554,7 +555,7 @@ def bulk_make_meanings_op(
         progress_updater,
         notes_to_add_dict=notes_to_add_dict,
         notes_to_update_dict=notes_to_update_dict,
-        model=model,
+        rate_limit=rate_limit,
         on_end=on_end,
     )
 
@@ -579,6 +580,7 @@ def bulk_merge_meanings_op(
         showWarning("Missing addon configuration")
         return
     model = config.get("make_meanings_model", "")
+    rate_limit = config.get("rate_limits", {}).get(model, None)
     message = "Merging meanings"
     processed_words_set: set[str] = set()
 
@@ -609,7 +611,7 @@ def bulk_merge_meanings_op(
         progress_updater,
         notes_to_add_dict=notes_to_add_dict,
         notes_to_update_dict=notes_to_update_dict,
-        model=model,
+        rate_limit=rate_limit,
         on_end=on_end,
     )
 

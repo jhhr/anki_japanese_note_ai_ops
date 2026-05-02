@@ -1126,7 +1126,7 @@ async def bulk_notes_op(
     notes_to_add_dict: dict[str, list[Note]] = {},
     notes_to_update_dict: dict[NoteId, Note] = {},
     notes_to_remove: Optional[list[NoteId]] = None,
-    model: str = "",
+    rate_limit: Optional[int] = None,
     on_end: Optional[Callable[..., None]] = None,
     is_sync_op: bool = False,
 ) -> BulkOpResult:
@@ -1143,7 +1143,8 @@ async def bulk_notes_op(
         col: The Anki collection object.
         notes: A sequence of Note objects to process.
         edited_nids: A list to store the IDs of edited notes, to be mutated in place.
-        model: The AI model to use for the operation, to get rate limit from config.
+        rate_limit: The rate limit (requests per minute) to use for async execution. If None or
+            <= 0, the operation runs synchronously.
         on_end: An optional callback to run on completion of the bulk op. Should be running other
             side effects that do not edit or add notes as those should be handled through
             notes_to_add_dict and notes_to_update_dict.
@@ -1165,13 +1166,8 @@ async def bulk_notes_op(
             notes_to_remove=notes_to_remove,
             on_end=on_end,
         )
-    config["rate_limits"] = config.get("rate_limits", {})
-    if not model:
-        logger.error("Model arg missing in bulk_notes_op, aborting")
-        return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
-    rate_limit = config["rate_limits"].get(model, None)
     if not rate_limit or rate_limit <= 0:
-        logger.debug(f"No rate limit set for model {model}, running sync bulk notes op instead")
+        logger.debug("No rate limit set, running sync bulk notes op instead")
         return sync_bulk_notes_op(
             pos=pos,
             col=col,

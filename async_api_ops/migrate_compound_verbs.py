@@ -209,6 +209,7 @@ async def bulk_migrate_compound_verbs_op(
         return
     message = "Migrating compound verbs to prefix/suffix verbs"
     model = config.get("migrate_compound_verbs_model", config.get("extract_words_model", ""))
+    rate_limit = config.get("rate_limits", {}).get(model, None)
     return await bulk_notes_op(
         message,
         config,
@@ -219,7 +220,7 @@ async def bulk_migrate_compound_verbs_op(
         progress_updater,
         notes_to_add_dict,
         notes_to_update_dict,
-        model=model,
+        rate_limit=rate_limit,
     )
 
 

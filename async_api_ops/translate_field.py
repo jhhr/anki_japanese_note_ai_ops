@@ -93,6 +93,7 @@ def bulk_translate_notes_op(
         showWarning("Missing addon configuration")
         return
     model = config.get("translate_sentence_model", "")
+    rate_limit = config.get("rate_limits", {}).get(model, None)
     message = "Translating sentences"
     op = translate_sentence_in_note
     return bulk_notes_op(
@@ -105,7 +106,7 @@ def bulk_translate_notes_op(
         progress_updater,
         notes_to_add_dict,
         notes_to_update_dict,
-        model=model,
+        rate_limit=rate_limit,
     )
 
 
