@@ -185,6 +185,13 @@ def compared_word_lists(
     added_set = new_set - cur_set
     # check each new tuple for validity
     added_list: list[Union[RawOneMeaningWordType, RawMultiMeaningWordType]] = []
+    # If the current set already contains words with note id set we'll get duplicates from the
+    # new set. Remove duplicates by checking for matching word + reading in the list with note_id
+    seen_with_note_id = set(
+        (w[0], w[1])
+        for w in cur_set
+        if (len(w) == 4 and w[3] is not None) or (len(w) == 5 and w[4] is not None)
+    )
     for word_tuple in added_set:
         word, reading, meaning_number, sort_word, note_id = None, None, None, None, None
 
@@ -194,6 +201,8 @@ def compared_word_lists(
             word, reading, meaning_number = word_tuple
         elif len(word_tuple) == 4:
             word, reading, sort_word, note_id = word_tuple
+        elif len(word_tuple) == 5:
+            word, reading, meaning_number, sort_word, note_id = word_tuple
         else:
             logger.warning(f"Word tuple with invalid length {word_tuple} in added_set, skipping")
             continue
@@ -211,11 +220,13 @@ def compared_word_lists(
                     " added_set, skipping"
                 )
                 continue
-            elif meaning_number is not None:
-                added_list.append((word, reading, meaning_number))
-            else:
-                # if meaning_number is not present, this is allowed
-                added_list.append((word, reading))
+            elif (word, reading) not in seen_with_note_id:
+                # Only add the word if it's not already present in the current set with a note_id
+                if meaning_number is not None:
+                    added_list.append((word, reading, meaning_number))
+                else:
+                    # if meaning_number is not present, this is allowed
+                    added_list.append((word, reading))
         else:
             logger.warning(
                 f"Invalid new word tuple with missing word/reading {word_tuple} in added_set,"
@@ -225,6 +236,7 @@ def compared_word_lists(
     # Return the sorted combined list of current words and new words
     # Ensure all elements are tuples
     combined_list = [tuple(w) for w in cur_word_list] + [tuple(w) for w in added_list]
+
     combined_list.sort(key=word_tuple_sort_key)
     return combined_list
 
@@ -298,9 +310,11 @@ def get_extracted_words_from_model(
     prompt = f"""Below is a Japanese sentence that contains furigana in brackets after kanji words. Your task is to examine each word and phrase in the sentence, categorize each into either nouns, proper nouns, numbers, counters, verbs, prefix verbs (leading verb component of compound verb constructions), suffix verbs (trailing verb component of compound verb constructions), adjectives, adverbs, adjectivals, particles (and copula), conjunctions, pronouns, suffixes, prefixes, idiomatic expressions or common phrases and 4-kanji idioms (yojijukugo). You will convert convert inflected words into their dictionary forms. When two or more words are both homophones and homographs a number is added to indicate that they are different meanings.
 
 More details on the categorization
-- Compound words, expressions or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ", "XY" and "Z" in the result.
-- For compound verb constructions, list the leading verb component in prefix_verbs and the trailing verb component in suffix_verbs. Listt the compound verb as a whole, if it has a distinct enough meaning separate from its components. If a component also appears as a standalone verb elsewhere in the sentence, list it in verbs as well. For example: 飲[の]み 込[こ]まれた --> 飲む in prefix_verbs, 込む in suffix_verbs, 飲み込む in compound_verbs. And if 飲む also appears elsewhere in the sentence as a standalone verb, it should also be listed in verbs.
+- Compound words, expressions or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ","XY" and "Z" in the result.
 - However, don't list compound words that do not form a significantly different meaning from their components. For example, from 委員会議長[いいんかいぎちょう] the words to list would be just 委員会 ("committee") and 議長 ("chairman") as the compound is simply "committee chairman" and thus perfectly described by the two components.
+- Compound verbs that should be split are only those where the prefix is in 1) noun form, e.g. 切り替える --> ["切る~","きる"] in prefix_verbs, ["~替える","かえる"] in suffix_verbs or 2) a ます stem form, e.g. 受け入れる --> ["受ける~","うける"] in prefix_verbs, ["~入れる","いれる"] in suffix_verbs.
+- Compound verbs that should not be split are 1) those where the prefix is in て-form, e.g. 応えてあげる --> ["応える","こたえる"] and ["あげる","あげる"] in verbs. 2) where the prefix is not a verb e.g. a <noun>を<verb> construction like 尻餅を突く --> ["尻餅","しりもち"] in nouns and ["突く","つく"] in verbs.
+- Any compound verbs with 過ぎる as the suffix, do not list the compound verb, list both the prefix and 過ぎる as normal verbs.
 - Don't list verbs いる, される or しまう when they occur as auxiliary verbs in verbs inflected forms, e.g. 食べている, 行かせる.
 - する verbs are to be listed as nouns and the する verb ignored.
 - Avoid listing words ending in particles or copula, as this would create many variants of the same word. The exceptions would be when the copula/particle-added form is overwhelmingly more common than the word being used without the particle/copula. For example, with the particle に, the adverb 共に is overhelmingly more common over the plain noun form 共, so whenever 共に occurs, 共に and not 共 should be listed. Only, if 共 were to occur alone (not as part of a compound word), it should be listed.
@@ -317,7 +331,7 @@ More details on the categorization
 - Additionally, a word occuring twice with the same meaning but, for some reason in kanji form and in hiragana, should result in one entry using the kanji form.
 - Ensure that you use the correct base reading for words, not a rendaku or otherwise altered reading. For example, 中 used as a suffix can often be じゅう but the base reading is ちゅう.
 
-This example includes prefix and suffix verb handling for a compound verb that is also listed:
+This example includes handling a compound verb that is not split into prefix and suffix verbs.
 Example sentence 1: 私[わたし]も<b> 連[つ]れて 行[い]って</b><k> 下[くだ]さい</k>。
 Example results 1:
 {{
@@ -325,10 +339,10 @@ Example results 1:
   "proper_nouns": [],
   "numbers": [],
   "counters": [],
-  "verbs": [],
-  "prefix_verbs": [["連れる","つれる"]],
-  "suffix_verbs": [["行く","いく"]],
-  "compound_verbs": [["連れて行く","つれていく"]],
+  "verbs": [["連れる","つれる"],["行く","いく"]],
+  "prefix_verbs": [],
+  "suffix_verbs": [],
+  "compound_verbs": [],
   "adjectives": [],
   "adverbs": [],
   "adjectivals": [],
@@ -341,9 +355,33 @@ Example results 1:
   "yojijukugo": []
 }}
 
+This example includes handling a compound verb that is split into prefix and suffix verbs.
+Example sentence 2: 坂[さか]を<k> 登[のぼ]り切[き]ったら</k>、 向[むこ]うに<b>開豁[かいかつ]</b>に<k> 拓[ひら]けた</k> 海[うみ]が<k> 見下[みお]ろせた</k>のだ。
+Example results 2:
+{{
+  "nouns": [["向こう","むこう"],["坂","さか"],["海","うみ"]],
+  "proper_nouns": [],
+  "numbers": [],
+  "counters": [],
+  "verbs": [["開ける","ひらける"]],
+  "prefix_verbs": [["登る","のぼる"],["見る","みる"]],
+  "suffix_verbs": [["下ろす","おろす"],["切る","きる"]],
+  "compound_verbs": [["登り切る","のぼりきる"],["見下ろす","みおろす"]],
+  "adjectives": [],
+  "adverbs": [],
+  "adjectivals": [["開豁","かいかつ"]],
+  "particles": [["が","が"],["に","に"],["の","の"],["を","を"]],
+  "conjunctions": [],
+  "pronouns": [],
+  "suffixes": [],
+  "prefixes": [],
+  "expressions": [],
+  "yojijukugo": []
+}}
+
 This example includes する verb handling and adverbial adjective handling:
 Example sentence 2: <k> 彼[あ]の</k> 飛行機[ひこうき]は<b> 間[ま]も<k> 無[な]く</k></b> 着陸[ちゃくりく]<k> 為[し]ます</k>ね。
-Example results 2:
+Example results 3:
 {{
   "nouns": [["飛行機","ひこうき"],["各陸","ちゃくりく"],["間","ま"]],
   "proper_nouns": [],
@@ -358,7 +396,7 @@ Example results 2:
   "adjectivals": [["彼の","あの"]],
   "particles": [["は","は"],["ね","ね"]],
   "conjunctions": [],
-  "pronouns",[],
+  "pronouns": [],
   "suffixes": [],
   "prefixes": [],
   "expressions": [],
@@ -367,7 +405,7 @@ Example results 2:
 
 This example includes long expression handling with all its individual components added:
 Example sentence 3:  <k> 此[こ]れ</k>は 正[まさ]に 天高[てんたか]く 馬肥[うまこ]ゆる 秋[あき]と 言[い]った<k> 物[も]ん</k>だな。
-Example result 3:
+Example result 4:
 {{
   "nouns": [["天","てん"],["馬","うま"],["秋","あき"],["物","もの"]],
   "proper_nouns": [],
@@ -391,7 +429,7 @@ Example result 3:
 
 This example includes yojijukugo handling:
 Example sentence 4: 昭和[しょうわ]10 年[ねん](1935 年[ねん]) 頃[ごろ]から、<b>八紘一宇[はっこういちう]</b><k> 等[など]</k>のスローガンが 掲[かか]げられる<k> 様[よう]に</k><k> 成[な]った</k>。
-Example result 4:
+Example result 5:
 {{
   "nouns": [["昭和","しょうわ"],["年","ねん"],["スローガン","すろーがん"],["様","よう"]],
   "proper_nouns": [],
@@ -406,7 +444,7 @@ Example result 4:
   "adverbs": [["頃","ごろ"]],
   "particles": [["から","から"],["等","など"],["の","の"],["が","が"],["に","に"]],
   "conjunctions": [],
-  "pronouns",[],
+  "pronouns": [],
   "suffixes": [],
   "prefixes": [],
   "expressions": [],
@@ -415,7 +453,7 @@ Example result 4:
 
 This example includes proper noun handling:
 Example sentence 5: <b> 不甲斐[ふがい]ない</b> 里樹[りしゅ]<k> 様[さま]</k>の 侍女[じじょ]<k> 達[たち]</k>を 阿多[ああでぅお]<k> 様[さま]</k>の 侍女[じじょ]<k> 達[たち]</k>が<k> 諫[いさ]めていた</k>。
-Example result 5:
+Example result 6:
 {{
   "nouns": [["侍女","じじょ"]],
   "proper_nouns": [["里樹","りしゅ"],["阿多","ああでぅお"]],
@@ -430,7 +468,7 @@ Example result 5:
   "adjectivals": [],
   "particles": [["の","の"],["を","を"],["が","が"]],
   "conjunctions": [],
-  "pronouns",[],
+  "pronouns": [],
   "suffixes": [["様","さま"],["達","たち"]],
   "prefixes": [],
   "expressions": [],
@@ -439,7 +477,7 @@ Example result 5:
 
 This example includes prefix handling:
 Example sentence 6: <k> 危[あや]うく</k><b>某[ぼう]</b> 業者[ぎょうしゃ]の 甘言[かんげん]に 騙[だま]され、 大損[おおそん]<k> 為[す]る</k><k> 所[ところ]</k>でした。
-Example result 6:
+Example result 7:
 {{
   "nouns": [["業者","ぎょうしゃ"],["甘言","かんげん"],["大損","おおそん"],["所","ところ"]],
   "proper_nouns": [],
@@ -456,14 +494,14 @@ Example result 6:
   "conjunctions": [],
   "pronouns": [],
   "suffixes": [],
-  "prefixes": [["某","ぼう"]]
+  "prefixes": [["某","ぼう"]],
   "expressions": [],
   "yojijukugo": []
 }}
 
 This example includes suffix handling:
 Example sentence 7: <k> 一[ひと]つ</k>の 仕事[しごと]に<b> 於[お]いて</b> 困難[こんなん] 性[せい]の 尺度[しゃくど]で、 仕事[しごと]の 遂行[すいこう] 能力[のうりょく]が、<k> 其[そ]の</k> 頂上[ちょうじょう]を 越[こ]えない 場合[ばあい]は、 何時[いつ]まで 待[ま]っても 解決[かいけつ]<k> 為[し]ない</k>。
-Example results 7:
+Example results 8:
 {{
   "nouns": [["仕事","しごと"],["困難","こんなん"],["性","せい"],["尺度","しゃくど"],["遂行","すいこう"],["能力","のうりょく"],["頂上","ちょうじょう"],["場合","ばあい"],["解決","かいけつ"]],
   "proper_nouns": [],
@@ -487,7 +525,7 @@ Example results 7:
 
 This example includes counter and number handling:
 Example sentence 8: 二<b>隻[せき]</b>の 船[ふね]が 同時[どうじ]に 沈[しず]んだ。
-Example result 8:
+Example result 9:
 {{
   "nouns": [["船","ふね"],["同時","どうじ"]],
   "proper_nouns": [],
@@ -510,7 +548,7 @@ Example result 8:
 
 This example includes homonym handling whent the word (行く) is used twice times with different meanings:
 Example sentence 9: 最近[さいきん] 行[い]ったデート、どのベースまで 行[い]けた？
-Example result 9:
+Example result 10:
 {{
   "nouns": [["デート","でーと"],["ベース","ベーす"]],
   "proper_nouns": [],
@@ -532,8 +570,8 @@ Example result 9:
 }}
 
 This example includes honomym handling when the word's (言う) occurrence is the same meaning:
-Example sentence 10: そう 言[い]えば、 昨日[きのう]なにいった？
-Example results 10:
+Example sentence 11: そう 言[い]えば、 昨日[きのう]なにいった？
+Example results 11:
 {{
   "nouns": [["昨日","きのう"]],
   "proper_nouns": [],
@@ -555,8 +593,8 @@ Example results 10:
 }}
 
 This example includes number handling with month and day counters:
-Example sentence 11: <k> 例えば[たとえば]</k>、イギリスや 香港[ほんこん]では3 月[がつ]1 日[にち]に 加齢[かれい]<k> 為[さ]れ</k>、 日本[にっぽん]やニュージーランドでは2 月[がつ]28 日[にち]に 加齢[かれい]<k> 為[さ]れる</k>。 日本[にっぽん]でグレゴリオ 暦[れき]を 採用[さいよう]<k> 為[する]</k> 際[さい]、2 月[がつ]29 日[にち]を<b> 閏[うるう] 日[び]</b>と 定[さだ]めた。
-Example results 11:
+Example sentence 12: <k> 例えば[たとえば]</k>、イギリスや 香港[ほんこん]では3 月[がつ]1 日[にち]に 加齢[かれい]<k> 為[さ]れ</k>、 日本[にっぽん]やニュージーランドでは2 月[がつ]28 日[にち]に 加齢[かれい]<k> 為[さ]れる</k>。 日本[にっぽん]でグレゴリオ 暦[れき]を 採用[さいよう]<k> 為[する]</k> 際[さい]、2 月[がつ]29 日[にち]を<b> 閏[うるう] 日[び]</b>と 定[さだ]めた。
+Example results 12:
 {{
   "nouns": [["加齢","かれい"],["グレゴリオ暦","ぐれごりおれき"],["暦","れき"],["採用","さいよう"],["際","さい"],["閏日","うるうび"],["閏","うるう"],["日","ひ"]],
   "proper_nouns": [["イギリス","いぎりす"],["香港","ほんこん"],["日本","にっぽん"],["ニュージーランド","にゅーじーらんど"]],
@@ -579,8 +617,8 @@ Example results 11:
 }}
 
 This example includes expression handling with all its individual components added:
-Example sentence 12: <b> 鳥肌[とりはだ]</b>が 立[た]つ<k> 位[くらい]</k><k> 痺[しび]れる</k> 演奏[えんそう] 聴[き]かせて<k> 遣[や]っから</k>
-Example results 12:
+Example sentence 13: <b> 鳥肌[とりはだ]</b>が 立[た]つ<k> 位[くらい]</k><k> 痺[しび]れる</k> 演奏[えんそう] 聴[き]かせて<k> 遣[や]っから</k>
+Example results 13:
 {{
   "nouns": [["鳥肌","とりはだ"], ["演奏","えんそう"], ["位","くらい"]],
   "proper_nouns": [],
@@ -603,8 +641,8 @@ Example results 12:
 }}
 
 This example includes expression handling when not all its components are added:
-Example sentence 13: 私[わたし]<k> 達[たち]</k>は 今[いま] 生徒会[せいとかい]に<b> 頭[あたま]ごなし</b>に 出展[しゅってん] 拒否[きょひ]<k> 為[さ]れている</k> 状況[じょうきょう]で 。
-Example results 13:
+Example sentence 14: 私[わたし]<k> 達[たち]</k>は 今[いま] 生徒会[せいとかい]に<b> 頭[あたま]ごなし</b>に 出展[しゅってん] 拒否[きょひ]<k> 為[さ]れている</k> 状況[じょうきょう]で 。
+Example results 14:
 {{
   "nouns": [["生徒会","せいとかい"], ["頭","あたま"], ["出展","しゅってん"], ["拒否","きょひ"], ["状況","じょうきょう"]],
   "proper_nouns": [],
@@ -626,8 +664,8 @@ Example results 13:
   "yojijukugo": []
 }}
 
-Example sentence 14: 私[わたし]には 生徒会[せいとかい]の<b> 総意[そうい]</b>を 覆[くつがえ]す<k> 様[よう]な</k> 力[ちから]は<k> 有[あ]りません</k>よ！ 前[まえ]も 言[い]いましたが<k> 先[ま]ずは</k> 証拠[しょうこ]！
-Example results 14:
+Example sentence 15: 私[わたし]には 生徒会[せいとかい]の<b> 総意[そうい]</b>を 覆[くつがえ]す<k> 様[よう]な</k> 力[ちから]は<k> 有[あ]りません</k>よ！ 前[まえ]も 言[い]いましたが<k> 先[ま]ずは</k> 証拠[しょうこ]！
+Example results 15:
 {{
   "nouns": [["生徒会","せいとかい"], ["総意","そうい"], ["力","ちから"], ["前","まえ"], ["証拠","しょうこ"], ["様","よう"]],
   "proper_nouns": [],
@@ -649,8 +687,8 @@ Example results 14:
   "yojijukugo": []
 }}
 
-Example sentence 15: 人一倍[ひといちばい]<b> 照[て]れ 屋[や]</b>だった 父[ちち]は、 酒[さけ]<k> 無[な]し</k>には 人[ひと]と 話[はなし]も<k> 出来[でき]</k>なかった。
-Example results 15:
+Example sentence 16: 人一倍[ひといちばい]<b> 照[て]れ 屋[や]</b>だった 父[ちち]は、 酒[さけ]<k> 無[な]し</k>には 人[ひと]と 話[はなし]も<k> 出来[でき]</k>なかった。
+Example results 16:
 {{
   "nouns": [["人","ひと"], ["無し","なし"], ["照れ屋","てれや"], ["父","ちち"], ["話","はなし"], ["酒","さけ"]],
   "proper_nouns": [],
@@ -672,8 +710,8 @@ Example results 15:
   "yojijukugo": []
 }}
 
-Example sentence 16: どんな 手段[しゅだん]を<k> 持[も]って</k>も、<k> 俺[おれ]</k>を 殺[ころ]さずには<b> 措[お]かない</b> 気[き]でいるに<k> 違[ちが]い 無[な]い</k>。
-Example results 16:
+Example sentence 17: どんな 手段[しゅだん]を<k> 持[も]って</k>も、<k> 俺[おれ]</k>を 殺[ころ]さずには<b> 措[お]かない</b> 気[き]でいるに<k> 違[ちが]い 無[な]い</k>。
+Example results 17:
 {{
   "nouns": [["手段","しゅだん"], ["気","き"], ["違い","ちがい"]],
   "proper_nouns": [],
@@ -696,8 +734,8 @@ Example results 16:
 }}
 
 This example includes multiple expression handling:
-Example sentence 17: 見[み]た 目[め]は 私[わたし]より<k> 余程[よっぽど]</k> 悪役[あくやく] 令嬢[れいじょう]っぽい。 声[こえ] 高々[たかだか]に<b> 配役[はいやく]</b>ミスを 主張[しゅちょう]<k> 為[し]たい</k>。
-example results 17:
+Example sentence 18: 見[み]た 目[め]は 私[わたし]より<k> 余程[よっぽど]</k> 悪役[あくやく] 令嬢[れいじょう]っぽい。 声[こえ] 高々[たかだか]に<b> 配役[はいやく]</b>ミスを 主張[しゅちょう]<k> 為[し]たい</k>。
+example results 18:
 {{
   "nouns": [["ミス","みす"], ["主張","しゅちょう"], ["令嬢","れいじょう"], ["声","こえ"], ["悪役","あくやく"], ["目","め"], ["配役","はいやく"]],
   "proper_nouns": [["私","わたし"]],
@@ -720,8 +758,8 @@ example results 17:
 }}
 
 This example includes compound verb handling where only 仕舞う in 竦んで仕舞う is considered a suffix verb. However, because it can be used with any verb, 竦む is listed under "verbs" not "prefix_verbs" and the compound itself is omitted:
-Example sentence 18: <k> 蛇[ヘビ]</k>を 見[み]て 足[あし]が<b><k> 竦[すく]んで</k><k> 仕舞[しま]った</k></b>。
-Example results 18:
+Example sentence 19: <k> 蛇[ヘビ]</k>を 見[み]て 足[あし]が<b><k> 竦[すく]んで</k><k> 仕舞[しま]った</k></b>。
+Example results 19:
 {{
   "nouns": [["蛇","へび"], ["足","あし"]],
   "proper_nouns": [],
@@ -744,8 +782,8 @@ Example results 18:
 }}
 
 This example includes not splitting a yojijukugo (自由自在) into its components:
-Example sentence 19: 自由自在[じゆうじざい]な 人物[じんぶつ]、 大空[おおぞら]を<b>翔[かけ]る</b> 奔馬[ほんば]だ。
-Example results 19:
+Example sentence 20: 自由自在[じゆうじざい]な 人物[じんぶつ]、 大空[おおぞら]を<b>翔[かけ]る</b> 奔馬[ほんば]だ。
+Example results 20:
 {{
   "nouns": [["人物","じんぶつ"], ["大空","おおぞら"], ["奔馬","ほんば"]],
   "proper_nouns": [],
@@ -768,8 +806,8 @@ Example results 19:
 }}
 
 This example includes suffix handling with correct base reading:
-Example sentence 20:  世界中[せかいじゅう]の 言語[げんご]は<k> 幾[いく]つ</k>かの<b> 類型[るいけい]</b>に 分類[ぶんるい]<k> 為[さ]れる</k>。
-Example results 20:
+Example sentence 21:  世界中[せかいじゅう]の 言語[げんご]は<k> 幾[いく]つ</k>かの<b> 類型[るいけい]</b>に 分類[ぶんるい]<k> 為[さ]れる</k>。
+Example results 21:
 {{
   "nouns": [["世界","せかい"], ["分類","ぶんるい"], ["言語","げんご"], ["類型","るいけい"]],
   "proper_nouns": [],
@@ -792,8 +830,8 @@ Example results 20:
 }}
 
 This example includes homonym handling with the word (方) used twice with different meanings:
-Example sentence 21: 藤堂[とうどう]さん 貴方[あなた]そろそろ 軽音部[けいおんぶ]の 方[ほう]に 向[む]かった<b> 方[ほう]が 良[い]い</b>んじゃないの？
-Example results 21:
+Example sentence 22: 藤堂[とうどう]さん 貴方[あなた]そろそろ 軽音部[けいおんぶ]の 方[ほう]に 向[む]かった<b> 方[ほう]が 良[い]い</b>んじゃないの？
+Example results 22:
 {{
   "nouns":[["方","ほう",1],["方","ほう",2]],
   "proper_nouns":[["藤堂","とうどう"]],
@@ -816,8 +854,8 @@ Example results 21:
 }}
 
 This example includes including noun form verbs as just verbs:
-Example sentence 22: <k> 籤[くじ]</k> 入[い]りカプセル<k> 掬[すく]い</k>だよ！ 一等[いっとう]は<b> 甘[あま]やかし</b><k> 御[お]</k> 姉[ねえ]さんか 罵倒[ばとう]<k> 御[お]</k> 姉[ねえ]さんの 耳元[みみもと]<k> 囁[ささや]き</k>だよ
-Example results 22:
+Example sentence 23: <k> 籤[くじ]</k> 入[い]りカプセル<k> 掬[すく]い</k>だよ！ 一等[いっとう]は<b> 甘[あま]やかし</b><k> 御[お]</k> 姉[ねえ]さんか 罵倒[ばとう]<k> 御[お]</k> 姉[ねえ]さんの 耳元[みみもと]<k> 囁[ささや]き</k>だよ
+Example results 23:
 {{
   "nouns": [["籤","くじ"], ["カプセル","かぷせる"], ["一等","いっとう"], ["罵倒","ばとう"], ["姉","あね"], ["耳元","みみもと"], ["耳","みみ"], ["元","もと"]],
   "proper_nouns": [],
