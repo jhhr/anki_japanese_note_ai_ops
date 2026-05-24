@@ -1,6 +1,7 @@
 {
   "google_api_key": "your_google_api_key",
   "openai_api_key": "your_openAI_api_key",
+  "together_api_key": "your_together_api_key",
   "word_meaning_model": "gemini-2.5-flash",
   "kanji_story_model": "gemini-2.5-flash",
   "translate_sentence_model": "gemini-2.5-flash",
@@ -40,7 +41,8 @@
     "o3": 10,
     "o1": 10,
     "o3-mini": 10,
-    "o1-mini": 10
+    "o1-mini": 10,
+    "together": 10
   },
   "request_timeout": 180,
   "mdx_filenames": [],

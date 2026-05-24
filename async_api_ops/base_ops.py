@@ -22,6 +22,11 @@ from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 logger = logging.getLogger(__name__)
 
 MAX_TOKENS_VALUE = 8000
+DEFAULT_SYSTEM_INSTRUCTION = (
+    "You are a helpful assistant for processing Japanese text. You are a"
+    " superlative expert in the Japanese language and its writing system."
+    " You are designed to output JSON."
+)
 
 
 class CancelState:
@@ -76,6 +81,16 @@ def get_response(
         )
     elif model.startswith("claude") or model.startswith("anthropic"):
         return get_response_from_anthropic(
+            model,
+            prompt,
+            cancel_state=cancel_state,
+            instructions=instructions,
+            response_schema=response_schema,
+            max_output_tokens=max_output_tokens,
+            json_result_corrector=json_result_corrector,
+        )
+    elif "/" in model:
+        return get_response_from_together(
             model,
             prompt,
             cancel_state=cancel_state,
@@ -402,6 +417,98 @@ def get_response_from_openai(
             active_requests.remove(req)
 
     # Extract the cleaned meaning from the response
+    json_result = extract_json_string(content_text)
+
+    result = decode_json_result(json_result)
+    if not result and json_result_corrector:
+        json_result = json_result_corrector(json_result)
+        result = decode_json_result(json_result)
+    return result
+
+
+def get_response_from_together(
+    model: str,
+    prompt: str,
+    cancel_state: Optional[CancelState] = None,
+    instructions: Optional[str] = None,
+    response_schema: Optional[dict] = None,
+    max_output_tokens: Optional[int] = None,
+    json_result_corrector: Optional[Callable[[str], str]] = None,
+) -> Union[dict, None]:
+    logger.debug("Together AI call, model %s", model)
+
+    if cancel_state and cancel_state.is_cancelled():
+        return None
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                instructions
+                if instructions
+                else (
+                    "You are a helpful assistant for processing Japanese text. You are a"
+                    " superlative expert in the Japanese language and its writing system. You are"
+                    " designed to output JSON."
+                )
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+    config = mw.addonManager.getConfig(__name__)
+    if config is None:
+        logger.error("No configuration found for the addon.")
+        return None
+    together_api_key = config.get("together_api_key", "")
+    request_timeout = config.get("request_timeout", 300)
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {together_api_key}",
+    }
+
+    data: dict[str, Any] = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": messages,
+        "max_tokens": max_output_tokens or MAX_TOKENS_VALUE,
+    }
+
+    # Make the API call
+    req = CancellableRequest()
+    active_requests.append(req)
+    try:
+        response = req.post(
+            "https://api.together.xyz/v1/chat/completions",
+            headers=headers,
+            json=data,
+            timeout=request_timeout,
+        )
+    except requests.exceptions.Timeout:
+        logger.error("Request timed out")
+        return None
+    except Exception as e:
+        logger.error(f"Error making request: {e}")
+        return None
+
+    if response.status_code != 200:
+        logger.error(f"Error: {response.status_code}, {response.text}")
+        return None
+
+    try:
+        decoded_json = json.loads(response.text)
+        content_text = decoded_json["choices"][0]["message"]["content"]
+    except json.JSONDecodeError as je:
+        logger.error(f"Error decoding JSON: {je}")
+        logger.error("response %s", response.text)
+        return None
+    except KeyError as ke:
+        logger.error(f"Error extracting content: {ke}")
+        logger.error("response %s", response.text)
+        return None
+    finally:
+        if req in active_requests:
+            active_requests.remove(req)
+
     json_result = extract_json_string(content_text)
 
     result = decode_json_result(json_result)

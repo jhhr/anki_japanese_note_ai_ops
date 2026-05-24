@@ -286,28 +286,8 @@ def word_lists_str_format(
     return format_word_list_dict(word_lists)
 
 
-def get_extracted_words_from_model(
-    sentence: str, current_lists: Union[str, None], config: dict[str, str]
-) -> Union[dict, None]:
-    # current_lists_addition = ""
-    # if current_lists:
-    # If current_lists is not empty, add the portion to the instructions to examine it
-    #         current_lists_addition = f"""The sentence has been processed before and the current word lists are shown below. Your task should be to consider only whether more words should be added to any lists and whether any words may have been categorized differently from the current instructions below - the instructions when you processed these last time may have been different.
-
-    # Instructions on modifying the current lists:
-    # - Linked words are word arrays that have 4 elements: 3 strings and one positive or negative long integer may only be moved to another list, not modified and definitely not removed.
-    #   - The most common case is that the linked multi-meaning word's 3rd string is the same as the 1st string. For example ["上る","のぼる",上る", 1378555077520]
-    #   - When there are more than one multi-meaning words in this form will have the two first strings be identical but the 3rd string and final integer will differ. For example: ["控える","おさえる"] and [控える","おさえる"]
-    # - Generally you should only add more words, not remove any. Removal can be considered for compound verbs or expressions that are sufficiently accounted for by their individual components that are already listed in other word categories. Or, if there appears to be too many multi-meaning words, when one less meaning may suffice to account for each usage of the word. However, if the multi-meaning words are already linked, they should not be touched.
-    # - If there is a case of a pair or more of homophone+homograph words occurring in the sentence but the current list does not list the word enough times, the to-be-added additional multi-meaning words' meaning index number depends on whether the current words are linked or not.
-    #   a. If there is only a single 2-element non-linked word, you should modify it to add the meaning index number to it, starting from 1, and add new word(s) with meanings number incrementing from there. For example, there being ["上がる","あがる"] only but 2 meanings of 上がる used in the sentence --> the result would contain ["上がる"] and ["上がる"]
-    #   b. If there is more than one 2-element word - which should contain meaning numbers already - continue adding more words with meaning numbers beginning from the highest index + 1 of the current words. For example, ["上がる"] and ["上がる"] being present but 3 meanings of 上がる are used in the sentence --> add one more, so ["上がる"]
-    #   c. If there are any 4-element linked words, the meaning numbers you use for the new word or words you add do not need count the linked word(s). For example, there is ["当て","あて"] and 2 meanings of 当て used --> only add ["当て"]. If there is ["当て","あて"] and ["当て"] but 3 meanings of 当て used --> only add ["当て"]
-
-    # Current word lists: {current_lists}
-
-    # """
-    prompt = f"""Below is a Japanese sentence that contains furigana in brackets after kanji words. Your task is to examine each word and phrase in the sentence, categorize each into either nouns, proper nouns, numbers, counters, verbs, prefix verbs (leading verb component of compound verb constructions), suffix verbs (trailing verb component of compound verb constructions), adjectives, adverbs, adjectivals, particles (and copula), conjunctions, pronouns, suffixes, prefixes, idiomatic expressions or common phrases and 4-kanji idioms (yojijukugo). You will convert convert inflected words into their dictionary forms. When two or more words are both homophones and homographs a number is added to indicate that they are different meanings.
+def get_extract_words_prompt(sentence: str) -> str:
+    return f"""Below is a Japanese sentence that contains furigana in brackets after kanji words. Your task is to examine each word and phrase in the sentence, categorize each into either nouns, proper nouns, numbers, counters, verbs, prefix verbs (leading verb component of compound verb constructions), suffix verbs (trailing verb component of compound verb constructions), adjectives, adverbs, adjectivals, particles (and copula), conjunctions, pronouns, suffixes, prefixes, idiomatic expressions or common phrases and 4-kanji idioms (yojijukugo). You will convert convert inflected words into their dictionary forms. When two or more words are both homophones and homographs a number is added to indicate that they are different meanings.
 
 More details on the categorization
 - Compound words, expressions or aphorisms should be listed as well, along with their components. That is, if "XYZ" is such a sequence and "XY" and "Z" are valid words, include "XYZ","XY" and "Z" in the result.
@@ -882,6 +862,30 @@ Return only the JSON formatted result containing all properties with at least em
 
 The sentence to process: {sentence}
 """
+
+
+def get_extracted_words_from_model(
+    sentence: str, current_lists: Union[str, None], config: dict[str, str]
+) -> Union[dict, None]:
+    # current_lists_addition = ""
+    # if current_lists:
+    # If current_lists is not empty, add the portion to the instructions to examine it
+    #         current_lists_addition = f"""The sentence has been processed before and the current word lists are shown below. Your task should be to consider only whether more words should be added to any lists and whether any words may have been categorized differently from the current instructions below - the instructions when you processed these last time may have been different.
+
+    # Instructions on modifying the current lists:
+    # - Linked words are word arrays that have 4 elements: 3 strings and one positive or negative long integer may only be moved to another list, not modified and definitely not removed.
+    #   - The most common case is that the linked multi-meaning word's 3rd string is the same as the 1st string. For example ["上る","のぼる",上る", 1378555077520]
+    #   - When there are more than one multi-meaning words in this form will have the two first strings be identical but the 3rd string and final integer will differ. For example: ["控える","おさえる"] and [控える","おさえる"]
+    # - Generally you should only add more words, not remove any. Removal can be considered for compound verbs or expressions that are sufficiently accounted for by their individual components that are already listed in other word categories. Or, if there appears to be too many multi-meaning words, when one less meaning may suffice to account for each usage of the word. However, if the multi-meaning words are already linked, they should not be touched.
+    # - If there is a case of a pair or more of homophone+homograph words occurring in the sentence but the current list does not list the word enough times, the to-be-added additional multi-meaning words' meaning index number depends on whether the current words are linked or not.
+    #   a. If there is only a single 2-element non-linked word, you should modify it to add the meaning index number to it, starting from 1, and add new word(s) with meanings number incrementing from there. For example, there being ["上がる","あがる"] only but 2 meanings of 上がる used in the sentence --> the result would contain ["上がる"] and ["上がる"]
+    #   b. If there is more than one 2-element word - which should contain meaning numbers already - continue adding more words with meaning numbers beginning from the highest index + 1 of the current words. For example, ["上がる"] and ["上がる"] being present but 3 meanings of 上がる are used in the sentence --> add one more, so ["上がる"]
+    #   c. If there are any 4-element linked words, the meaning numbers you use for the new word or words you add do not need count the linked word(s). For example, there is ["当て","あて"] and 2 meanings of 当て used --> only add ["当て"]. If there is ["当て","あて"] and ["当て"] but 3 meanings of 当て used --> only add ["当て"]
+
+    # Current word lists: {current_lists}
+
+    # """
+    prompt = get_extract_words_prompt(sentence)
     model = config.get("extract_words_model", "")
     result = get_response(model, prompt, max_output_tokens=6000)
     if result is None:
@@ -1128,7 +1132,11 @@ def bulk_extract_words_test_compare_from_notes_op(
         return
     model = config.get("extract_words_model", "")
     logger.debug(f"Model for extract words test compare: {model}")
-    rate_limit = config.get("rate_limits", {}).get(model, None)
+    if model.startswith("/"):
+        # If the model is a custom endpoint, apply together rate_limit
+        rate_limit = config.get("rate_limits", {}).get("together", None)
+    else:
+        rate_limit = config.get("rate_limits", {}).get(model, None)
     message = "Testing extract words prompt"
     op = extract_words_test_compare_in_note
     return bulk_notes_op(

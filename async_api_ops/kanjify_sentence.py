@@ -86,13 +86,11 @@ def make_number_furi_replacer(sentence: str):
     return number_furi_replacer
 
 
-def get_kanjified_sentence_from_model(
-    config: dict[str, str],
-    sentence: str,
-) -> Union[list[str], None]:
-    kanjified_sentence_return_field = "kanjified_sentence"
+KANJIFIED_SENTENCE_RETURN_FIELD = "kanjified_sentence"
 
-    prompt = f"""Below is a sentence in Japanese that includes furigana in brackets after kanji words. Your task is to convert the sentence into a fully kanjified version, where all hiragana and katakana words are replaced with their kanji equivalents"
+
+def get_kanjify_sentence_prompt(sentence: str) -> str:
+    return f"""Below is a sentence in Japanese that includes furigana in brackets after kanji words. Your task is to convert the sentence into a fully kanjified version, where all hiragana and katakana words are replaced with their kanji equivalents"
 
 Carefully examine each and every word written in hiragana or katakana and determine whether it can be written in kanji.
 Common words that always written in hiragana should be kanjified. Examples of common words in kanjified form (not to be considered an exhaustive list of what to kanjify!): 此[こ]れ, 無[な]い,出来[でき]る, 御前[おまえ], 愈々[いよいよ]
@@ -201,10 +199,17 @@ Example sentence 22: それらの 作品[さくひん]には<b>優劣[ゆうれ�
 Kanjified example 22: <k> 其[そ]れ 等[ら]</k>の 作品[さくひん]には<b><k> 優劣[ゆうれつ]</k></b>を<k> 付[つ]け 難[がた]い</k>。
 
 Return a JSON string with the following key-value pairs:
- "{kanjified_sentence_return_field}": The fully kanjified sentence.
+ "{KANJIFIED_SENTENCE_RETURN_FIELD}": The fully kanjified sentence.
 
 The sentence to process: {sentence}
 """
+
+
+def get_kanjified_sentence_from_model(
+    config: dict[str, str],
+    sentence: str,
+) -> Union[list[str], None]:
+    prompt = get_kanjify_sentence_prompt(sentence)
     model = config.get("kanjify_sentence_model", "")
     result = get_response(model, prompt)
     if result is None:
@@ -212,9 +217,9 @@ The sentence to process: {sentence}
         # If the prompt failed, return nothing
         return None
     try:
-        return [result[kanjified_sentence_return_field]]
+        return [result[KANJIFIED_SENTENCE_RETURN_FIELD]]
     except KeyError:
-        logger.error(f"Key '{kanjified_sentence_return_field}' not found in the result.")
+        logger.error(f"Key '{KANJIFIED_SENTENCE_RETURN_FIELD}' not found in the result.")
         return None
 
 
@@ -339,7 +344,11 @@ def bulk_kanjify_notes_op(
         showWarning("Missing addon configuration")
         return
     model = config.get("kanjify_sentence_model", "")
-    rate_limit = config.get("rate_limits", {}).get(model, None)
+    if model.startswith("/"):
+        # If the model is a custom endpoint, apply together rate_limit
+        rate_limit = config.get("rate_limits", {}).get("together", None)
+    else:
+        rate_limit = config.get("rate_limits", {}).get(model, None)
     message = "Kanjifying sentences"
     op = kanjify_sentence_in_note
     return bulk_notes_op(
