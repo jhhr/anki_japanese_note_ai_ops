@@ -774,17 +774,28 @@ def create_new_note_without_matching(
             # Ensure we edit the latest version of the note
             a_note = notes_to_update_dict[a_note.id]
 
-        markers_match = re.search(
-            r"(\((?:kun|on)\))?(\(r\d+\))?(\(\w\d+\))?",
-            a_note[word_sort_field],
-        )
-        other_markers = ""
+        sort_field_value = a_note[word_sort_field].strip()
+        marker_start_index = sort_field_value.find("(")
+        if marker_start_index == -1:
+            base_word = sort_field_value
+            marker_area = ""
+        else:
+            base_word = sort_field_value[:marker_start_index].strip()
+            marker_area = sort_field_value[marker_start_index:]
+
+        marker_tokens = re.findall(r"\([^()]+\)", marker_area)
         kun_on_marker = ""
         r_marker = ""
-        if markers_match:
-            kun_on_marker = markers_match.group(1) or ""
-            r_marker = markers_match.group(2) or ""
-            other_markers = markers_match.group(3) or ""
+        other_markers: list[str] = []
+        for marker_token in marker_tokens:
+            if not kun_on_marker and re.fullmatch(r"\((?:kun|on)\)", marker_token):
+                kun_on_marker = marker_token
+            elif not r_marker and re.fullmatch(r"\(r\d+\)", marker_token):
+                r_marker = marker_token
+            else:
+                # Keep marker order for everything else, including (mX)-style markers.
+                other_markers.append(marker_token)
+
         # If there wasn't an (rX) marker, add the specified one
         if not r_marker and add_reading_number is not None:
             r_marker = f"(r{add_reading_number})"
@@ -792,7 +803,10 @@ def create_new_note_without_matching(
         if not kun_on_marker and add_reading_type is not None:
             kun_on_marker = f"({add_reading_type})"
 
-        a_note[word_sort_field] = f"{word} {kun_on_marker}{r_marker}{other_markers}"
+        rebuilt_markers = f"{kun_on_marker}{r_marker}{''.join(other_markers)}"
+        a_note[word_sort_field] = (
+            f"{base_word} {rebuilt_markers}".strip() if rebuilt_markers else base_word
+        )
 
         # This is needed for an existing note that hasn't been edited yet
         # Don't add new notes (id == 0) to notes_to_update_dict
@@ -940,6 +954,40 @@ def create_new_note_without_matching(
     return create_meaning_result
 
 
+def upsert_meaning_marker(sort_field_value: str, meaning_number: int, fallback_word: str) -> str:
+    """Insert or replace (mX) while preserving existing marker order and reading markers."""
+    clean_sort_field = (sort_field_value or "").strip()
+    marker_start_index = clean_sort_field.find("(")
+    if marker_start_index == -1:
+        base_word = clean_sort_field or fallback_word
+        marker_tokens: list[str] = []
+    else:
+        base_word = clean_sort_field[:marker_start_index].strip() or fallback_word
+        marker_tokens = re.findall(r"\([^()]+\)", clean_sort_field[marker_start_index:])
+
+    meaning_marker = f"(m{meaning_number})"
+    marker_without_meaning = [
+        marker_token
+        for marker_token in marker_tokens
+        if not re.fullmatch(r"\(m\d+\)", marker_token)
+    ]
+
+    split_index = 0
+    for marker_token in marker_without_meaning:
+        if re.fullmatch(r"\((?:kun|on|r\d+)\)", marker_token):
+            split_index += 1
+            continue
+        break
+
+    rebuilt_tokens = (
+        marker_without_meaning[:split_index]
+        + [meaning_marker]
+        + marker_without_meaning[split_index:]
+    )
+
+    return f"{base_word} {''.join(rebuilt_tokens)}".strip() if rebuilt_tokens else base_word
+
+
 def create_new_note_from_matched_note(
     config: dict,
     note_to_copy: Note,
@@ -1022,7 +1070,8 @@ def create_new_note_from_matched_note(
     # If we're copying a note, we need to ensure the meaning number is at least 2
     # as the first meaning should be (m1)
     largest_meaning_index = max(largest_meaning_index, 2)
-    # Either replace the (mX) in the sort field, or if there was none, add it
+
+    # Either replace existing (mX) or add it while preserving any reading markers.
     prev_sort_field = new_note[word_sort_field]
     mxRec = re.compile(r"\(m(\d+)\)")
     # Additionally, check notes_to_add_dict for any notes we've added for this word
@@ -1037,27 +1086,30 @@ def create_new_note_from_matched_note(
                     # update the largest meaning index
                     largest_meaning_index = max(largest_meaning_index, int(mx_match.group(1)) + 1)
     if prev_sort_field and mxRec.search(prev_sort_field):
-        # Replace the existing (mX) with the new meaning number
-        new_note[word_sort_field] = mxRec.sub(f"(m{largest_meaning_index})", prev_sort_field)
+        # Replace the existing (mX) with the new meaning number while preserving markers.
+        new_note[word_sort_field] = upsert_meaning_marker(
+            prev_sort_field,
+            largest_meaning_index,
+            word,
+        )
     elif prev_sort_field:
-        if re.search(r"\(\w\d+\)", prev_sort_field):
-            # If there is no (mX) but some other number, add meaning number to end
-            # And update the note_to_copy, since it should a meaning number now too
-            new_note[word_sort_field] += f"(m{largest_meaning_index})"
-            note_to_copy[word_sort_field] += f"(m{largest_meaning_index - 1})"
-        else:
-            # Else, same but add a space
-            new_note[word_sort_field] += f" (m{largest_meaning_index})"
-            note_to_copy[word_sort_field] += f" (m{largest_meaning_index - 1})"
-            note_to_copy[word_sort_field] = (
-                note_to_copy[word_sort_field].replace(") (", ")(").replace("  ", " ")
-            )
+        # No (mX) yet: add one while preserving/ordering existing markers like (on)/(kun)/(rX).
+        new_note[word_sort_field] = upsert_meaning_marker(
+            prev_sort_field,
+            largest_meaning_index,
+            word,
+        )
+        note_to_copy[word_sort_field] = upsert_meaning_marker(
+            note_to_copy[word_sort_field],
+            largest_meaning_index - 1,
+            word,
+        )
         if note_to_copy.id > 0 and note_to_copy.id not in notes_to_update_dict:
             notes_to_update_dict[note_to_copy.id] = note_to_copy
     # Note to copy was missing sort field somehow? Add it now + the meaning numbers
     else:
-        new_note[word_sort_field] = f"{word} (m{largest_meaning_index})"
-        note_to_copy[word_sort_field] = f"{word} (m{largest_meaning_index - 1})"
+        new_note[word_sort_field] = upsert_meaning_marker("", largest_meaning_index, word)
+        note_to_copy[word_sort_field] = upsert_meaning_marker("", largest_meaning_index - 1, word)
         if note_to_copy.id > 0 and note_to_copy.id not in notes_to_update_dict:
             notes_to_update_dict[note_to_copy.id] = note_to_copy
     notes_to_add_dict.setdefault(word, []).append(new_note)
@@ -2739,6 +2791,10 @@ def match_single_word_to_notes_from_selected(
                 word=target_word,
                 reading=target_reading,
                 with_processed=reprocess_words,
+            )
+            logger.debug(
+                f"{log_prefix}Single-word-only mode: Querying for notes with word '{target_word}'"
+                f" and reading '{target_reading}' using regex '{target_word_regex}'"
             )
             # Not excluding the initial note nid in this, so it can match itself too
             query = f'''"note:{note_type["name"]}" "{word_list_field}:re:{target_word_regex}"'''

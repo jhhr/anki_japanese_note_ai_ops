@@ -2,7 +2,7 @@ import logging
 import json
 import re
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Sequence
 from anki.notes import Note, NoteId
 from anki.collection import Collection
 from aqt import mw
@@ -715,7 +715,7 @@ def clean_meaning_in_note(
     all_generated_meanings_dict: GeneratedMeaningsDictType,
     allow_update_all_meanings: Optional[bool] = True,
     allow_reupdate_existing: Optional[bool] = False,
-    other_meaning_notes: Optional[list[Note]] = None,
+    other_meaning_notes: Optional[Sequence[Note]] = None,
 ) -> bool:
     """
     Clean or update the meaning field in a given note using an AI model.
