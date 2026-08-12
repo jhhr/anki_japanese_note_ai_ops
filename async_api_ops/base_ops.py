@@ -49,6 +49,7 @@ def get_response(
     instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     """Get a response from the appropriate model based on the configuration.
@@ -67,6 +68,7 @@ def get_response(
             instructions=instructions,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            temperature=temperature,
             json_result_corrector=json_result_corrector,
         )
     elif model.startswith("gpt") or model.startswith("o3") or model.startswith("o1"):
@@ -77,6 +79,7 @@ def get_response(
             instructions=instructions,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            temperature=temperature,
             json_result_corrector=json_result_corrector,
         )
     elif model.startswith("claude") or model.startswith("anthropic"):
@@ -87,6 +90,7 @@ def get_response(
             instructions=instructions,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            temperature=temperature,
             json_result_corrector=json_result_corrector,
         )
     elif "/" in model:
@@ -97,6 +101,7 @@ def get_response(
             instructions=instructions,
             response_schema=response_schema,
             max_output_tokens=max_output_tokens,
+            temperature=temperature,
             json_result_corrector=json_result_corrector,
         )
     else:
@@ -193,6 +198,7 @@ def get_response_from_gemini(
     instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     """Get a response from Google's Gemini API.
@@ -242,6 +248,9 @@ def get_response_from_gemini(
     }
     if max_output_tokens is not None:
         logger.debug("Using max_output_tokens %d", max_output_tokens)
+    if temperature is not None:
+        data["generationConfig"]["temperature"] = temperature
+        logger.debug("Using temperature %s", temperature)
     if response_schema:
         response_schema = clean_response_schema_for_gemini(response_schema)
         data["generationConfig"]["responseSchema"] = response_schema
@@ -320,6 +329,7 @@ def get_response_from_openai(
     instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     logger.debug("OpenAI call, model %s", model)
@@ -366,6 +376,9 @@ def get_response_from_openai(
     else:
         # This is for GPT models and only limits output, not reasoning
         data["max_tokens"] = max_output_tokens or MAX_TOKENS_VALUE
+    if temperature is not None:
+        data["temperature"] = temperature
+        logger.debug("Using temperature %s", temperature)
     if response_schema:
         data["response_format"] = {
             "type": "json_schema",
@@ -433,6 +446,7 @@ def get_response_from_together(
     instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     logger.debug("Together AI call, model %s", model)
@@ -472,6 +486,9 @@ def get_response_from_together(
         "messages": messages,
         "max_tokens": max_output_tokens or MAX_TOKENS_VALUE,
     }
+    if temperature is not None:
+        data["temperature"] = temperature
+        logger.debug("Using temperature %s", temperature)
 
     # Make the API call
     req = CancellableRequest()
@@ -525,6 +542,7 @@ def get_response_from_anthropic(
     instructions: Optional[str] = None,
     response_schema: Optional[dict] = None,
     max_output_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
     json_result_corrector: Optional[Callable[[str], str]] = None,
 ) -> Union[dict, None]:
     """Get a response from Anthropic's Claude API.
@@ -558,6 +576,9 @@ def get_response_from_anthropic(
         "max_tokens": max_output_tokens or MAX_TOKENS_VALUE,
         "messages": messages,
     }
+    if temperature is not None:
+        data["temperature"] = temperature
+        logger.debug("Using temperature %s", temperature)
 
     if response_schema:
         data["output_format"] = {

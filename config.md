@@ -34,6 +34,11 @@ Define which model to use for each task
 - `extract_words_model`
 - `match_words_model`
 
+### temperature
+
+- `kanjify_sentence_temperature`: Default is `0.1`. Passed through to provider temperature controls for kanjification requests only.
+  Use a low value to reduce variation in kanji choice while still allowing the model a small amount of flexibility. `0.0` is supported by the major providers here, but is not guaranteed to be fully deterministic and can sometimes be more brittle than a very low non-zero setting.
+
 ### model rate limits
 
 Must be defined for each model. Default are set very low. Check the respective API docs

@@ -87,6 +87,7 @@ def make_number_furi_replacer(sentence: str):
 
 
 KANJIFIED_SENTENCE_RETURN_FIELD = "kanjified_sentence"
+KANJIFY_SENTENCE_DEFAULT_TEMPERATURE = 0.1
 
 
 def get_kanjify_sentence_prompt(sentence: str) -> str:
@@ -211,7 +212,20 @@ def get_kanjified_sentence_from_model(
 ) -> Union[list[str], None]:
     prompt = get_kanjify_sentence_prompt(sentence)
     model = config.get("kanjify_sentence_model", "")
-    result = get_response(model, prompt)
+    config_temp = config.get("kanjify_sentence_temperature", None)
+    if config_temp is not None:
+        try:
+            temperature = float(config_temp)
+        except ValueError:
+            logger.error(
+                "Invalid temperature value in config: %s. Using default temperature: %f",
+                config_temp,
+                KANJIFY_SENTENCE_DEFAULT_TEMPERATURE,
+            )
+            temperature = KANJIFY_SENTENCE_DEFAULT_TEMPERATURE
+    else:
+        temperature = KANJIFY_SENTENCE_DEFAULT_TEMPERATURE
+    result = get_response(model, prompt, temperature=temperature)
     if result is None:
         logger.error("Failed to get a response from the API.")
         # If the prompt failed, return nothing
