@@ -28,6 +28,13 @@ DEFAULT_SYSTEM_INSTRUCTION = (
     " You are designed to output JSON."
 )
 
+OPENAI_FIXED_TEMPERATURE_MODEL_PREFIXES = (
+    "gpt-5",
+    "o1",
+    "o3",
+    "o4",
+)
+
 
 class CancelState:
     """Shared state for cancellation that can be accessed across threads."""
@@ -189,6 +196,10 @@ def clean_response_schema_for_gemini(schema: dict) -> dict:
             for key, value in schema["properties"].items():
                 schema["properties"][key] = clean_response_schema_for_gemini(value)
     return schema
+
+
+def openai_supports_custom_temperature(model: str) -> bool:
+    return not model.startswith(OPENAI_FIXED_TEMPERATURE_MODEL_PREFIXES)
 
 
 def get_response_from_gemini(
@@ -377,8 +388,16 @@ def get_response_from_openai(
         # This is for GPT models and only limits output, not reasoning
         data["max_tokens"] = max_output_tokens or MAX_TOKENS_VALUE
     if temperature is not None:
-        data["temperature"] = temperature
-        logger.debug("Using temperature %s", temperature)
+        if openai_supports_custom_temperature(model):
+            data["temperature"] = temperature
+            logger.debug("Using temperature %s", temperature)
+        else:
+            logger.debug(
+                "Skipping custom temperature %s for model %s because this OpenAI chat"
+                " model family only accepts the default temperature.",
+                temperature,
+                model,
+            )
     if response_schema:
         data["response_format"] = {
             "type": "json_schema",
