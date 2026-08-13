@@ -47,6 +47,14 @@ def get_kanji_story_from_model(
             component_words_dict = {}
 
     return_field = "new_story"
+    response_schema = {
+        "type": "object",
+        "properties": {
+            return_field: {"type": "string"},
+        },
+        "required": [return_field],
+        "additionalProperties": False,
+    }
 
     prompt = (
         f"kanji: {kanji}"
@@ -133,7 +141,7 @@ def get_kanji_story_from_model(
         f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
     )
     model = config.get("kanji_story_model", "")
-    result = get_response(model, prompt)
+    result = get_response(model, prompt, response_schema=response_schema)
     if result is None:
         # Return original story unchanged if the cleaning failed
         return current_story
