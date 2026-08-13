@@ -93,6 +93,8 @@ def get_kanji_story_from_model(
         "Instead, it should focus on being memorable by connecting the component words with the"
         " example word in a direct (though potentially fantastical) way that is easy to remember"
         " and visualize."
+        "\nYOU MUST use the component words in the exact order they are listed in the components"
+        " list, and then the kanji word at the end."
         "\n"
         "\nExamples of stories for other kanji:"
         "\n  kanji: 裾"
