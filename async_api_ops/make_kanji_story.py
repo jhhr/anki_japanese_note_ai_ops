@@ -146,6 +146,10 @@ def get_kanji_story_from_model(
         f"\n{get_component_words_section(['マ', '男'], component_words_dict)}"
         "\n  story: <i>ま！</i> <i>おとこらしい！</i> <b>いさましい</b> <b>ゆう</b>き を もっている ね"
         "\n"
+        "\n kanji: 鯉"
+        f"\n{get_component_words_section(['魚', '里'], component_words_dict)}"
+        "\n  story: <i>さかな</i>, <i>さと</i> の いけ で はっしゃぐ、<b>こい</b> だ。"
+        "\n"
         f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
     )
     model = config.get("kanji_story_model", "")
