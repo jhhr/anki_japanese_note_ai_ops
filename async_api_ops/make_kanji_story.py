@@ -69,7 +69,8 @@ def get_kanji_story_from_model(
         " story for the kanji."
     )
     prompt += (
-        "\nComplete the current mnemonic story in Japanese for the kanji using those words."
+        "\nKeep the the current mnemonic story otherwise the same but complete it for the kanji"
+        " using those words (if it isn't already using them)."
         if current_story
         else "\nCome up with a new mnemonic story in Japanese for the kanji using those words."
     )
@@ -86,10 +87,12 @@ def get_kanji_story_from_model(
         "\n 6) If there are no words for a component, invent a word that fits the component in a"
         " memorable way."
         "\n"
-        "\nIMPORTANT: The story should be grammatically correct but does not need to be"
-        "grammatically complex, sophisticated or even make sense."
-        "instead, it should focus on being memorable by connecting the component words with the"
-        "example word in a simple way that is easy to remember and visualize."
+        "\nIMPORTANT: The story doesn't need to be strictly grammatically correct, it can take"
+        " poetic license to achieve the necessary word order and brevity. It doesn't need to be"
+        " grammatically complex, sophisticated or even make sense. "
+        "Instead, it should focus on being memorable by connecting the component words with the"
+        " example word in a direct (though potentially fantastical) way that is easy to remember"
+        " and visualize."
         "\n"
         "\nExamples of stories for other kanji:"
         "\n  kanji: 裾"
