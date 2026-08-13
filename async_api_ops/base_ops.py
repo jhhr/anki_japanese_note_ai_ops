@@ -600,9 +600,11 @@ def get_response_from_anthropic(
         logger.debug("Using temperature %s", temperature)
 
     if response_schema:
-        data["output_format"] = {
-            "type": "json_schema",
-            "schema": response_schema,
+        data["output_config"] = {
+            "format": {
+                "type": "json_schema",
+                "schema": response_schema,
+            }
         }
         logger.debug(
             "Using response schema %s", json.dumps(response_schema, ensure_ascii=False, indent=2)
@@ -649,7 +651,15 @@ def get_response_from_anthropic(
 
     try:
         decoded_json = json.loads(response.text)
-        content_text = decoded_json["content"][0]["text"]
+        content_blocks = decoded_json.get("content", [])
+        text_blocks = [
+            block.get("text", "")
+            for block in content_blocks
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        content_text = "\n".join([text for text in text_blocks if text]).strip()
+        if not content_text:
+            raise KeyError("content text blocks")
     except json.JSONDecodeError as je:
         logger.error(f"Error decoding JSON: {je}")
         logger.error("response %s", response.text)
