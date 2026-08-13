@@ -35,6 +35,16 @@ OPENAI_FIXED_TEMPERATURE_MODEL_PREFIXES = (
     "o4",
 )
 
+ANTHROPIC_FIXED_TEMPERATURE_MODEL_PREFIXES = (
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-mythos-preview",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-sonnet-5",
+)
+
 
 class CancelState:
     """Shared state for cancellation that can be accessed across threads."""
@@ -200,6 +210,20 @@ def clean_response_schema_for_gemini(schema: dict) -> dict:
 
 def openai_supports_custom_temperature(model: str) -> bool:
     return not model.startswith(OPENAI_FIXED_TEMPERATURE_MODEL_PREFIXES)
+
+
+def anthropic_supports_custom_temperature(model: str) -> bool:
+    normalized_model = model
+    if model.startswith("anthropic/"):
+        normalized_model = model.split("/", 1)[1]
+    return not normalized_model.startswith(ANTHROPIC_FIXED_TEMPERATURE_MODEL_PREFIXES)
+
+
+def anthropic_response_indicates_unsupported_temperature(response_text: str) -> bool:
+    text = response_text.lower()
+    return "temperature" in text and (
+        "deprecated for this model" in text or "not supported for this model" in text
+    )
 
 
 def get_response_from_gemini(
@@ -595,9 +619,17 @@ def get_response_from_anthropic(
         "max_tokens": max_output_tokens or MAX_TOKENS_VALUE,
         "messages": messages,
     }
-    if temperature is not None:
+    use_temperature = temperature is not None and anthropic_supports_custom_temperature(model)
+    if use_temperature:
         data["temperature"] = temperature
         logger.debug("Using temperature %s", temperature)
+    elif temperature is not None:
+        logger.debug(
+            "Skipping custom temperature %s for model %s because this Anthropic model family"
+            " only accepts the default temperature.",
+            temperature,
+            model,
+        )
 
     if response_schema:
         data["output_config"] = {
@@ -624,9 +656,9 @@ def get_response_from_anthropic(
     }
 
     # Make the API call
+    url = "https://api.anthropic.com/v1/messages"
     req = CancellableRequest()
     active_requests.append(req)
-    url = "https://api.anthropic.com/v1/messages"
     try:
         response = req.post(
             url,
@@ -644,6 +676,37 @@ def get_response_from_anthropic(
         # Response completed, remove from active requests
         if req in active_requests:
             active_requests.remove(req)
+
+    if (
+        response.status_code == 400
+        and "temperature" in data
+        and anthropic_response_indicates_unsupported_temperature(response.text)
+    ):
+        logger.warning(
+            "Anthropic model %s rejected custom temperature; retrying with default temperature.",
+            model,
+        )
+        retry_data = dict(data)
+        retry_data.pop("temperature", None)
+
+        retry_req = CancellableRequest()
+        active_requests.append(retry_req)
+        try:
+            response = retry_req.post(
+                url,
+                headers=headers,
+                json=retry_data,
+                timeout=request_timeout,
+            )
+        except requests.exceptions.Timeout:
+            logger.error("Request timed out")
+            return None
+        except Exception as e:
+            logger.error(f"Error making request: {e}")
+            return None
+        finally:
+            if retry_req in active_requests:
+                active_requests.remove(retry_req)
 
     if response.status_code != 200:
         logger.error(f"Error: {response.status_code}, {response.text}")

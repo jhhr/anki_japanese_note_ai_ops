@@ -4,6 +4,7 @@
   "together_api_key": "your_together_api_key",
   "word_meaning_model": "gemini-3.5-flash-lite",
   "kanji_story_model": "gemini-3.5-flash-lite",
+  "kanji_story_temperature": 0.8,
   "translate_sentence_model": "gemini-3.5-flash-lite",
   "kanjify_sentence_model": "gemini-3.5-flash-lite",
   "kanjify_sentence_temperature": 0.1,

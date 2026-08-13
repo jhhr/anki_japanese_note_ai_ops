@@ -21,6 +21,9 @@ from .base_ops import (
 logger = logging.getLogger(__name__)
 
 
+KANJI_STORY_DEFAULT_TEMPERATURE = 0.8
+
+
 def get_component_words_section(components: list[str], components_dict: dict[str, str]) -> str:
     component_words = ", ".join(
         [components_dict.get(component, component) for component in components]
@@ -146,7 +149,26 @@ def get_kanji_story_from_model(
         f'\nReturn the new story in a JSON string as the value of the key "{return_field}".'
     )
     model = config.get("kanji_story_model", "")
-    result = get_response(model, prompt, response_schema=response_schema)
+    config_temp = config.get("kanji_story_temperature", None)
+    if config_temp is not None:
+        try:
+            temperature = float(config_temp)
+        except ValueError:
+            logger.error(
+                "Invalid kanji story temperature in config: %s. Using default temperature: %f",
+                config_temp,
+                KANJI_STORY_DEFAULT_TEMPERATURE,
+            )
+            temperature = KANJI_STORY_DEFAULT_TEMPERATURE
+    else:
+        temperature = KANJI_STORY_DEFAULT_TEMPERATURE
+
+    result = get_response(
+        model,
+        prompt,
+        response_schema=response_schema,
+        temperature=temperature,
+    )
     if result is None:
         # Return original story unchanged if the cleaning failed
         return current_story
