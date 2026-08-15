@@ -289,9 +289,7 @@ def concurrency_limits(
         # No probe available: a conservative static limit
         return INITIAL_AUTO_CONCURRENCY, INITIAL_AUTO_CONCURRENCY, False
 
-    max_limit = max_concurrency_for(
-        per_task_memory if per_task_memory else DEFAULT_PER_TASK_MEMORY
-    )
+    max_limit = max_concurrency_for(per_task_memory if per_task_memory else DEFAULT_PER_TASK_MEMORY)
     return min(max_limit, INITIAL_AUTO_CONCURRENCY), max_limit, True
 
 
@@ -554,9 +552,9 @@ class ConcurrencyGate:
         rss = process_memory()
         self.estimator.sample(rss, self.in_flight)
 
-        under_pressure = (
-            available is not None and self.reserve and available < self.reserve
-        ) or (rss is not None and self.memory_limit and rss > self.memory_limit)
+        under_pressure = (available is not None and self.reserve and available < self.reserve) or (
+            rss is not None and self.memory_limit and rss > self.memory_limit
+        )
 
         if under_pressure:
             new_limit = max(MIN_CONCURRENCY, self.limit // 2)

@@ -163,9 +163,7 @@ def post_to_api(
         timeout=config.get("request_timeout", 300),
         cancel_state=cancel_state,
         max_retries=int(config.get("max_request_retries", DEFAULT_MAX_RETRIES)),
-        max_retry_wait=float(
-            config.get("max_retry_wait_seconds", DEFAULT_MAX_RETRY_WAIT_SECONDS)
-        ),
+        max_retry_wait=float(config.get("max_retry_wait_seconds", DEFAULT_MAX_RETRY_WAIT_SECONDS)),
     )
 
 
@@ -894,7 +892,7 @@ class AsyncTaskProgressUpdater:
             """
         if self.gate is not None:
             task_progress_msg += (
-                f'<small style="opacity: 0.85"> | Running: {self.gate.status_text()}</small>'
+                f'<br><small style="opacity: 0.85">Running: {self.gate.status_text()}</small>'
             )
         if self.total_notes is not None:
             tasks_per_note = (
@@ -1411,6 +1409,7 @@ async def bulk_notes_op(
 
             tasks: list[asyncio.Task] = []
             for note in window:
+
                 def handle_error(current_note, e):
                     logger.error(f"Error during operation with note {current_note.id}: {e}")
                     print_error_traceback(e, logger)
@@ -1421,9 +1420,7 @@ async def bulk_notes_op(
                 )
 
                 handle_op_result = partial(
-                    lambda current_note, was_success: handle_op_success(
-                        current_note, was_success
-                    ),
+                    lambda current_note, was_success: handle_op_success(current_note, was_success),
                     note,
                 )
                 process_note = make_inner_bulk_op(
