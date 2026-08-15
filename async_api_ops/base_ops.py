@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Callable, Coroutine, Any, Union
+from typing import Optional, Callable, Coroutine, Any, NamedTuple, Union
 from functools import partial
 
 from anki.notes import Note, NoteId
@@ -1085,6 +1085,26 @@ class AsyncTaskProgressUpdater:
             <br><code>ETA: {eta_time}</code>"""
         self._push(f"{task_progress_msg}{time_msg}", self.tasks_done, self.total_tasks)
 
+    def update_preparation_progress(
+        self,
+        notes_prepared: int = 0,
+        total_notes: int = 0,
+        tasks_planned: int = 0,
+    ):
+        """Update the dialog while a nested op works out what it has to do.
+
+        Nothing is running yet at this point, but an op that fans out per note has to read
+        every note's word list before it knows its task total, and for a large selection that
+        pass takes long enough to look like a hang if the dialog says nothing.
+        """
+        elapsed_s = time.time() - self.start_time
+        elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_s))
+        task_progress_msg = f"""<strong>Preparing:</strong>
+            <br><strong><code>{notes_prepared}/{total_notes}</code></strong> notes read
+            <small style="opacity: 0.85"> | Tasks found: {tasks_planned}</small>
+            <br><code>Time: {elapsed_time}</code>"""
+        self._push(task_progress_msg, notes_prepared, total_notes)
+
     def update_note_adding_progress(
         self,
         notes_added: int = 0,
@@ -1271,10 +1291,26 @@ def make_inner_bulk_op(
     return process_op
 
 
+class NotePlan(NamedTuple):
+    """One note's work, worked out before any of it has been started.
+
+    `task_count` is how many API tasks the note will produce. Knowing it before the run starts
+    is what lets the progress dialog show the real total from the beginning, instead of a total
+    that climbs every time a window of notes is reached.
+
+    `spawn` creates those tasks, appending them to the window's task list. It is called only
+    when the note's window comes up, so the tasks themselves - which each hold a note and a
+    prompt for as long as they live - still exist only a window at a time.
+    """
+
+    task_count: int
+    spawn: Callable[[list[asyncio.Task]], None]
+
+
 async def bulk_nested_notes_op(
     message: str,
     config: dict,
-    bulk_inner_op: Callable[..., None],
+    bulk_inner_op: Callable[..., Optional[NotePlan]],
     col: Collection,
     notes: Sequence[Note],
     edited_nids: list[NoteId],
@@ -1293,8 +1329,11 @@ async def bulk_nested_notes_op(
 
     :param message: A message to display in the progress dialog.
     :param config: Addon config dict.
-    :param bulk_inner_op: The nested operation function to apply to each note. This op itself will
-           handle calling inner_bulk_op and updating updated_notes and edited_nids.
+    :param bulk_inner_op: The nested operation function to apply to each note. It is called once
+           per note up front and must not start any work itself: it returns a NotePlan saying how
+           many tasks the note will produce and how to create them, or None if the note has
+           nothing to do. This op itself handles calling inner_bulk_op and updating updated_notes
+           and edited_nids.
     :param col: The Anki collection object.
     :param notes: A sequence of Note objects to process.
     :param edited_nids: A list to store the IDs of edited notes, to be mutated in place.
@@ -1310,8 +1349,6 @@ async def bulk_nested_notes_op(
         return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
     progress_updater.set_total_notes(len(notes))
-    # Can start auto updater now that we're in an async context with a running loop
-    progress_updater.start_autoupdate()
 
     # The message doubles as the op's identity for the learned per-task memory cost
     gate = ConcurrencyGate(config, op_key=message)
@@ -1325,41 +1362,77 @@ async def bulk_nested_notes_op(
     cancel_state = CancelState()
     cancel_manager: Optional[CancelManager] = None
 
+    # Work out what every note needs doing before starting any of it. This pass is synchronous
+    # and creates no tasks - it only reads the notes, which are in memory already - so it costs
+    # nothing in concurrency, and it is what gives the dialog the run's real task total from the
+    # start. A note here can fan out to anywhere between one and dozens of API calls, so a count
+    # of notes on its own says very little about how much work is left.
+    plan_started = time.monotonic()
+    plans: list[NotePlan] = []
+    planned_tasks = 0
+    for note_index, note in enumerate(notes):
+        if mw.progress.want_cancel():
+            logger.debug("Nested bulk op cancelled while planning")
+            cancel_state.cancel()
+            break
+        plan = bulk_inner_op(
+            config,
+            note,
+            edited_nids=edited_nids,
+            notes_to_add_dict=notes_to_add_dict,
+            notes_to_update_dict=notes_to_update_dict,
+            progress_updater=progress_updater,
+            cancel_state=cancel_state,
+            gate=gate,
+        )
+        if plan is not None:
+            plans.append(plan)
+            planned_tasks += plan.task_count
+        progress_updater.set_total_tasks(planned_tasks)
+        progress_updater.update_preparation_progress(
+            notes_prepared=note_index + 1,
+            total_notes=len(notes),
+            tasks_planned=planned_tasks,
+        )
+    log_phase("nested op: plan notes", plan_started, notes=len(notes), tasks=planned_tasks)
+
+    # Only now that the total is known: until this point the periodic updater would be drawing
+    # a task line whose total is still growing, over the preparation line
+    progress_updater.start_autoupdate()
+
     try:
-        # Each note fans out to one task per word, and every task holds onto its note, prompt
-        # and config for as long as it lives. Creating them all up front is what runs the
-        # machine out of memory, so notes are processed in windows instead: only the current
-        # window's tasks exist at once. Shared per-run state (word locks, generated meanings)
-        # lives in the caller's closure and carries across windows.
-        window_size = max(1, gate.limit)
+        # Every task holds onto its note, prompt and config for as long as it lives. Creating
+        # them all up front is what runs the machine out of memory, so notes are processed in
+        # windows instead: only the current window's tasks exist at once. The window is sized by
+        # the tasks the notes in it will produce rather than by note count, since that is what
+        # decides the memory - a few times the gate limit, so tasks queue behind the gate rather
+        # than the run stalling between windows. Shared per-run state (word locks, generated
+        # meanings) lives in the caller's closure and carries across windows.
+        task_budget = max(1, gate.limit * TASK_QUEUE_DEPTH)
         index = 0
-        while index < len(notes):
+        while index < len(plans):
             if mw.progress.want_cancel() or cancel_state.is_cancelled():
                 break
-            window = notes[index : index + window_size]
-            index += window_size
+            window: list[NotePlan] = []
+            window_task_count = 0
+            # Always take at least one note, however many tasks it turns out to want
+            while index < len(plans) and (not window or window_task_count < task_budget):
+                window.append(plans[index])
+                window_task_count += plans[index].task_count
+                index += 1
 
             # Nothing is in flight here, so this is a clean baseline to measure the window's
             # concurrent memory use against
             gate.begin_window()
 
             tasks: list[asyncio.Task] = []
-            for note in window:
+            for note_plan in window:
                 if mw.progress.want_cancel():
                     break
-                bulk_inner_op(
-                    config,
-                    note,
-                    tasks,
-                    edited_nids=edited_nids,
-                    notes_to_add_dict=notes_to_add_dict,
-                    notes_to_update_dict=notes_to_update_dict,
-                    progress_updater=progress_updater,
-                    cancel_state=cancel_state,
-                    gate=gate,
-                )
+                note_plan.spawn(tasks)
             if not tasks:
                 continue
+            progress_updater.update_progress()
 
             cancel_manager = CancelManager(
                 tasks, cancel_state=cancel_state, progress_updater=progress_updater
@@ -1382,7 +1455,7 @@ async def bulk_nested_notes_op(
             # Fold this window into what we know an op of this kind costs, which may move the
             # ceiling; the gate may also have resized under memory pressure while it ran
             gate.end_window()
-            window_size = max(1, gate.limit)
+            task_budget = max(1, gate.limit * TASK_QUEUE_DEPTH)
     finally:
         marker = time.monotonic()
         gate.finish()

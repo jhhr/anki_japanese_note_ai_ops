@@ -50,6 +50,7 @@ from ..utils import copy_into_new_note, get_field_config, print_error_traceback
 from .base_ops import (
     AsyncTaskProgressUpdater,
     CancelState,
+    NotePlan,
     bulk_nested_notes_op,
     get_response,
     make_inner_bulk_op,
@@ -1851,7 +1852,6 @@ def match_words_to_notes(
     word_tuple_indexes: set[int],
     word_list_key: str,
     sentence: str,
-    tasks: list[asyncio.Task],
     note_tasks: list[asyncio.Task],
     final_update_tasks: list[asyncio.Task],
     notes_to_add_dict: dict[str, list[Note]],
@@ -1865,9 +1865,14 @@ def match_words_to_notes(
     word_locks_dict: dict[str, asyncio.Lock],
     word_lock: asyncio.Lock,
     replace_existing: bool = False,
-):
+) -> tuple[int, Optional[Callable[[list[asyncio.Task]], None]]]:
     """
-    Match words to notes based on the kanjified sentence.
+    Plan the matching of one word list's words to notes, based on the kanjified sentence.
+
+    Nothing is started here: the words that need an API call are worked out synchronously, and
+    the returned spawner creates the tasks for them when the caller is ready to run them. That
+    keeps the count of tasks the whole run will do knowable before any of it starts, while
+    still leaving it to the caller to decide how many exist at once.
 
     :param config (dict): Addon config
     :param current_note (Note): The current note being processed
@@ -1877,10 +1882,9 @@ def match_words_to_notes(
             processing to only some words.
     :param word_list_key (str): The key in the note to get the word list
     :param sentence (str): The sentence that provides context for the words' meaning
-    :param tasks (list): List of asyncio tasks to append to. Will be mutated by this function.
-    :param note_tasks (list): List to append word-matching tasks to. Will be mutated by this function.
-    :param final_update_tasks (list): List to append final update tasks to. Will be mutated by this
-            function. These tasks will call update_word_list_in_dict.
+    :param note_tasks (list): List to append word-matching tasks to. Mutated by the spawner.
+    :param final_update_tasks (list): List to append final update tasks to. Mutated by the
+            spawner. These tasks will call update_word_list_in_dict.
     :param notes_to_add_dict (dict): Dict to append new notes to be added. Will be mutated by this
             function. Used to also check if the operation has already created something it should
             reuse.
@@ -1900,24 +1904,25 @@ def match_words_to_notes(
     :param replace_existing (bool): If True, replace existing matched words with new matches.
             Otherwise, words that already have a note match will be skipped during processing and
             returned as is.
-    :return: A list of processed word tuples with matched note IDs.
+    :return: How many word-matching tasks this word list will produce, and a callable that
+            creates them, or None when there is nothing for this word list to do.
     """
     if not config:
         logger.error("Error: Missing addon configuration")
-        return word_tuples
+        return 0, None
     model = config.get("match_words_model", "")
     if not model:
         logger.error("Error: Missing match words model in config")
-        return word_tuples
+        return 0, None
 
     log_prefix = f"Match words, note.id={current_note.id}--"
 
     if not word_tuples:
         logger.debug(f"{log_prefix}No words to match against notes")
-        return word_tuples
+        return 0, None
     if not sentence:
         logger.error(f"{log_prefix}Error: No sentence provided for matching words")
-        return word_tuples
+        return 0, None
 
     # Get the field names from the config
     word_list_field = get_field_config(config, "word_list_field", note_type)
@@ -1962,7 +1967,7 @@ def match_words_to_notes(
             missing_fields.append(field_name)
     if missing_fields:
         logger.error(f"Error: Missing fields in config: {', '.join(missing_fields)}")
-        return word_tuples
+        return 0, None
 
     # Copy the word_tuples to processed_word_tuples, which will be mutated by the match_op calls
     processed_word_tuples = cast(list[ProcessedWordTuple], word_tuples.copy())
@@ -2037,6 +2042,8 @@ def match_words_to_notes(
         return handle_result
 
     word_list_task_count = 0
+    # One entry per word that needs an API call, each one able to create its task later
+    word_task_spawners: list[Callable[[list[asyncio.Task]], None]] = []
 
     for i, word_tuple in enumerate(word_tuples):
         if i not in word_tuple_indexes:
@@ -2167,47 +2174,71 @@ def match_words_to_notes(
 
         new_tasks_count += 1
 
-        def handle_op_error(e: Exception):
-            logger.error(f"{log_prefix}Error processing word tuple {word_tuple} at index {i}: {e}")
-            print_error_traceback(e, logger)
+        def make_word_task_spawner(
+            word_index: int,
+            spawn_word: str,
+            spawn_reading: str,
+            spawn_multi_meaning_index: Optional[int],
+            spawn_word_tuple,
+        ) -> Callable[[list[asyncio.Task]], None]:
+            """Bind one word's arguments now, and create its task when asked to.
 
-        handle_op_result = create_result_handler(i, word)
+            The binding has to happen in a function of its own: closures made in the loop body
+            would all see whichever word the loop ended on.
+            """
 
-        process_word_tuple: Callable[..., Coroutine[Any, Any, bool]] = make_inner_bulk_op(
-            config=config,
-            op=match_op,
-            gate=gate,
-            progress_updater=progress_updater,
-            handle_op_error=handle_op_error,
-            handle_op_result=handle_op_result,
-            cancel_state=cancel_state,
+            def handle_op_error(e: Exception):
+                logger.error(
+                    f"{log_prefix}Error processing word tuple {spawn_word_tuple} at index"
+                    f" {word_index}: {e}"
+                )
+                print_error_traceback(e, logger)
+
+            def spawn_word_task(tasks: list[asyncio.Task]) -> None:
+                # Built here rather than while planning so that a word waiting for its window
+                # holds only its own arguments, not a wrapper around the whole op
+                process_word_tuple: Callable[..., Coroutine[Any, Any, bool]] = make_inner_bulk_op(
+                    config=config,
+                    op=match_op,
+                    gate=gate,
+                    progress_updater=progress_updater,
+                    handle_op_error=handle_op_error,
+                    handle_op_result=create_result_handler(word_index, spawn_word),
+                    cancel_state=cancel_state,
+                )
+                task: asyncio.Task = asyncio.create_task(
+                    process_word_tuple(
+                        notes_to_add_dict=notes_to_add_dict,
+                        notes_to_update_dict=notes_to_update_dict,
+                        # the below kwargs are passed back to the match_op function (and any
+                        # more if we were to add them)
+                        word=spawn_word,
+                        reading=spawn_reading,
+                        word_index=word_index,
+                        multi_meaning_index=spawn_multi_meaning_index,
+                    )
+                )
+                tasks.append(task)
+                note_tasks.append(task)
+
+            return spawn_word_task
+
+        word_task_spawners.append(
+            make_word_task_spawner(i, word, reading, multi_meaning_index, word_tuple)
         )
-        if mw.progress.want_cancel():
-            break
-        task: asyncio.Task = asyncio.create_task(
-            process_word_tuple(
-                notes_to_add_dict=notes_to_add_dict,
-                notes_to_update_dict=notes_to_update_dict,
-                # the below kwargs are passed back to the match_op function (and any more if we were
-                # to add them)
-                word=word,
-                reading=reading,
-                word_index=i,
-                multi_meaning_index=multi_meaning_index,
-            )
-        )
-        progress_updater.increment_counts(
-            total_tasks=1,
-        )
-        # Show progress as tasks are being gathered, this too can take a bit
-        if len(tasks) % 5 == 0:
-            progress_updater.update_progress()
-        tasks.append(task)
-        note_tasks.append(task)
         word_list_task_count += 1
 
-    # After all tasks are created, add one final task
-    if word_list_task_count > 0 or need_update_note:
+    logger.debug(f"{log_prefix}Final processed word tuples: {processed_word_tuples}")
+
+    if word_list_task_count == 0 and not need_update_note:
+        return 0, None
+
+    def spawn_word_list_tasks(tasks: list[asyncio.Task]) -> None:
+        """Create this word list's tasks, plus the task that writes their results back."""
+        for spawn_word_task in word_task_spawners:
+            spawn_word_task(tasks)
+
+        # After all tasks are created, add one final task
         logger.debug(
             f"{log_prefix}Adding final update task after processing {len(note_tasks)} word tasks"
         )
@@ -2226,29 +2257,28 @@ def match_words_to_notes(
         final_update_tasks.append(final_task)
         tasks.append(final_task)
 
-    logger.debug(f"{log_prefix}Final processed word tuples: {processed_word_tuples}")
-    if not note_tasks and need_update_note:
-        logger.debug(
-            f"{log_prefix}No word tasks were created, but we need to update the note with"
-            " final_word_tuples"
-        )
-
-        # If we ended up skipping all word tuples, we still may need to update the note
-        # Create a dummy task that'll trigger calling handle_return_word_tuples
-        async def run_dummy_task():
-            await asyncio.sleep(0)
-            progress_updater.increment_counts(
-                notes_done=1,
+        if not note_tasks and need_update_note:
+            logger.debug(
+                f"{log_prefix}No word tasks were created, but we need to update the note with"
+                " final_word_tuples"
             )
-            handle_return_word_tuples()
 
-        note_tasks.append(asyncio.create_task(run_dummy_task()))
+            # If we ended up skipping all word tuples, we still may need to update the note
+            # Create a dummy task that'll trigger calling handle_return_word_tuples
+            async def run_dummy_task():
+                await asyncio.sleep(0)
+                handle_return_word_tuples()
+
+            # Counted as a note done by wait_for_tasks, which gathers note_tasks, so this one
+            # must not count it again
+            note_tasks.append(asyncio.create_task(run_dummy_task()))
+
+    return word_list_task_count, spawn_word_list_tasks
 
 
 def match_words_to_notes_for_note(
     config: dict,
     note: Note,
-    tasks: list[asyncio.Task],
     edited_nids: list[NoteId],
     notes_to_add_dict: dict[str, list[Note]],
     notes_to_update_dict: dict[NoteId, Note],
@@ -2260,14 +2290,17 @@ def match_words_to_notes_for_note(
     word_lock: asyncio.Lock,
     limit_words_and_readings: Optional[list[RawOneMeaningWordType]] = None,
     reprocess_words: bool = False,
-) -> None:
+) -> Optional[NotePlan]:
     """
-    Match words to notes for a single note.
+    Plan the matching of words to notes for a single note.
+
+    Reads the note's word lists and works out which words need an API call, without starting
+    any of them: the returned NotePlan says how many tasks that is and creates them when the
+    caller is ready. Returns None when the note has nothing to do.
 
     Args:
         config (dict): Addon config
         note (Note): The note to match words for.
-        tasks (list): List of asyncio tasks to append to. Will be mutated by this function.
         notes_to_add_dict (dict): Dict of new notes for unmatched words. Will be mutated by this
             function. Used to also check if the operation has already created something it should
             reuse.
@@ -2292,38 +2325,38 @@ def match_words_to_notes_for_note(
     """
     if not note:
         logger.error("Error: No note provided for matching words")
-        return
+        return None
 
     if not config:
         logger.error("Error: Missing addon configuration")
-        return
+        return None
 
     replace_existing = config.get("replace_existing_matched_words", False)
 
     note_type = note.note_type()
     if not note_type:
         logger.error(f"Error: Note {note.id} is missing note type")
-        return
+        return None
 
     furigana_sentence_field = get_field_config(config, "furigana_sentence_field", note_type)
     if not furigana_sentence_field:
         logger.error("Error: Missing sentence field in config")
-        return
+        return None
 
     if furigana_sentence_field not in note:
         logger.error(f"Error: Note is missing the sentence field '{furigana_sentence_field}'")
-        return
+        return None
     sentence = note[furigana_sentence_field]
     if not sentence:
         logger.error(f"Error: Note's sentence field '{furigana_sentence_field}' is empty")
-        return
+        return None
 
     word_lists_to_process = config.get("word_lists_to_process", {})
     if not word_lists_to_process:
         logger.error("Error: No word lists to process in the config")
     if not isinstance(word_lists_to_process, dict):
         logger.error("Error: Invalid word lists format in the config, expected a dictionary")
-        return
+        return None
     # Filter the WORD_LISTS based on the config
     word_list_keys = [wl for wl in WORD_LISTS if word_lists_to_process.get(wl, False)]
 
@@ -2344,7 +2377,7 @@ def match_words_to_notes_for_note(
             logger.error(
                 f"{log_prefix}Error: Invalid word list format in the note, expected a dictionary"
             )
-            return
+            return None
 
         # Make a task for waiting for until all tasks for a single note are done before
         # updating the note
@@ -2386,6 +2419,9 @@ def match_words_to_notes_for_note(
             return update_function
 
         encountered_words = set()
+        # One entry per word list that has something to do, each able to create its tasks later
+        word_list_spawners: list[Callable[[list[asyncio.Task]], None]] = []
+        planned_task_count = 0
         logger.debug(
             f"{log_prefix}Processing word lists with limit_words_and_readings="
             f" {limit_words_and_readings}, reprocess_words={reprocess_words}"
@@ -2472,14 +2508,13 @@ def match_words_to_notes_for_note(
                 )
 
             update_word_list_in_dict = make_word_list_updater(word_list_key)
-            match_words_to_notes(
+            word_list_task_count, spawn_word_list_tasks = match_words_to_notes(
                 config=config,
                 current_note=note,
                 word_tuples=word_tuples,
                 word_list_key=word_list_key,
                 word_tuple_indexes=word_tuple_indexes,
                 sentence=sentence,
-                tasks=tasks,
                 note_tasks=note_tasks,
                 final_update_tasks=final_update_tasks,
                 notes_to_add_dict=notes_to_add_dict,
@@ -2494,27 +2529,42 @@ def match_words_to_notes_for_note(
                 word_lock=word_lock,
                 replace_existing=replace_existing,
             )
-        if note_tasks:
-            # Create a task to wait for all note tasks to finish
-            tasks.append(
-                asyncio.create_task(
-                    wait_for_tasks(
-                        all_note_tasks=note_tasks,
-                        all_final_update_tasks=final_update_tasks,
-                        current_note=note,
-                        updated_word_list_dict=word_list_dict,
-                    )
-                )
-            )
-        else:
-            # No tasks were created, update progress to mark this note as done
+            planned_task_count += word_list_task_count
+            if spawn_word_list_tasks is not None:
+                word_list_spawners.append(spawn_word_list_tasks)
+
+        if not word_list_spawners:
+            # Nothing to do for this note, mark it done now rather than counting it as pending
             progress_updater.increment_counts(
                 notes_done=1,
             )
-        return
+            return None
+
+        def spawn_note_tasks(tasks: list[asyncio.Task]) -> None:
+            for spawn_word_list in word_list_spawners:
+                spawn_word_list(tasks)
+            if note_tasks:
+                # Create a task to wait for all note tasks to finish
+                tasks.append(
+                    asyncio.create_task(
+                        wait_for_tasks(
+                            all_note_tasks=note_tasks,
+                            all_final_update_tasks=final_update_tasks,
+                            current_note=note,
+                            updated_word_list_dict=word_list_dict,
+                        )
+                    )
+                )
+            else:
+                # No tasks were created after all, mark this note as done
+                progress_updater.increment_counts(
+                    notes_done=1,
+                )
+
+        return NotePlan(task_count=planned_task_count, spawn=spawn_note_tasks)
     else:
         logger.error(f"Error: Note is missing the word list field '{word_list_field}'")
-        return
+        return None
 
 
 def bulk_match_words_to_notes(
@@ -2569,14 +2619,13 @@ def bulk_match_words_to_notes(
     def inner_op(
         config: dict,
         note: Note,
-        tasks: list[asyncio.Task],
         edited_nids: list[NoteId],
         notes_to_add_dict: dict[str, list[Note]],
         notes_to_update_dict: dict[NoteId, Note],
         progress_updater: AsyncTaskProgressUpdater,
         cancel_state: CancelState,
         gate: ConcurrencyGate,
-    ):
+    ) -> Optional[NotePlan]:
         nonlocal all_generated_meanings_dict
         limit_words_and_readings = None
         if limit_word_and_reading_dict:
@@ -2584,7 +2633,6 @@ def bulk_match_words_to_notes(
         return match_words_to_notes_for_note(
             config=config,
             note=note,
-            tasks=tasks,
             edited_nids=edited_nids,
             notes_to_add_dict=notes_to_add_dict,
             notes_to_update_dict=notes_to_update_dict,
