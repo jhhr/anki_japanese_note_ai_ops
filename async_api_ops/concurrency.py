@@ -470,6 +470,7 @@ class ConcurrencyGate:
         self.available_memory = available
         self._waiters: deque[asyncio.Future] = deque()
         self._adapt_task: Optional[asyncio.Task] = None
+        self._aborted = False
 
         logger.debug(
             "ConcurrencyGate(%r): limit=%d max=%d adaptive=%s per_task=%s (%s)"
@@ -486,8 +487,29 @@ class ConcurrencyGate:
             format_bytes(self.memory_limit or None),
         )
 
+    def abort(self) -> None:
+        """Stop letting anything through, and release everything queued up.
+
+        Used on cancellation: rather than relying on each waiting task being cancelled
+        individually, the gate turns every pending and future acquire into a CancelledError at
+        once, so a run with hundreds of queued tasks unwinds in one step.
+        """
+        self._aborted = True
+        queued = len(self._waiters)
+        while self._waiters:
+            future = self._waiters.popleft()
+            if not future.done():
+                future.cancel()
+        logger.debug(
+            "Gate abort: released %d queued, %d still holding a slot",
+            queued,
+            self.in_flight,
+        )
+
     async def acquire(self) -> None:
         """Wait for a free slot. Raises CancelledError if the task is cancelled while waiting."""
+        if self._aborted:
+            raise asyncio.CancelledError("concurrency gate aborted")
         while self.in_flight >= self.limit:
             future: asyncio.Future = asyncio.get_running_loop().create_future()
             self._waiters.append(future)

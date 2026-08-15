@@ -22,12 +22,24 @@ from .api_client import (
     GEMINI,
     OPENAI,
     TOGETHER,
+    begin_run,
+    cancel_run,
     close_all_sessions,
+    is_cancelled,
     post_with_retry,
     rate_limit_tracker,
+    run_cancelled,
     set_connection_pool_size,
 )
+from .collection_access import RunCancelled, begin_cleanup_phase, end_cleanup_phase
 from .concurrency import TASK_QUEUE_DEPTH, ConcurrencyGate, max_possible_concurrency
+from .diagnostics import (
+    diagnostic_level,
+    dump_thread_stacks,
+    note_cancel_time,
+    seconds_since_cancel,
+    start_cancel_watchdog,
+)
 
 from ..utils import get_field_config, print_error_traceback
 
@@ -36,6 +48,9 @@ from ..make_notes_tsv import make_tsv_from_notes, import_tsv_file
 logger = logging.getLogger(__name__)
 
 MAX_TOKENS_VALUE = 8000
+# Shortest gap between progress dialog redraws. Redraws run on Anki's main thread, so this is
+# what keeps a burst of finishing tasks from starving the UI.
+PROGRESS_UPDATE_INTERVAL = 0.15
 DEFAULT_SYSTEM_INSTRUCTION = (
     "You are a helpful assistant for processing Japanese text. You are a"
     " superlative expert in the Japanese language and its writing system."
@@ -58,6 +73,25 @@ ANTHROPIC_FIXED_TEMPERATURE_MODEL_PREFIXES = (
     "claude-opus-4-7",
     "claude-sonnet-5",
 )
+
+
+def log_phase(label: str, started: float, **extra) -> float:
+    """Log how long a shutdown or cleanup step took, and return a fresh start marker.
+
+    Cancellation problems show up as one of these steps blocking on something, and which step
+    it is narrows the cause down immediately. Debug logging shows them for every run; once a
+    run has been cancelled they are logged at info level too, since that is the case where
+    knowing which step is slow actually matters and a cancelled run only emits a handful.
+    """
+    now = time.monotonic()
+    level = diagnostic_level()
+    if logger.isEnabledFor(level):
+        details = "".join(f" {k}={v}" for k, v in extra.items())
+        since_cancel = seconds_since_cancel()
+        if since_cancel is not None:
+            details += f" since_cancel={since_cancel:.1f}s"
+        logger.log(level, "[phase] %s took %.3fs%s", label, now - started, details)
+    return now
 
 
 class CancelState:
@@ -254,7 +288,7 @@ def get_response_from_gemini(
     """
     logger.debug(f"Gemini call, model: {model}")
 
-    if cancel_state and cancel_state.is_cancelled():
+    if is_cancelled(cancel_state):
         return None
 
     # Create the request body
@@ -368,7 +402,7 @@ def get_response_from_openai(
 ) -> Union[dict, None]:
     logger.debug("OpenAI call, model %s", model)
 
-    if cancel_state and cancel_state.is_cancelled():
+    if is_cancelled(cancel_state):
         return None
 
     # Use max_completion_tokens instead of max_tokens for o3
@@ -484,7 +518,7 @@ def get_response_from_together(
 ) -> Union[dict, None]:
     logger.debug("Together AI call, model %s", model)
 
-    if cancel_state and cancel_state.is_cancelled():
+    if is_cancelled(cancel_state):
         return None
 
     messages = [
@@ -580,7 +614,7 @@ def get_response_from_anthropic(
     """
     logger.debug("Anthropic call, model %s", model)
 
-    if cancel_state and cancel_state.is_cancelled():
+    if is_cancelled(cancel_state):
         return None
 
     messages = [
@@ -732,53 +766,83 @@ class CancelManager:
     It provides a way to set and check cancellation requests.
     """
 
-    def __init__(self, tasks, cancel_state: Optional[CancelState] = None):
+    def __init__(
+        self,
+        tasks,
+        cancel_state: Optional[CancelState] = None,
+        progress_updater: Optional["AsyncTaskProgressUpdater"] = None,
+    ):
         self.cancel_requested = False
         self.tasks = tasks  # List of tasks to cancel if needed
         self.cancel_state = cancel_state or CancelState()
+        self.progress_updater = progress_updater
+        # Lets whoever is waiting on the tasks stop waiting the moment cancel is requested,
+        # rather than having to see every task through to the end
+        self.cancelled_event = asyncio.Event()
         self.monitor_task = asyncio.create_task(self.monitor_for_cancellation())
+
+    async def wait_cancelled(self) -> None:
+        await self.cancelled_event.wait()
 
     def request_cancel(self):
         """Request cancellation of all tasks managed by this instance."""
+        started = time.monotonic()
+        pending = sum(1 for t in self.tasks if not t.done())
+        logger.info(
+            "Cancellation requested: %d tasks (%d still running), %d threads alive",
+            len(self.tasks),
+            pending,
+            threading.active_count(),
+        )
         self.cancel_requested = True
-        logger.debug("Cancellation requested, updating UI")
+        self.cancelled_event.set()
+        note_cancel_time()
+        # What the worker threads are doing at the moment of the cancel, and then repeatedly
+        # until they are gone. Everything that has made cancelling slow so far has been work
+        # continuing in threads nothing was waiting for, and this is what shows it.
+        dump_thread_stacks("at cancel")
+        start_cancel_watchdog()
 
-        # Set the shared cancel state first, so requests aborted below aren't retried
+        # Set the cancelled state first: this is what actually stops the work. Requests that
+        # have not been sent yet are skipped, cooldown waits wake up, requests already in
+        # flight have their sockets shut down so the threads waiting on them return at once,
+        # and any response that still arrives afterwards is discarded instead of being acted
+        # on. cancel_run() is the one that matters - the ops overwhelmingly do not pass their
+        # cancel_state down, so without it their abandoned threads keep calling APIs and
+        # querying the collection.
+        cancel_run()
         self.cancel_state.cancel()
 
-        # Immediately end all in-flight requests by closing their sessions
-        logger.debug("Closing API sessions to abort in-flight requests")
+        # Drops the pooled connections so nothing new reuses them. The in-flight ones were
+        # already aborted by cancel_run() above.
         close_all_sessions()
 
-        # Update UI to show cancellation is in progress
-        mw.taskman.run_on_main(
-            lambda: mw.progress.update(
-                label="<b>Cancelling operations...</b><br>Please wait while tasks are cleaned up.",
-                value=0,
-                max=0,  # Indeterminate progress
+        # Show the cancelling message and stop every other progress update from here on. A
+        # cancelled run unwinds hundreds of tasks at once, and each one asking the main thread
+        # to redraw the dialog is what made the window lock up instead of closing.
+        if self.progress_updater is not None:
+            self.progress_updater.show_cancelling()
+        else:
+            mw.taskman.run_on_main(
+                lambda: mw.progress.update(
+                    label="<b>Cancelling operations...</b><br>Finishing up.",
+                    value=0,
+                    max=0,  # Indeterminate progress
+                )
             )
-        )
+
+        started = log_phase("cancel: show_cancelling", started)
 
         # Cancel all tasks without waiting
         for task in self.tasks:
             if not task.done():
                 task.cancel()
         self.monitor_task.cancel()
+        log_phase("cancel: cancel all tasks", started)
 
     def is_cancel_requested(self) -> bool:
         """Check if cancellation has been requested."""
         return self.cancel_requested
-
-    def check_for_cancellation(self):
-        logger.debug("Checking for cancellation")
-        if mw.progress.want_cancel() and not self.cancel_requested:
-            logger.debug("Cancellation requested, setting cancel_requested to True")
-            self.cancel_requested = True
-            # Cancel all running tasks
-            for t in self.tasks:
-                t.cancel()
-            return True
-        return False
 
     async def monitor_for_cancellation(self):
         """Monitor for cancellation requests and cancel all tasks if requested."""
@@ -803,6 +867,60 @@ class CancelManager:
             # Just exit the task when cancelled
 
 
+async def await_tasks_or_cancel(
+    tasks: "list[asyncio.Task]", cancel_manager: CancelManager
+) -> None:
+    """Wait for a window's tasks, but stop waiting the instant cancellation is requested.
+
+    Waiting for the tasks to unwind is not safe to rely on. A task blocked in a worker thread
+    detaches when cancelled, but nothing can interrupt the blocking HTTP request itself, and
+    any task that swallows the cancellation or is stuck on something uninterruptible would
+    hold the whole run open - which is what made cancelling hang for minutes on one straggler.
+
+    So on cancellation we simply stop waiting. The tasks are cancelled and abandoned; their
+    requests finish in their own threads and the results are discarded (post_with_retry throws
+    away anything that arrives after a cancel), and the run moves on to saving what it already
+    has.
+    """
+    started = time.monotonic()
+    if not tasks:
+        # asyncio.wait rejects an empty set, where gather was happy with one
+        return
+    # A task rather than asyncio.gather: cancelling a gather leaves a future holding a
+    # CancelledError that nothing reads, and asyncio complains about it on the console once the
+    # loop has closed and the callback that would have read it can no longer run. A cancelled
+    # task is simply cancelled, with nothing left to retrieve.
+    all_done: "asyncio.Future[Any]" = asyncio.ensure_future(asyncio.wait(tasks))
+    cancel_waiter: "asyncio.Future[Any]" = asyncio.ensure_future(cancel_manager.wait_cancelled())
+    waiting: "set[asyncio.Future[Any]]" = {all_done, cancel_waiter}
+    try:
+        await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        cancel_waiter.cancel()
+        abandoned = 0
+        if not all_done.done():
+            all_done.cancel()
+            abandoned = sum(1 for t in tasks if not t.done())
+        # asyncio.wait does not read its tasks' results, so anything a finished task raised is
+        # still sitting in it unretrieved. process_op handles its own errors, so reaching here
+        # with one means something got past it and is worth seeing rather than being reported
+        # much later against a closed loop.
+        for task in tasks:
+            if task.done() and not task.cancelled():
+                error = task.exception()
+                if error is not None:
+                    logger.error("Task failed: %s", error)
+                    print_error_traceback(error, logger)
+        log_phase(
+            "await window tasks",
+            started,
+            tasks=len(tasks),
+            cancelled=cancel_manager.is_cancel_requested(),
+            abandoned=abandoned,
+            threads=threading.active_count(),
+        )
+
+
 class AsyncTaskProgressUpdater:
     """A class to update the progress dialog in async ops."""
 
@@ -822,6 +940,11 @@ class AsyncTaskProgressUpdater:
         self._counts_lock = threading.Lock()
         # Set by the bulk ops so the dialog can show what the concurrency gate is doing
         self.gate: Optional[ConcurrencyGate] = None
+        # Every finishing task asks for a redraw, so bursts have to be coalesced - see _push
+        self._ui_lock = threading.Lock()
+        self._update_pending = False
+        self._last_update_at = 0.0
+        self._suppressed = False
         if title is None:
             title = "Processing asynchronous tasks..."
         self.set_title(title)
@@ -865,6 +988,52 @@ class AsyncTaskProgressUpdater:
 
     def set_title(self, title: str):
         mw.taskman.run_on_main(lambda: mw.progress.set_title(title))
+
+    def _push(self, label: str, value: int, maximum: int, force: bool = False) -> None:
+        """Queue a dialog redraw, collapsing bursts into a single update.
+
+        Progress is refreshed from every task as it finishes, so a run with a high
+        concurrency limit produces hundreds of these at once - and a cancelled run produces
+        them all in the same instant, as every task unwinds together. Each one has to be run
+        on the main thread, so letting them all through buries Anki's event loop: the window
+        stops repainting and the click on Cancel isn't even seen for a long time.
+
+        At most one redraw is ever queued, and only one every PROGRESS_UPDATE_INTERVAL, so a
+        burst of any size costs the main thread exactly one update.
+        """
+        with self._ui_lock:
+            if self._suppressed and not force:
+                return
+            if self._update_pending:
+                return
+            now = time.time()
+            if not force and now - self._last_update_at < PROGRESS_UPDATE_INTERVAL:
+                return
+            self._update_pending = True
+            self._last_update_at = now
+
+        def run_update():
+            try:
+                mw.progress.update(label=label, value=value, max=maximum)
+            finally:
+                with self._ui_lock:
+                    self._update_pending = False
+
+        mw.taskman.run_on_main(run_update)
+
+    def show_cancelling(self) -> None:
+        """Switch the dialog to the cancelling message and stop all further updates."""
+        with self._ui_lock:
+            self._suppressed = False
+            self._update_pending = False
+        self._push(
+            "<b>Cancelling operations...</b><br>Finishing up.",
+            value=0,
+            maximum=0,  # Indeterminate progress
+            force=True,
+        )
+        with self._ui_lock:
+            self._suppressed = True
 
     def increment_counts(
         self,
@@ -914,13 +1083,7 @@ class AsyncTaskProgressUpdater:
             time_msg += f""" | <small> Avg time per task: {avg_per_op_s:.2f}s
             | Max: {self.max_task_time:.2f}s</small>
             <br><code>ETA: {eta_time}</code>"""
-        mw.taskman.run_on_main(
-            lambda: mw.progress.update(
-                label=f"{task_progress_msg}{time_msg}",
-                value=self.tasks_done,
-                max=self.total_tasks,
-            )
-        )
+        self._push(f"{task_progress_msg}{time_msg}", self.tasks_done, self.total_tasks)
 
     def update_note_adding_progress(
         self,
@@ -949,13 +1112,7 @@ class AsyncTaskProgressUpdater:
         except Exception as e:
             logger.error("Error updating note adding progress: %s", e)
             return
-        mw.taskman.run_on_main(
-            lambda: mw.progress.update(
-                label=f"{task_progress_msg}{time_msg}",
-                value=notes_added,
-                max=total_notes,
-            )
-        )
+        self._push(f"{task_progress_msg}{time_msg}", notes_added, total_notes)
 
     def update_new_note_processing_progress(
         self,
@@ -974,13 +1131,7 @@ class AsyncTaskProgressUpdater:
             <br><code>ETA: {eta_time}</code>"""
         task_progress_msg = f"""<strong>Processing new notes:</strong>
             <br><strong><code>{new_notes_processed}/{total_notes}</code></strong> notes"""
-        mw.taskman.run_on_main(
-            lambda: mw.progress.update(
-                label=f"{task_progress_msg}{time_msg}",
-                value=new_notes_processed,
-                max=total_notes,
-            )
-        )
+        self._push(f"{task_progress_msg}{time_msg}", new_notes_processed, total_notes)
 
 
 def make_inner_bulk_op(
@@ -1078,12 +1229,28 @@ def make_inner_bulk_op(
                     if asyncio.iscoroutine(op_result):
                         op_result = await op_result
 
+                except RunCancelled as e:
+                    # The op asked the collection for something after the run was cancelled.
+                    # Expected, not an error: the task is being abandoned on purpose, and
+                    # whatever it had done so far is simply left unfinished.
+                    logger.log(diagnostic_level(), "Op abandoned on cancellation: %s", e)
+                    return False
                 except Exception as e:
                     logger.error("Inner process op error, passing to handle_op_error: %s", e)
                     handle_op_error(e)
                     return False
                 finally:
                     task_time = time.time() - task_start_time
+                    # A task that only finishes well after the cancel is one that kept working
+                    # regardless of it; how long it took to stop is the thing to measure
+                    since_cancel = seconds_since_cancel()
+                    if since_cancel is not None:
+                        logger.log(
+                            diagnostic_level(),
+                            "[stage] op returned %.1fs after the cancel (ran %.1fs)",
+                            since_cancel,
+                            task_time,
+                        )
                     progress_updater.increment_counts(
                         tasks_done=1,
                         tasks_in_progress=-1,
@@ -1152,6 +1319,8 @@ async def bulk_nested_notes_op(
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
     rate_limit_tracker.reset()
+    # Clear any cancellation left over from a previous run
+    begin_run()
 
     cancel_state = CancelState()
     cancel_manager: Optional[CancelManager] = None
@@ -1192,22 +1361,22 @@ async def bulk_nested_notes_op(
             if not tasks:
                 continue
 
-            cancel_manager = CancelManager(tasks, cancel_state=cancel_state)
+            cancel_manager = CancelManager(
+                tasks, cancel_state=cancel_state, progress_updater=progress_updater
+            )
             try:
-                # First await for the regular tasks to complete
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await await_tasks_or_cancel(tasks, cancel_manager)
             except asyncio.CancelledError:
                 logger.debug("Cancelling bulk operation")
             finally:
                 if not cancel_manager.monitor_task.done():
                     cancel_manager.monitor_task.cancel()
-                try:
-                    await asyncio.wait_for(cancel_manager.monitor_task, timeout=0.5)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    logger.debug("Monitor task CancelledError encountered")
 
             if cancel_manager.is_cancel_requested():
                 logger.debug("Bulk operation was cancelled, returning results so far")
+                marker = time.monotonic()
+                gate.abort()
+                log_phase("nested op: gate.abort", marker)
                 break
 
             # Fold this window into what we know an op of this kind costs, which may move the
@@ -1215,12 +1384,16 @@ async def bulk_nested_notes_op(
             gate.end_window()
             window_size = max(1, gate.limit)
     finally:
+        marker = time.monotonic()
         gate.finish()
+        marker = log_phase("nested op: gate.finish", marker)
         progress_updater.gate = None
 
     if on_end:
         on_end()
+        marker = log_phase("nested op: on_end", marker)
     progress_updater.stop_autoupdate()
+    log_phase("nested op: stop_autoupdate", marker, threads=threading.active_count())
     return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
 
@@ -1372,6 +1545,8 @@ async def bulk_notes_op(
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
     rate_limit_tracker.reset()
+    # Clear any cancellation left over from a previous run
+    begin_run()
 
     def handle_op_success(
         note: Note,
@@ -1451,23 +1626,24 @@ async def bulk_notes_op(
                 continue
             progress_updater.update_progress()
 
-            cancel_manager = CancelManager(tasks, cancel_state)
+            cancel_manager = CancelManager(
+                tasks, cancel_state, progress_updater=progress_updater
+            )
             try:
                 logger.debug("Bulk notes op awaiting %d tasks", len(tasks))
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await await_tasks_or_cancel(tasks, cancel_manager)
             except asyncio.CancelledError:
                 logger.debug("Bulk notes op asyncio.CancelledError caught")
                 cancel_manager.request_cancel()
             finally:
                 if not cancel_manager.monitor_task.done():
                     cancel_manager.monitor_task.cancel()
-                try:
-                    await asyncio.wait_for(cancel_manager.monitor_task, timeout=0.5)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass
 
             if cancel_manager.is_cancel_requested():
                 logger.debug("Bulk notes op cancellation requested, returning early")
+                marker = time.monotonic()
+                gate.abort()
+                log_phase("bulk op: gate.abort", marker)
                 cancelled = True
                 break
 
@@ -1476,7 +1652,9 @@ async def bulk_notes_op(
             gate.end_window()
             window_size = max(1, gate.limit * TASK_QUEUE_DEPTH)
     finally:
+        marker = time.monotonic()
         gate.finish()
+        marker = log_phase("bulk op: gate.finish", marker)
         progress_updater.gate = None
 
     if not cancelled:
@@ -1484,8 +1662,17 @@ async def bulk_notes_op(
 
     if on_end:
         on_end()
+        marker = log_phase("bulk op: on_end", marker)
 
     progress_updater.stop_autoupdate()
+    log_phase(
+        "bulk op: stop_autoupdate",
+        marker,
+        cancelled=cancelled,
+        to_update=len(notes_to_update_dict),
+        to_add=sum(len(v) for v in notes_to_add_dict.values()),
+        threads=threading.active_count(),
+    )
     return pos, notes_to_add_dict, notes_to_update_dict, notes_to_remove
 
 
@@ -1499,11 +1686,14 @@ def on_bulk_success(
     # notes_to_add_dict: Optional[dict[str, list[Note]]] = None,
     extra_callback=None,
 ):
+    success_started = time.monotonic()
+    logger.debug("[phase] on_bulk_success reached, closing progress")
     mw.taskman.run_on_main(lambda: mw.progress.finish())
     # if DEBUG:
     # print("on_bulk_success", out, notes_to_add_dict)
     if extra_callback:
         extra_callback()
+        log_phase("success: extra_callback", success_started)
     # if notes_to_add_dict:
     #     new_notes: list[Note] = []
     #     for note_list in notes_to_add_dict.values():
@@ -1568,6 +1758,13 @@ def selected_notes_op(
                 notes_to_add_dict=notes_to_add_dict,
                 notes_to_update_dict=notes_to_update_dict,
             )
+            cleanup_started = time.monotonic()
+            logger.debug("[phase] bulk op returned, starting cleanup")
+            # From here on this thread is saving what the run managed to do, which is the whole
+            # point of cancelling gracefully - so it keeps its access to the collection even
+            # though the run is cancelled. Some ops have real work left here, such as resolving
+            # the ids of the notes they added. Cleared in run_bulk_op's finally.
+            begin_cleanup_phase()
             pos, res_notes_to_add_dict, res_notes_to_update_dict, res_notes_to_remove = result
 
             sanitized_notes_to_remove: list[NoteId] = []
@@ -1592,6 +1789,13 @@ def selected_notes_op(
                         res_notes_to_remove,
                     )
 
+            # A cancelled run leaves its requests running in worker threads, and one of them
+            # can still be writing into these dicts while we work through them here. Take a
+            # snapshot so the cleanup sees a consistent set and can't trip over a dict that
+            # changed size mid-iteration.
+            res_notes_to_add_dict = dict(res_notes_to_add_dict)
+            res_notes_to_update_dict = dict(res_notes_to_update_dict)
+
             logger.debug(f"res_notes_to_update_dict keys: {res_notes_to_update_dict.keys()}")
             notes_to_add_dict.update(res_notes_to_add_dict)
             notes_to_update_dict.update(res_notes_to_update_dict)
@@ -1615,7 +1819,7 @@ def selected_notes_op(
 
             # Remove note.id=0 notes from updated_notes
             all_updated_notes_dict: dict[NoteId, Note] = {}
-            for note in notes_to_update_dict.values():
+            for note in list(notes_to_update_dict.values()):
                 if note.id == 0:
                     logger.error(f"Found note.id=0, fields: {note.fields}")
                 elif note.id not in all_updated_notes_dict:
@@ -1628,12 +1832,24 @@ def selected_notes_op(
                         " bulk op final update"
                     )
             all_updated_notes = [n for n in all_updated_notes_dict.values() if n.id != 0]
+            cleanup_started = log_phase(
+                "cleanup: collect notes", cleanup_started, notes=len(all_updated_notes)
+            )
+            # This write has been the visible symptom of every cancellation hang so far, taking
+            # minutes even with nothing to write. Record what the rest of the process is doing
+            # on either side of it: an empty write cannot be slow by itself, so whatever is
+            # holding it up is in these stacks.
+            if run_cancelled():
+                dump_thread_stacks("about to update_notes")
             try:
                 mw.col.update_notes(all_updated_notes)
             except Exception as e:
                 logger.error(f"Error updating notes: {e}")
                 logger.error(f"Notes causing error: {[n.fields for n in all_updated_notes]}")
                 print_error_traceback(e, logger)
+            cleanup_started = log_phase("cleanup: update_notes", cleanup_started)
+            if run_cancelled():
+                dump_thread_stacks("finished update_notes")
             if notes_to_remove:
                 try:
                     mw.col.remove_notes(sorted(notes_to_remove))
@@ -1641,11 +1857,15 @@ def selected_notes_op(
                     logger.error(f"Error removing notes: {e}")
                     logger.error(f"Note IDs causing error: {sorted(notes_to_remove)}")
                     print_error_traceback(e, logger)
+                cleanup_started = log_phase("cleanup: remove_notes", cleanup_started)
             op_changes = mw.col.merge_undo_entries(pos)
             notes_to_add = []
             if notes_to_add_dict:
-                for note_list in notes_to_add_dict.values():
-                    notes_to_add.extend(note_list)
+                for note_list in list(notes_to_add_dict.values()):
+                    notes_to_add.extend(list(note_list))
+            cleanup_started = log_phase(
+                "cleanup: merge_undo_entries", cleanup_started, to_add=len(notes_to_add)
+            )
 
             if notes_to_add and filter_new_notes_op:
                 notes_to_add, filtered_notes_to_update_dict = filter_new_notes_op(
@@ -1671,6 +1891,9 @@ def selected_notes_op(
                                 edited_nids.append(note.id)
                         elif note.id not in edited_other_nids:
                             edited_other_nids.append(note.id)
+                cleanup_started = log_phase(
+                    "cleanup: filter_new_notes_op", cleanup_started, kept=len(notes_to_add)
+                )
 
             if notes_to_add:
                 logger.debug(
@@ -1714,12 +1937,16 @@ def selected_notes_op(
                         total_notes=total_notes,
                         failed=failed_cnt,
                     )
+                cleanup_started = log_phase(
+                    "cleanup: add_note loop", cleanup_started, added=added_cnt, failed=failed_cnt
+                )
                 if new_notes_op:
                     # Run the new notes operation if provided
                     # col.add_note mutates the note given, adding the id to it
                     additional_updates_notes_dict = new_notes_op(
                         notes_to_add, config, progress_updater
                     )
+                    cleanup_started = log_phase("cleanup: new_notes_op", cleanup_started)
 
                     additional_updated_notes = list(additional_updates_notes_dict.values())
                     if additional_updated_notes:
@@ -1753,6 +1980,7 @@ def selected_notes_op(
                         edited_nids.extend(
                             [note.id for note in valid_notes if note.id not in edited_nids]
                         )
+            log_phase("cleanup: finished", cleanup_started, threads=threading.active_count())
             return op_changes
 
         # Create and run the event loop
@@ -1771,14 +1999,35 @@ def selected_notes_op(
         try:
             return loop.run_until_complete(async_wrapper())
         finally:
-            try:
-                # loop.close() on its own leaves the default executor's threads running
-                loop.run_until_complete(loop.shutdown_default_executor())
-            except Exception as e:
-                logger.debug("Error shutting down default executor: %s", e)
+            teardown_started = time.monotonic()
+            logger.debug(
+                "[phase] teardown starting, %d threads alive", threading.active_count()
+            )
+            # This thread goes back to Anki's pool and will run other operations, so its
+            # exemption must not outlive this one
+            end_cleanup_phase()
+            # shutdown(wait=False) tells the pool's threads to exit once their current call
+            # returns, without blocking on them. Never join them here: a blocking HTTP request
+            # cannot be interrupted from outside, so joining would make cancelling take as
+            # long as the slowest request still in flight. Their results are discarded.
             executor.shutdown(wait=False)
+            teardown_started = log_phase("teardown: executor.shutdown", teardown_started)
+            # Tasks abandoned by a cancellation are still pending; drop them so closing the
+            # loop doesn't complain about them
+            leftover = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for task in leftover:
+                task.cancel()
+            teardown_started = log_phase(
+                "teardown: cancel leftover tasks", teardown_started, leftover=len(leftover)
+            )
             loop.close()
+            teardown_started = log_phase("teardown: loop.close", teardown_started)
             close_all_sessions()
+            log_phase(
+                "teardown: close_all_sessions",
+                teardown_started,
+                threads=threading.active_count(),
+            )
 
     return (
         CollectionOp(

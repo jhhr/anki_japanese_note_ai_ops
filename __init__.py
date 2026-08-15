@@ -85,6 +85,28 @@ def setup_addon_logging():
 setup_addon_logging()
 
 
+# Marks the handlers this addon attaches, so they can be found and closed again
+_ADDON_HANDLER_FLAG = "_simple_anki_ai_prompts_handler"
+
+
+def close_previous_log_handlers(logger_instance: logging.Logger) -> None:
+    """Detach and close any log handler this addon attached earlier.
+
+    A handler was added every time the browser context menu was built or a field lost focus,
+    and none were ever removed. They accumulate for the lifetime of the session, so every log
+    record gets written once per handler - and with several worker threads logging at once
+    that turns into a great deal of redundant file I/O. It also keeps every previous log file
+    open, which is why they can't be deleted until Anki is closed.
+    """
+    for handler in list(logger_instance.handlers):
+        if getattr(handler, _ADDON_HANDLER_FLAG, False):
+            logger_instance.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+
 def create_call_log_handler(function_name: str) -> logging.Handler:
     """Create a new file handler for a specific function call"""
     config = mw.addonManager.getConfig(__name__) or {}
@@ -107,6 +129,7 @@ def create_call_log_handler(function_name: str) -> logging.Handler:
         handler.setFormatter(
             logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         )
+        setattr(handler, _ADDON_HANDLER_FLAG, True)
         return handler
 
     # Create logs directory
@@ -118,10 +141,12 @@ def create_call_log_handler(function_name: str) -> logging.Handler:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(logs_dir, f"{function_name}_{timestamp}.log")
 
-    # Create handler
-    handler = logging.FileHandler(log_file, encoding="utf-8")
+    # Create handler. delay=True so the file isn't opened (or created) until something is
+    # actually logged - building the context menu shouldn't leave an empty log file behind.
+    handler = logging.FileHandler(log_file, encoding="utf-8", delay=True)
     handler.setLevel(log_level)
     handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    setattr(handler, _ADDON_HANDLER_FLAG, True)
 
     return handler
 
@@ -132,6 +157,8 @@ def on_browser_will_show_context_menu(browser: Browser, menu: QMenu):
     logger = logging.getLogger(__name__)
 
     if handler:
+        # Replace the previous run's handler rather than stacking another one on top
+        close_previous_log_handlers(logger)
         logger.addHandler(handler)
 
     # Create a new action for the context menu
@@ -279,6 +306,8 @@ def run_op_on_field_unfocus(changed: bool, note: Note, field_idx: int):
     logger = logging.getLogger(__name__)
 
     if handler:
+        # Replace the previous run's handler rather than stacking another one on top
+        close_previous_log_handlers(logger)
         logger.addHandler(handler)
 
     note_type = note.note_type()
@@ -309,6 +338,8 @@ def run_op_on_add_note(note: Note):
     logger = logging.getLogger(__name__)
 
     if handler:
+        # Replace the previous run's handler rather than stacking another one on top
+        close_previous_log_handlers(logger)
         logger.addHandler(handler)
 
     note_type = note.note_type()

@@ -10,13 +10,17 @@ import json
 import logging
 import random
 import re
+import socket
 import threading
 import time
+import weakref
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import requests  # type: ignore
 from requests.adapters import HTTPAdapter  # type: ignore
+from urllib3.connection import HTTPConnection, HTTPSConnection  # type: ignore
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,43 @@ GEMINI = "gemini"
 OPENAI = "openai"
 ANTHROPIC = "anthropic"
 TOGETHER = "together"
+
+
+# --- Run-wide cancellation ----------------------------------------------------------------
+
+# Cancellation used to rely on each op passing its cancel_state down to get_response, and in
+# practice almost none of them did - so a cancelled run kept issuing API calls and collection
+# queries from its abandoned threads for as long as there was work left. Only one bulk op runs
+# at a time, so the run's cancelled state lives here instead and every request checks it
+# whether or not the caller threaded anything through.
+_run_cancelled = threading.Event()
+
+
+def begin_run() -> None:
+    """Mark the start of a bulk operation, clearing any previous cancellation."""
+    _run_cancelled.clear()
+
+
+def cancel_run() -> None:
+    """Cancel the current bulk operation.
+
+    No further requests are issued, and the ones already in flight are aborted rather than
+    left to run to completion in threads nothing is waiting for any more.
+    """
+    _run_cancelled.set()
+    aborted = abort_in_flight_requests()
+    logger.info("Run cancelled, aborted %d in-flight request(s)", aborted)
+
+
+def run_cancelled() -> bool:
+    return _run_cancelled.is_set()
+
+
+def is_cancelled(cancel_state: Optional[Any] = None) -> bool:
+    """True if the run was cancelled, or the caller's own cancel state was set."""
+    if _run_cancelled.is_set():
+        return True
+    return cancel_state is not None and cancel_state.is_cancelled()
 
 
 # --- Response classification -------------------------------------------------------------
@@ -303,6 +344,126 @@ class RateLimitTracker:
 rate_limit_tracker = RateLimitTracker()
 
 
+# --- Aborting requests in flight -----------------------------------------------------------
+
+# A thread blocked in session.post() is waiting on a socket read, and nothing outside it can
+# make that call return - not cancelling the asyncio task, not closing the Session (which only
+# discards connections sitting idle in the pool, never one that is checked out and in use).
+# That is why cancelling used to leave hundreds of threads running for minutes, still talking to
+# the API and still holding their note and response buffers.
+#
+# Shutting the socket down does return the read immediately, so every connection registers
+# itself here while it has a live socket. On cancellation we shut them all down at once; the
+# waiting threads get a connection error, see that the run was cancelled, and exit.
+_live_connections: "weakref.WeakSet[Any]" = weakref.WeakSet()
+_connection_lock = threading.Lock()
+
+# How many threads are inside session.post() right now, for telling "waiting on the API" apart
+# from "busy with something else" when a cancelled run will not settle
+_in_request_count = 0
+_in_request_lock = threading.Lock()
+
+
+def _count_request(delta: int) -> None:
+    global _in_request_count
+    with _in_request_lock:
+        _in_request_count += delta
+
+
+class _TrackedConnection:
+    """Mixin registering a connection for the lifetime of its socket."""
+
+    def connect(self) -> None:
+        super().connect()  # type: ignore[misc]
+        with _connection_lock:
+            _live_connections.add(self)
+
+    def close(self) -> None:
+        with _connection_lock:
+            _live_connections.discard(self)
+        super().close()  # type: ignore[misc]
+
+
+class _TrackedHTTPConnection(_TrackedConnection, HTTPConnection):
+    pass
+
+
+class _TrackedHTTPSConnection(_TrackedConnection, HTTPSConnection):
+    pass
+
+
+class _TrackedHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = _TrackedHTTPConnection
+
+
+class _TrackedHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _TrackedHTTPSConnection
+
+
+class _TrackedAdapter(HTTPAdapter):
+    """An HTTPAdapter whose connections can be aborted mid-request."""
+
+    def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
+        super().init_poolmanager(*args, **kwargs)
+        # PoolManager copies the scheme->pool mapping onto the instance, so this only affects
+        # this adapter's pools and never anything else in the process using requests
+        self.poolmanager.pool_classes_by_scheme = {
+            "http": _TrackedHTTPConnectionPool,
+            "https": _TrackedHTTPSConnectionPool,
+        }
+
+
+def abort_in_flight_requests() -> int:
+    """Force every live connection's socket to return, aborting requests in flight.
+
+    Returns the number of sockets shut down. Safe to call at any time: a connection whose
+    socket has been shut down is never reused, it is discarded and replaced on the next
+    request.
+    """
+    with _connection_lock:
+        connections = list(_live_connections)
+        _live_connections.clear()
+
+    # How many threads are actually inside a request matters as much as the abort itself: if it
+    # is far below the number of tasks running, the rest are busy somewhere else entirely and
+    # aborting requests was never going to be what stops them.
+    logger.info(
+        "Aborting requests: %d live connection(s), %d thread(s) inside a request",
+        len(connections),
+        _in_request_count,
+    )
+
+    aborted = 0
+    for connection in connections:
+        sock = getattr(connection, "sock", None)
+        if sock is None:
+            continue
+        # Enough on its own on Unix, where it makes a blocked read return end-of-file
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            # Already closed, or never finished connecting
+            pass
+        # On Windows it is not: shutdown() leaves a thread already blocked in recv sitting
+        # there, and sock.close() does not help either because http.client reads through a
+        # makefile() wrapper, whose reference keeps close() from actually releasing the
+        # descriptor. Detaching and closing the descriptor itself is what makes the pending
+        # read return - it fails with "not a socket", which is exactly what we want it to do.
+        try:
+            fileno = sock.detach()
+        except Exception as e:
+            logger.debug("Could not detach socket while aborting: %s", e)
+            continue
+        if fileno == -1:
+            continue
+        try:
+            socket.socket(sock.family, sock.type, sock.proto, fileno=fileno).close()
+            aborted += 1
+        except OSError as e:
+            logger.debug("Could not close socket while aborting: %s", e)
+    return aborted
+
+
 # --- Sessions ----------------------------------------------------------------------------
 
 _session_lock = threading.Lock()
@@ -332,7 +493,7 @@ def get_session(provider: str) -> "requests.Session":
             session = requests.Session()
             # max_retries=0: retries are handled by post_with_retry, which knows how to read
             # each provider's rate-limit hints
-            adapter = HTTPAdapter(
+            adapter = _TrackedAdapter(
                 pool_connections=_pool_size,
                 pool_maxsize=_pool_size,
                 max_retries=0,
@@ -344,10 +505,11 @@ def get_session(provider: str) -> "requests.Session":
 
 
 def close_all_sessions() -> None:
-    """Close every session, aborting requests in flight.
+    """Drop every session and the idle connections it is holding.
 
-    Used to make cancellation take effect immediately. Sessions are re-created lazily, so this
-    is safe to call at any point.
+    This does not touch requests in flight - a connection checked out of the pool survives its
+    pool being closed. abort_in_flight_requests() is what stops those. Sessions are re-created
+    lazily, so this is safe to call at any point.
     """
     with _session_lock:
         sessions = list(_sessions.values())
@@ -366,7 +528,7 @@ def _sleep_cancellable(seconds: float, cancel_state: Optional[Any]) -> bool:
     """Sleep in short slices so cancellation isn't delayed. Returns False if cancelled."""
     deadline = time.monotonic() + seconds
     while True:
-        if cancel_state is not None and cancel_state.is_cancelled():
+        if is_cancelled(cancel_state):
             return False
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -401,7 +563,10 @@ def post_with_retry(
     last_response: Optional["requests.Response"] = None
 
     for attempt in range(max_retries + 1):
-        if cancel_state is not None and cancel_state.is_cancelled():
+        if is_cancelled(cancel_state):
+            # Worth an info line: a burst of these says the tasks were nowhere near their
+            # request when the cancel landed, and only reached it long afterwards
+            logger.info("Skipping request to %s, the run was cancelled", key)
             return None
 
         # Another task may already have been rejected for this model; wait rather than
@@ -413,7 +578,11 @@ def post_with_retry(
                 return None
 
         try:
-            response = session.post(url, headers=headers, json=json_body, timeout=timeout)
+            _count_request(1)
+            try:
+                response = session.post(url, headers=headers, json=json_body, timeout=timeout)
+            finally:
+                _count_request(-1)
         except requests.exceptions.Timeout:
             logger.warning("Request to %s timed out (attempt %d)", key, attempt + 1)
             action, delay = ResponseAction.RETRY, None
@@ -421,7 +590,7 @@ def post_with_retry(
         except requests.exceptions.RequestException as e:
             # Includes connection errors, and the aborted-socket error raised when the
             # session is closed by a cancellation
-            if cancel_state is not None and cancel_state.is_cancelled():
+            if is_cancelled(cancel_state):
                 return None
             logger.warning("Request to %s failed (attempt %d): %s", key, attempt + 1, e)
             action, delay = ResponseAction.RETRY, None
@@ -429,6 +598,14 @@ def post_with_retry(
         else:
             last_response = response
             action, delay = classify_response(provider, response)
+
+        # A blocking request can't be aborted from outside, so a cancelled operation's request
+        # keeps running in its worker thread and lands here after everything else has moved on.
+        # Drop the result: the caller then behaves as if the request failed and won't go on to
+        # edit notes behind the back of the cleanup phase.
+        if is_cancelled(cancel_state):
+            logger.debug("Late response for %s discarded, operation was cancelled", key)
+            return None
 
         if action == ResponseAction.OK and response is not None:
             rate_limit_tracker.note_success(key)

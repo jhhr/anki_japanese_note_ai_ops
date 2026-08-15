@@ -56,6 +56,11 @@ from .base_ops import (
     selected_notes_op,
 )
 from .concurrency import ConcurrencyGate
+from .collection_access import (
+    find_notes as col_find_notes,
+    get_note as col_get_note,
+    get_notes as col_get_notes,
+)
 from .clean_meaning import clean_meaning_in_note
 from .extract_words import word_lists_str_format
 from .make_all_meanings import (
@@ -239,7 +244,7 @@ def update_fake_note_ids(
             fake_note_id = new_note[new_note_id_field]
             if not fake_note_id:
                 continue
-            referencing_note_ids = mw.col.find_notes(f'"{word_list_field}:*{fake_note_id}*"')
+            referencing_note_ids = col_find_notes(f'"{word_list_field}:*{fake_note_id}*"')
             if not referencing_note_ids:
                 continue
             referencing_notes = []
@@ -251,7 +256,7 @@ def update_fake_note_ids(
                     previous_nids.append(nid)
             referencing_note_ids = [nid for nid in referencing_note_ids if nid not in previous_nids]
             # Fetch the rest from the collection
-            referencing_notes.extend([mw.col.get_note(nid) for nid in referencing_note_ids])
+            referencing_notes.extend(col_get_notes(referencing_note_ids))
             for referencing_note in referencing_notes:
                 if new_note_id_field in referencing_note:
                     # Update the word_list_field to point to the actual new note ID
@@ -536,13 +541,13 @@ def deduplicate_notes_list(
                 if ref_note.id > 0:
                     notes_to_update_dict[ref_note.id] = ref_note
 
-        referencing_nids = mw.col.find_notes(f'"{word_list_field}:*{dup_ref}*"')
+        referencing_nids = col_find_notes(f'"{word_list_field}:*{dup_ref}*"')
         for ref_nid in referencing_nids:
             if ref_nid in processed_note_ids:
                 continue
             ref_note = notes_to_update_dict.get(ref_nid)
             if ref_note is None:
-                ref_note = mw.col.get_note(ref_nid)
+                ref_note = col_get_note(ref_nid)
             if word_list_field in ref_note and dup_ref in ref_note[word_list_field]:
                 ref_note[word_list_field] = re.sub(
                     dup_ref_pattern, keep_ref, ref_note[word_list_field]
@@ -707,10 +712,10 @@ def create_new_note_without_matching(
     # - if there is no marker, this should have none
     marker_regex = rf"^{word} ?(?:\((?:kun|on)\))?(?:\(r\d+\))?(?:\(m\d+\))?$"
     marker_note_query = f'"{word_sort_field}:re:{marker_regex}"'
-    marker_note_ids = mw.col.find_notes(marker_note_query)
+    marker_note_ids = col_find_notes(marker_note_query)
     unedited_marker_note_ids = [nid for nid in marker_note_ids if nid not in notes_to_update_dict]
     # Fetch unedited marker notes from db
-    marker_notes = [mw.col.get_note(note_id) for note_id in unedited_marker_note_ids]
+    marker_notes = col_get_notes(unedited_marker_note_ids)
     if unedited_marker_note_ids:
         logger.debug(
             f"{log_prefix}Fetched {len(marker_notes)} unedited marker notes from DB,"
@@ -1192,7 +1197,7 @@ def get_matching_notes_for_word_and_reading(
     if only_note_id is not None:
         query += f" nid:{only_note_id}"
     logger.debug(f"{log_prefix}Searching for notes with query: {query}")
-    note_ids: Sequence[NoteId] = mw.col.find_notes(query)
+    note_ids: Sequence[NoteId] = col_find_notes(query)
     # Filter by reading matches, we don't do this in the query since it's not easy to check
     # for a reading where some parts are in katakana
 
@@ -1202,7 +1207,7 @@ def get_matching_notes_for_word_and_reading(
 
     for note_id in note_ids:
         note = (
-            mw.col.get_note(note_id)
+            col_get_note(note_id)
             if note_id not in notes_to_update_dict
             else notes_to_update_dict[note_id]
         )
@@ -2079,7 +2084,7 @@ def match_words_to_notes(
 
                 else:
                     # Try to find a note with this in its 'new_note_id_field' field
-                    nids = mw.col.find_notes(
+                    nids = col_find_notes(
                         f'''"note:{note_type["name"]}" "{new_note_id_field}:{fake_note_id}"'''
                     )
                     if len(nids) == 1:
@@ -2089,7 +2094,7 @@ def match_words_to_notes(
                             f"{log_prefix}Found note with ID {note_id} for new note ID"
                             f" {fake_note_id}, updating word tuple at index {i}"
                         )
-                        unfake_note = mw.col.get_note(note_id)
+                        unfake_note = col_get_note(note_id)
                     elif len(nids) > 1:
                         logger.debug(
                             f"{log_prefix}Error: Found multiple notes with new note ID"
@@ -2800,12 +2805,12 @@ def match_single_word_to_notes_from_selected(
             # Not excluding the initial note nid in this, so it can match itself too
             query = f'''"note:{note_type["name"]}" "{word_list_field}:re:{target_word_regex}"'''
             logger.debug(f"{log_prefix} Single-word-only mode: Querying for notes with: '{query}'")
-            matching_nids = mw.col.find_notes(query)
+            matching_nids = col_find_notes(query)
             logger.debug(
                 f"{log_prefix}Single-word-only mode: Found {len(matching_nids)} matching"
                 f" notes for word '{target_word}' with reading '{target_reading}'"
             )
-            matching_notes = [mw.col.get_note(nid) for nid in matching_nids]
+            matching_notes = col_get_notes(matching_nids)
             for match_note in matching_notes:
                 # It doesn't matter if we overwrite the note in the dict, as we haven't made
                 # any edits so, it's the exact same note object
