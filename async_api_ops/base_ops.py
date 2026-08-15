@@ -27,7 +27,7 @@ from .api_client import (
     rate_limit_tracker,
     set_connection_pool_size,
 )
-from .concurrency import TASK_QUEUE_DEPTH, ConcurrencyGate, concurrency_limits
+from .concurrency import TASK_QUEUE_DEPTH, ConcurrencyGate, max_possible_concurrency
 
 from ..utils import get_field_config, print_error_traceback
 
@@ -1148,7 +1148,8 @@ async def bulk_nested_notes_op(
     # Can start auto updater now that we're in an async context with a running loop
     progress_updater.start_autoupdate()
 
-    gate = ConcurrencyGate(config)
+    # The message doubles as the op's identity for the learned per-task memory cost
+    gate = ConcurrencyGate(config, op_key=message)
     progress_updater.gate = gate
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
@@ -1170,6 +1171,10 @@ async def bulk_nested_notes_op(
                 break
             window = notes[index : index + window_size]
             index += window_size
+
+            # Nothing is in flight here, so this is a clean baseline to measure the window's
+            # concurrent memory use against
+            gate.begin_window()
 
             tasks: list[asyncio.Task] = []
             for note in window:
@@ -1207,10 +1212,12 @@ async def bulk_nested_notes_op(
                 logger.debug("Bulk operation was cancelled, returning results so far")
                 break
 
-            # The gate may have resized in response to memory pressure while this window ran
+            # Fold this window into what we know an op of this kind costs, which may move the
+            # ceiling; the gate may also have resized under memory pressure while it ran
+            gate.end_window()
             window_size = max(1, gate.limit)
     finally:
-        gate.stop_adapting()
+        gate.finish()
         progress_updater.gate = None
 
     if on_end:
@@ -1361,7 +1368,8 @@ async def bulk_notes_op(
     # Can start auto updater now that we're in an async context with a running loop
     progress_updater.start_autoupdate()
 
-    gate = ConcurrencyGate(config)
+    # The message doubles as the op's identity for the learned per-task memory cost
+    gate = ConcurrencyGate(config, op_key=message)
     progress_updater.gate = gate
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
@@ -1396,6 +1404,10 @@ async def bulk_notes_op(
                 break
             window = notes[index : index + window_size]
             index += window_size
+
+            # Nothing is in flight here, so this is a clean baseline to measure the window's
+            # concurrent memory use against
+            gate.begin_window()
 
             tasks: list[asyncio.Task] = []
             for note in window:
@@ -1462,10 +1474,12 @@ async def bulk_notes_op(
                 cancelled = True
                 break
 
-            # The gate may have resized in response to memory pressure while this window ran
+            # Fold this window into what we know an op of this kind costs, which may move the
+            # ceiling; the gate may also have resized under memory pressure while it ran
+            gate.end_window()
             window_size = max(1, gate.limit * TASK_QUEUE_DEPTH)
     finally:
-        gate.stop_adapting()
+        gate.finish()
         progress_updater.gate = None
 
     if not cancelled:
@@ -1749,10 +1763,11 @@ def selected_notes_op(
         asyncio.set_event_loop(loop)
         # One bounded thread pool for the whole operation, shared by make_inner_bulk_op and
         # every asyncio.to_thread call beneath it. Previously each task built its own pool and
-        # never shut it down, so threads accumulated for the life of the process.
-        _, max_concurrency, _ = concurrency_limits(config)
+        # never shut it down, so threads accumulated for the life of the process. Sized to the
+        # highest limit the gate could reach, since it may raise its ceiling mid-run once it
+        # has measured what the op costs; unused threads are never spawned.
         executor = ThreadPoolExecutor(
-            max_workers=max_concurrency + 4,
+            max_workers=max_possible_concurrency(config) + 4,
             thread_name_prefix="simple_anki_ai_prompts",
         )
         loop.set_default_executor(executor)

@@ -5,26 +5,38 @@ and how many a device can afford differs a lot between a desktop and a tablet. S
 fixed per-model request rate, a gate caps concurrent operations and resizes itself based on how
 much memory is still free.
 
+How much one operation costs also differs a lot between ops — a match-words task fans out per
+word and can create notes and call several other ops, while translating a field is a single
+request — so the cost is measured while running rather than assumed, and remembered per op for
+next time.
+
 Memory probing is stdlib-only (ctypes on Windows, /proc on Linux) because Anki's bundled Python
 has no psutil.
 """
 
 import asyncio
 import ctypes
+import json
 import logging
 import os
 import subprocess
 import sys
 from collections import deque
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 MB = 1024 * 1024
 
-# Rough memory cost of one in-flight operation: a worker thread's committed stack, the
-# connection, the request/response buffers and the note objects the task holds onto.
-PER_TASK_MEMORY_ESTIMATE = 8 * MB
+# Starting guess for what one in-flight operation costs: a worker thread's committed stack, the
+# connection, the request/response buffers and the note objects the task holds onto. Only used
+# until the op has been measured once; see MemoryEstimator.
+DEFAULT_PER_TASK_MEMORY = 8 * MB
+# Measured values are clamped to this range. Anything outside it is measurement noise rather
+# than a real per-task cost.
+MIN_PER_TASK_MEMORY = 512 * 1024
+MAX_PER_TASK_MEMORY = 128 * MB
 
 MIN_CONCURRENCY = 1
 MIN_AUTO_CONCURRENCY = 4
@@ -225,32 +237,175 @@ def format_bytes(value: Optional[int]) -> str:
 # --- The gate ----------------------------------------------------------------------------
 
 
-def concurrency_limits(config: Optional[dict] = None) -> tuple[int, int, bool]:
+def memory_budget() -> Optional[float]:
+    """Bytes we're willing to spend on in-flight tasks, or None if memory can't be probed."""
+    memory = system_memory()
+    if not memory or not memory[0] or not memory[1]:
+        return None
+    total, available = memory
+    return min(available * MEMORY_TARGET_FRACTION, total * MEMORY_TOTAL_FRACTION)
+
+
+def max_possible_concurrency(config: Optional[dict] = None) -> int:
+    """The highest limit the gate could ever reach for this config.
+
+    Used to size the shared thread pool, which is created before the gate and must still be
+    big enough if a cheap op turns out to warrant a lot of concurrency. Threads are spawned
+    lazily, so an over-generous ceiling costs nothing.
+    """
+    config = config or {}
+    configured = int(config.get("max_concurrent_requests", 0) or 0)
+    return max(configured, MAX_AUTO_CONCURRENCY)
+
+
+def max_concurrency_for(per_task_memory: float) -> int:
+    budget = memory_budget()
+    if budget is None:
+        return INITIAL_AUTO_CONCURRENCY
+    return int(
+        min(
+            MAX_AUTO_CONCURRENCY,
+            max(MIN_AUTO_CONCURRENCY, budget // max(per_task_memory, MIN_PER_TASK_MEMORY)),
+        )
+    )
+
+
+def concurrency_limits(
+    config: Optional[dict] = None, per_task_memory: Optional[float] = None
+) -> tuple[int, int, bool]:
     """Work out (starting limit, ceiling, adaptive) for this device.
 
     A configured max_concurrent_requests is used verbatim and turns adaptation off. Otherwise
-    the ceiling comes from how much memory is free, so a tablet gets a lower one than a
-    desktop without anyone having to configure it.
+    the ceiling comes from how much memory is free divided by what one task costs, so a tablet
+    gets a lower one than a desktop, and a heavy op gets a lower one than a light one, without
+    anyone having to configure it.
     """
     config = config or {}
     configured = int(config.get("max_concurrent_requests", 0) or 0)
     if configured > 0:
         return configured, configured, False
 
-    memory = system_memory()
-    if not memory or not memory[0] or not memory[1]:
+    if memory_budget() is None:
         # No probe available: a conservative static limit
         return INITIAL_AUTO_CONCURRENCY, INITIAL_AUTO_CONCURRENCY, False
 
-    total, available = memory
-    budget = min(available * MEMORY_TARGET_FRACTION, total * MEMORY_TOTAL_FRACTION)
-    max_limit = int(
-        min(
-            MAX_AUTO_CONCURRENCY,
-            max(MIN_AUTO_CONCURRENCY, budget // PER_TASK_MEMORY_ESTIMATE),
-        )
+    max_limit = max_concurrency_for(
+        per_task_memory if per_task_memory else DEFAULT_PER_TASK_MEMORY
     )
     return min(max_limit, INITIAL_AUTO_CONCURRENCY), max_limit, True
+
+
+# --- Learning what an op actually costs ---------------------------------------------------
+
+ESTIMATES_FILE = "memory_estimates.json"
+# Weight given to a new run's measurement when blending it into the stored value. Low enough
+# that one unusual run doesn't throw the estimate off, high enough to track real changes.
+ESTIMATE_BLEND = 0.4
+# A measurement needs at least this many tasks running concurrently to mean anything
+MIN_SAMPLE_IN_FLIGHT = 2
+
+
+def _estimates_path() -> Path:
+    # user_files is the add-on's own data directory: it survives add-on updates and is not
+    # synced, which suits a per-device measurement.
+    return Path(__file__).resolve().parent.parent / "user_files" / ESTIMATES_FILE
+
+
+def load_per_task_estimates() -> dict:
+    path = _estimates_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logger.debug("Could not read memory estimates: %s", e)
+        return {}
+
+
+def save_per_task_estimate(op_key: str, value: float) -> None:
+    path = _estimates_path()
+    try:
+        estimates = load_per_task_estimates()
+        previous = estimates.get(op_key)
+        if isinstance(previous, (int, float)) and previous > 0:
+            value = previous * (1 - ESTIMATE_BLEND) + value * ESTIMATE_BLEND
+        estimates[op_key] = int(value)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dict(sorted(estimates.items())), f, indent=2)
+        logger.debug("Saved per-task memory estimate for %r: %s", op_key, format_bytes(int(value)))
+    except Exception as e:
+        logger.debug("Could not save memory estimate for %r: %s", op_key, e)
+
+
+class MemoryEstimator:
+    """Measures what one in-flight operation of a given op actually costs.
+
+    Measured per window of tasks. The bulk ops process notes in windows, and between windows
+    nothing is in flight, which gives a clean baseline: memory that has accumulated over the
+    run so far (results dicts and the like) is absorbed into the new baseline, so only the
+    growth caused by the window's concurrent tasks is attributed to per-task cost.
+
+    Within a run the largest measurement wins, because what has to fit in RAM is the peak, not
+    the average. Across runs the value is blended into the stored one so a single odd run
+    doesn't skew it.
+    """
+
+    def __init__(self, op_key: Optional[str], stored: Optional[float] = None):
+        self.op_key = op_key
+        self.measured: Optional[float] = None
+        self.estimate: float = float(stored) if stored else DEFAULT_PER_TASK_MEMORY
+        self.from_measurement = bool(stored)
+        self._baseline: Optional[int] = None
+        self._peak_rss = 0
+        self._peak_in_flight = 0
+
+    def begin_window(self) -> None:
+        """Called when nothing is in flight, to re-baseline."""
+        rss = process_memory()
+        self._baseline = rss
+        self._peak_rss = rss or 0
+        self._peak_in_flight = 0
+
+    def sample(self, rss: Optional[int], in_flight: int) -> None:
+        if rss is not None:
+            self._peak_rss = max(self._peak_rss, rss)
+        self._peak_in_flight = max(self._peak_in_flight, in_flight)
+
+    def end_window(self) -> Optional[float]:
+        """Fold this window into the estimate. Returns the new estimate if it changed."""
+        rss = process_memory()
+        self.sample(rss, 0)
+        baseline = self._baseline
+        self._baseline = None
+        if baseline is None or self._peak_in_flight < MIN_SAMPLE_IN_FLIGHT:
+            return None
+        growth = self._peak_rss - baseline
+        if growth <= 0:
+            # Memory the allocator already held was reused; that tells us nothing new
+            return None
+        per_task = growth / self._peak_in_flight
+        per_task = min(MAX_PER_TASK_MEMORY, max(MIN_PER_TASK_MEMORY, per_task))
+        if self.measured is not None and per_task <= self.measured:
+            return None
+        self.measured = per_task
+        previous = self.estimate
+        self.estimate = per_task
+        self.from_measurement = True
+        logger.debug(
+            "Measured per-task memory for %r: %s over %d concurrent tasks (was %s)",
+            self.op_key,
+            format_bytes(int(per_task)),
+            self._peak_in_flight,
+            format_bytes(int(previous)),
+        )
+        return per_task
+
+    def persist(self) -> None:
+        if self.op_key and self.measured:
+            save_per_task_estimate(self.op_key, self.measured)
 
 
 class ConcurrencyGate:
@@ -265,7 +420,7 @@ class ConcurrencyGate:
     One gate per bulk run; create it inside the running event loop.
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: Optional[dict] = None, op_key: Optional[str] = None):
         config = config or {}
         memory_limit_mb = int(config.get("memory_limit_mb", 0) or 0)
 
@@ -274,7 +429,15 @@ class ConcurrencyGate:
         self.memory_limit = memory_limit_mb * MB if memory_limit_mb > 0 else 0
         self.reserve = max(MIN_RESERVE_BYTES, int(total * RESERVE_TOTAL_FRACTION)) if total else 0
 
-        self.limit, self.max_limit, self.adaptive = concurrency_limits(config)
+        # What this particular op cost last time it ran, if we've measured it before
+        stored = load_per_task_estimates().get(op_key) if op_key else None
+        self.estimator = MemoryEstimator(
+            op_key, stored if isinstance(stored, (int, float)) else None
+        )
+
+        self.limit, self.max_limit, self.adaptive = concurrency_limits(
+            config, self.estimator.estimate
+        )
 
         self.in_flight = 0
         self.available_memory = available
@@ -282,11 +445,14 @@ class ConcurrencyGate:
         self._adapt_task: Optional[asyncio.Task] = None
 
         logger.debug(
-            "ConcurrencyGate: limit=%d max=%d adaptive=%s total_mem=%s avail_mem=%s"
-            " reserve=%s hard_cap=%s",
+            "ConcurrencyGate(%r): limit=%d max=%d adaptive=%s per_task=%s (%s)"
+            " total_mem=%s avail_mem=%s reserve=%s hard_cap=%s",
+            op_key,
             self.limit,
             self.max_limit,
             self.adaptive,
+            format_bytes(int(self.estimator.estimate)),
+            "measured previously" if self.estimator.from_measurement else "default guess",
             format_bytes(total or None),
             format_bytes(available or None),
             format_bytes(self.reserve or None),
@@ -341,6 +507,37 @@ class ConcurrencyGate:
             self._adapt_task.cancel()
             self._adapt_task = None
 
+    def finish(self) -> None:
+        """End of the run: stop adapting and remember what this op cost."""
+        self.stop_adapting()
+        self.estimator.persist()
+
+    def begin_window(self) -> None:
+        """Called by the bulk ops before starting a window of tasks, with nothing in flight."""
+        self.estimator.begin_window()
+
+    def end_window(self) -> None:
+        """Called once a window's tasks have all finished."""
+        if self.estimator.end_window() is None:
+            return
+        if not self.adaptive:
+            # The limit is pinned by config; we still learn the cost for next time
+            return
+        new_max = max_concurrency_for(self.estimator.estimate)
+        if new_max == self.max_limit:
+            return
+        logger.debug(
+            "Per-task memory now %s, adjusting concurrency ceiling %d -> %d",
+            format_bytes(int(self.estimator.estimate)),
+            self.max_limit,
+            new_max,
+        )
+        self.max_limit = new_max
+        if self.limit > self.max_limit:
+            self.limit = self.max_limit
+        # A raised ceiling isn't applied at once: the adapt loop grows the limit towards it
+        # only while memory stays comfortable.
+
     async def _adapt_loop(self) -> None:
         try:
             while True:
@@ -353,7 +550,9 @@ class ConcurrencyGate:
         memory = system_memory()
         available = memory[1] if memory else None
         self.available_memory = available or 0
-        rss = process_memory() if self.memory_limit else None
+        # Sampled every tick both for the hard cap and to learn what a task costs
+        rss = process_memory()
+        self.estimator.sample(rss, self.in_flight)
 
         under_pressure = (
             available is not None and self.reserve and available < self.reserve
@@ -390,4 +589,6 @@ class ConcurrencyGate:
         text = f"{self.in_flight}/{self.limit}"
         if self.available_memory:
             text += f" | Free memory: {format_bytes(self.available_memory)}"
+        if self.estimator.measured:
+            text += f" | {format_bytes(int(self.estimator.measured))}/task"
         return text

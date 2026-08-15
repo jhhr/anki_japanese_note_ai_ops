@@ -59,9 +59,23 @@ Errors that retrying can't fix are not retried: an exhausted OpenAI billing quot
 ### memory use and concurrency
 
 How many notes/words are processed at once is what determines memory use, and it is sized
-automatically from the device's available RAM — a tablet gets a lower limit than a desktop with
-no configuration. While a run is going, the limit is lowered if free memory gets low and raised
+automatically: available RAM divided by what one task of that op actually costs. A tablet gets a
+lower limit than a desktop, and a heavy op gets a lower limit than a light one, with no
+configuration. While a run is going, the limit is lowered if free memory gets low and raised
 again when it recovers. The progress dialog shows the current value.
+
+The per-task cost is measured, not guessed. Notes are processed in windows, and between windows
+nothing is in flight, which gives a clean baseline — memory that has accumulated over the run so
+far is absorbed into it, so only growth caused by the concurrent tasks counts. The largest
+measurement in a run wins, since what has to fit in RAM is the peak. The result is remembered per
+op in `user_files/memory_estimates.json` and blended with the previous value, so the first run of
+an op learns what it costs and later runs start out sized correctly. Deleting that file just
+means the ops get measured again from the default guess.
+
+Note that this only changes the limit when memory is the binding constraint. Concurrency is
+capped at 64 tasks regardless, so on a machine with plenty of free RAM even a heavy op may sit at
+the cap and the measurement will have no visible effect; it matters on devices where RAM is
+short. The progress dialog shows the measured cost per task once a window has completed.
 
 Both settings default to `0`, meaning "work it out automatically". Set them only if the
 automatic behaviour gets it wrong on a particular device.
