@@ -55,6 +55,7 @@ from .base_ops import (
     make_inner_bulk_op,
     selected_notes_op,
 )
+from .concurrency import ConcurrencyGate
 from .clean_meaning import clean_meaning_in_note
 from .extract_words import word_lists_str_format
 from .make_all_meanings import (
@@ -1852,6 +1853,7 @@ def match_words_to_notes(
     notes_to_update_dict: dict[NoteId, Note],
     progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
+    gate: ConcurrencyGate,
     all_generated_meanings_dict: GeneratedMeaningsDictType,
     update_word_list_in_dict: Callable[[list[ProcessedWordTuple], list[ProcessedWordTuple]], None],
     note_type: NotetypeDict,
@@ -1911,9 +1913,6 @@ def match_words_to_notes(
     if not sentence:
         logger.error(f"{log_prefix}Error: No sentence provided for matching words")
         return word_tuples
-
-    config["rate_limits"] = config.get("rate_limits", {})
-    rate_limit = config["rate_limits"].get(model, None)
 
     # Get the field names from the config
     word_list_field = get_field_config(config, "word_list_field", note_type)
@@ -2172,7 +2171,7 @@ def match_words_to_notes(
         process_word_tuple: Callable[..., Coroutine[Any, Any, bool]] = make_inner_bulk_op(
             config=config,
             op=match_op,
-            rate_limit=rate_limit,
+            gate=gate,
             progress_updater=progress_updater,
             handle_op_error=handle_op_error,
             handle_op_result=handle_op_result,
@@ -2182,8 +2181,6 @@ def match_words_to_notes(
             break
         task: asyncio.Task = asyncio.create_task(
             process_word_tuple(
-                # task_index is consumed by process_op in make_inner_bulk_op and not passed back!
-                task_index=len(tasks) - 1,
                 notes_to_add_dict=notes_to_add_dict,
                 notes_to_update_dict=notes_to_update_dict,
                 # the below kwargs are passed back to the match_op function (and any more if we were
@@ -2252,6 +2249,7 @@ def match_words_to_notes_for_note(
     notes_to_update_dict: dict[NoteId, Note],
     progress_updater: AsyncTaskProgressUpdater,
     cancel_state: CancelState,
+    gate: ConcurrencyGate,
     all_generated_meanings_dict: GeneratedMeaningsDictType,
     word_locks_dict: dict[str, asyncio.Lock],
     word_lock: asyncio.Lock,
@@ -2483,6 +2481,7 @@ def match_words_to_notes_for_note(
                 notes_to_update_dict=notes_to_update_dict,
                 progress_updater=progress_updater,
                 cancel_state=cancel_state,
+                gate=gate,
                 all_generated_meanings_dict=all_generated_meanings_dict,
                 update_word_list_in_dict=update_word_list_in_dict,
                 note_type=note_type,
@@ -2571,6 +2570,7 @@ def bulk_match_words_to_notes(
         notes_to_update_dict: dict[NoteId, Note],
         progress_updater: AsyncTaskProgressUpdater,
         cancel_state: CancelState,
+        gate: ConcurrencyGate,
     ):
         nonlocal all_generated_meanings_dict
         limit_words_and_readings = None
@@ -2585,6 +2585,7 @@ def bulk_match_words_to_notes(
             notes_to_update_dict=notes_to_update_dict,
             progress_updater=progress_updater,
             cancel_state=cancel_state,
+            gate=gate,
             all_generated_meanings_dict=all_generated_meanings_dict,
             word_locks_dict=word_locks_dict,
             word_lock=word_lock,

@@ -952,8 +952,6 @@ def bulk_clean_notes_op(
     if not config:
         showWarning("Missing addon configuration")
         return
-    model = config.get("word_meaning_model", "")
-    rate_limit = config.get("rate_limits", {}).get(model, None)
     message = "Cleaning meaning"
 
     media_path = Path(mw.pm.profileFolder(), "collection.media")
@@ -993,7 +991,6 @@ def bulk_clean_notes_op(
         progress_updater,
         notes_to_add_dict=notes_to_add_dict,
         notes_to_update_dict=notes_to_update_dict,
-        rate_limit=rate_limit,
         on_end=on_end,
     )
 

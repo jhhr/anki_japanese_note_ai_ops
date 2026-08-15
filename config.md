@@ -39,16 +39,43 @@ Define which model to use for each task
 - `kanjify_sentence_temperature`: Default is `0.1`. Passed through to provider temperature controls for kanjification requests only.
   Use a low value to reduce variation in kanji choice while still allowing the model a small amount of flexibility. `0.0` is supported by the major providers here, but is not guaranteed to be fully deterministic and can sometimes be more brittle than a very low non-zero setting.
 
-### model rate limits
+### rate limits
 
-Must be defined for each model. Default are set very low. Check the respective API docs
-for what rate limits you may be able to / want to use for each model.
+Nothing to configure. Requests go out as fast as the concurrency limit allows; when a provider
+rejects one for exceeding its rate limit, that model is put on a short cooldown and the request
+is retried automatically. The wait comes from the provider's own response — Anthropic's
+`retry-after` header, OpenAI's `Retry-After`, Gemini's `RetryInfo.retryDelay` — falling back to
+exponential backoff when none is given.
 
-RPM=request per minure, TPM=tokenn per minute
+Errors that retrying can't fix are not retried: an exhausted OpenAI billing quota
+(`insufficient_quota`) or a used-up Gemini per-day quota fails immediately and is logged.
 
-- Free tier gemini 2.5-flash 10RPM
-- Paid tier 1 gemini 2.5-flash 1000RPM
-- gpt4o 450000TPM / 5000RPM
+- `max_request_retries`: Default `5`. How many times to retry a request that failed for a
+  retryable reason (rate limit, provider overload, timeout, connection error).
+- `max_retry_wait_seconds`: Default `120`. If a provider asks to wait longer than this, the
+  request is abandoned rather than stalling the whole run. Raise it if you regularly hit long
+  token-per-minute cooldowns and would rather wait them out.
+
+### memory use and concurrency
+
+How many notes/words are processed at once is what determines memory use, and it is sized
+automatically from the device's available RAM — a tablet gets a lower limit than a desktop with
+no configuration. While a run is going, the limit is lowered if free memory gets low and raised
+again when it recovers. The progress dialog shows the current value.
+
+Both settings default to `0`, meaning "work it out automatically". Set them only if the
+automatic behaviour gets it wrong on a particular device.
+
+- `max_concurrent_requests`: Default `0` (automatic). A value above `0` pins the number of
+  concurrent operations and turns off the memory-based adjustment.
+- `memory_limit_mb`: Default `0` (automatic — keep at least 512 MB, or 10% of total RAM,
+  free). A value above `0` caps how much memory the Anki process may use before the addon
+  starts backing off.
+
+### request_timeout
+
+Default `180`. Seconds to wait for a single API response before giving up on that attempt.
+Timeouts are retried, subject to `max_request_retries`.
 
 ## config fields per note type name
 
