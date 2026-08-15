@@ -1356,8 +1356,6 @@ async def bulk_nested_notes_op(
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
     rate_limit_tracker.reset()
-    # Clear any cancellation left over from a previous run
-    begin_run()
 
     cancel_state = CancelState()
     cancel_manager: Optional[CancelManager] = None
@@ -1618,8 +1616,6 @@ async def bulk_notes_op(
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
     rate_limit_tracker.reset()
-    # Clear any cancellation left over from a previous run
-    begin_run()
 
     def handle_op_success(
         note: Note,
@@ -1821,6 +1817,15 @@ def selected_notes_op(
 
     # Create a wrapper function that handles the async operation
     def run_bulk_op(col: Collection) -> OpChanges:
+        # Every operation enters here, which makes this the only place that can promise a run
+        # starts uncancelled. bulk_notes_op and bulk_nested_notes_op used to do the clearing,
+        # but an op is free to read the collection before it gets that far - the single-word
+        # match ops search out the notes to work on first - and those reads go through
+        # collection_access, which refuses while the previous, cancelled run's flag is still
+        # set. That turned "cancel a run, then start another" into a RunCancelled traceback out
+        # of the new operation before it had done anything.
+        begin_run()
+
         async def async_wrapper():
             nonlocal edited_nids, edited_other_nids
             result = await bulk_op(
@@ -2071,6 +2076,13 @@ def selected_notes_op(
         loop.set_default_executor(executor)
         try:
             return loop.run_until_complete(async_wrapper())
+        except RunCancelled as e:
+            # A cancel that landed on a collection read this thread makes outside the cleanup
+            # phase, so the op unwound before it could save anything. There is nothing left to
+            # write, but being cancelled is a normal outcome rather than an error: end the
+            # operation quietly instead of showing the user a traceback.
+            logger.info("Bulk op abandoned after cancellation: %s", e)
+            return OpChanges()
         finally:
             teardown_started = time.monotonic()
             logger.debug(
