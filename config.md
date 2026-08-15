@@ -72,19 +72,21 @@ op in `user_files/memory_estimates.json` and blended with the previous value, so
 an op learns what it costs and later runs start out sized correctly. Deleting that file just
 means the ops get measured again from the default guess.
 
-Note that this only changes the limit when memory is the binding constraint. Concurrency is
-capped at 64 tasks regardless, so on a machine with plenty of free RAM even a heavy op may sit at
-the cap and the measurement will have no visible effect; it matters on devices where RAM is
-short. The progress dialog shows the measured cost per task once a window has completed.
+There is also a fixed backstop of 256 concurrent tasks, which only exists to stop a very cheap op
+on a very empty machine from opening an absurd number of connections at once. Memory is meant to
+be what limits concurrency in practice: with a couple of GB of budget, ops costing more than
+about 8 MB per task are limited by memory rather than by the backstop.
 
-Both settings default to `0`, meaning "work it out automatically". Set them only if the
-automatic behaviour gets it wrong on a particular device.
-
-- `max_concurrent_requests`: Default `0` (automatic). A value above `0` pins the number of
-  concurrent operations and turns off the memory-based adjustment.
+- `max_concurrent_requests`: Default `0` (automatic). A value above `0` lowers the ceiling but
+  does **not** turn off the memory-based adjustment — the limit still drops under memory pressure
+  and is still capped by what memory allows if that is lower than your value. Use it to hold a
+  device below what its free RAM would otherwise permit.
 - `memory_limit_mb`: Default `0` (automatic — keep at least 512 MB, or 10% of total RAM,
-  free). A value above `0` caps how much memory the Anki process may use before the addon
-  starts backing off.
+  free). A value above `0` caps how much memory the Anki process may use before the addon starts
+  backing off.
+
+The progress dialog shows the current limit, free memory, and the measured cost per task once a
+window has completed.
 
 ### request_timeout
 

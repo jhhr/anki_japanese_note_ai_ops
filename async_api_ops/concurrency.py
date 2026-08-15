@@ -40,19 +40,33 @@ MAX_PER_TASK_MEMORY = 128 * MB
 
 MIN_CONCURRENCY = 1
 MIN_AUTO_CONCURRENCY = 4
-MAX_AUTO_CONCURRENCY = 64
-INITIAL_AUTO_CONCURRENCY = 8
+# Backstop only. Memory is meant to be what limits concurrency; this just stops a very cheap
+# op on a very empty machine from opening an absurd number of connections at once.
+MAX_AUTO_CONCURRENCY = 256
+# Where an adaptive run starts before it has grown into its ceiling
+ADAPTIVE_START_CONCURRENCY = 16
+# Used when memory can't be probed at all, so there is nothing to adapt against
+NO_PROBE_CONCURRENCY = 8
 
-# Fraction of currently-available memory we're willing to spend on in-flight tasks
+# Fraction of the memory we're allowed to touch that goes to in-flight tasks. The rest is
+# headroom, so a run doesn't drive the machine to the point where the adapt loop has to
+# start backing off.
 MEMORY_TARGET_FRACTION = 0.5
 # ...but never more than this fraction of total RAM, so a machine that happens to be idle
 # doesn't get us a limit it can't sustain once other apps want memory back
 MEMORY_TOTAL_FRACTION = 0.25
 
+# Memory to leave for everything else on the machine - the browser and editor the user has
+# open alongside Anki. Both the budget and the runtime pressure check work off this, so the
+# ceiling we plan for and the point we back off at agree with each other.
 MIN_RESERVE_BYTES = 512 * MB
 RESERVE_TOTAL_FRACTION = 0.1
 
 ADAPT_INTERVAL_SECONDS = 2.0
+# Fraction of the current limit to add per adapt tick while memory stays comfortable. Growing
+# by a fixed step instead would take minutes to reach a high ceiling, so a run that is short
+# or whose notes are quick would finish having never used the concurrency it could afford.
+GROWTH_RATE = 0.25
 
 # How many tasks to have queued behind the gate, as a multiple of the current limit. Some
 # queue is needed: a slot must be claimed the instant one frees, and the gate can only tell
@@ -237,13 +251,24 @@ def format_bytes(value: Optional[int]) -> str:
 # --- The gate ----------------------------------------------------------------------------
 
 
+def memory_reserve(total: int) -> int:
+    """Memory to keep free for the rest of the machine."""
+    return max(MIN_RESERVE_BYTES, int(total * RESERVE_TOTAL_FRACTION))
+
+
 def memory_budget() -> Optional[float]:
-    """Bytes we're willing to spend on in-flight tasks, or None if memory can't be probed."""
+    """Bytes we're willing to spend on in-flight tasks, or None if memory can't be probed.
+
+    The reserve comes off the top before anything is budgeted, so the ceiling we size for and
+    the level the adapt loop backs off at are consistent. Budgeting from raw available memory
+    would happily plan a limit that immediately triggers the pressure response.
+    """
     memory = system_memory()
     if not memory or not memory[0] or not memory[1]:
         return None
     total, available = memory
-    return min(available * MEMORY_TARGET_FRACTION, total * MEMORY_TOTAL_FRACTION)
+    spendable = max(0, available - memory_reserve(total))
+    return min(spendable * MEMORY_TARGET_FRACTION, total * MEMORY_TOTAL_FRACTION)
 
 
 def max_possible_concurrency(config: Optional[dict] = None) -> int:
@@ -261,7 +286,7 @@ def max_possible_concurrency(config: Optional[dict] = None) -> int:
 def max_concurrency_for(per_task_memory: float) -> int:
     budget = memory_budget()
     if budget is None:
-        return INITIAL_AUTO_CONCURRENCY
+        return NO_PROBE_CONCURRENCY
     return int(
         min(
             MAX_AUTO_CONCURRENCY,
@@ -275,22 +300,24 @@ def concurrency_limits(
 ) -> tuple[int, int, bool]:
     """Work out (starting limit, ceiling, adaptive) for this device.
 
-    A configured max_concurrent_requests is used verbatim and turns adaptation off. Otherwise
-    the ceiling comes from how much memory is free divided by what one task costs, so a tablet
-    gets a lower one than a desktop, and a heavy op gets a lower one than a light one, without
-    anyone having to configure it.
+    The ceiling comes from how much memory is free divided by what one task costs, so a tablet
+    gets a lower one than a desktop, and a heavy op a lower one than a light op, without anyone
+    having to configure it. A configured max_concurrent_requests lowers that ceiling further
+    but does not switch adaptation off - the memory-pressure response still applies underneath
+    it, which is what actually protects the machine.
     """
     config = config or {}
     configured = int(config.get("max_concurrent_requests", 0) or 0)
-    if configured > 0:
-        return configured, configured, False
 
     if memory_budget() is None:
-        # No probe available: a conservative static limit
-        return INITIAL_AUTO_CONCURRENCY, INITIAL_AUTO_CONCURRENCY, False
+        # Nothing to adapt against: a conservative static limit
+        static = configured if configured > 0 else NO_PROBE_CONCURRENCY
+        return static, static, False
 
-    max_limit = max_concurrency_for(per_task_memory if per_task_memory else DEFAULT_PER_TASK_MEMORY)
-    return min(max_limit, INITIAL_AUTO_CONCURRENCY), max_limit, True
+    max_limit = max_concurrency_for(per_task_memory or DEFAULT_PER_TASK_MEMORY)
+    if configured > 0:
+        max_limit = min(max_limit, configured)
+    return min(max_limit, ADAPTIVE_START_CONCURRENCY), max_limit, True
 
 
 # --- Learning what an op actually costs ---------------------------------------------------
@@ -425,7 +452,9 @@ class ConcurrencyGate:
         total, available = system_memory() or (0, 0)
         self.total_memory = total
         self.memory_limit = memory_limit_mb * MB if memory_limit_mb > 0 else 0
-        self.reserve = max(MIN_RESERVE_BYTES, int(total * RESERVE_TOTAL_FRACTION)) if total else 0
+        self.reserve = memory_reserve(total) if total else 0
+        # A user-set ceiling the gate must never grow past, even after re-measuring
+        self.configured_max = int(config.get("max_concurrent_requests", 0) or 0)
 
         # What this particular op cost last time it ran, if we've measured it before
         stored = load_per_task_estimates().get(op_key) if op_key else None
@@ -519,9 +548,11 @@ class ConcurrencyGate:
         if self.estimator.end_window() is None:
             return
         if not self.adaptive:
-            # The limit is pinned by config; we still learn the cost for next time
+            # Nothing to adapt against; we still learn the cost for next time
             return
         new_max = max_concurrency_for(self.estimator.estimate)
+        if self.configured_max > 0:
+            new_max = min(new_max, self.configured_max)
         if new_max == self.max_limit:
             return
         logger.debug(
@@ -574,12 +605,15 @@ class ConcurrencyGate:
         # Only grow when the gate itself is the bottleneck; if tasks aren't queueing up, a
         # bigger limit wouldn't be used anyway.
         if self.adaptive and self.limit < self.max_limit and self.in_flight >= self.limit:
-            self.limit += 1
+            previous = self.limit
+            self.limit = min(self.max_limit, self.limit + max(1, int(self.limit * GROWTH_RATE)))
             self._wake_waiters(self.limit - self.in_flight)
             logger.debug(
-                "Memory comfortable (avail=%s), raising concurrency to %d",
+                "Memory comfortable (avail=%s), raising concurrency %d -> %d (ceiling %d)",
                 format_bytes(available),
+                previous,
                 self.limit,
+                self.max_limit,
             )
 
     def status_text(self) -> str:
