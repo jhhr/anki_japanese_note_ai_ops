@@ -202,10 +202,22 @@ def _macos_system_memory() -> Optional[tuple[int, int]]:
 
 
 def _macos_process_memory() -> Optional[int]:
+    """Known broken: reports the peak rather than current usage. Needs replacing.
+
+    ru_maxrss is in bytes on macOS (kilobytes on Linux), but it is a high-water mark and never
+    falls, which both callers of process_memory() need it to do. The pressure response in
+    _adapt_once latches on once a configured memory_limit_mb has been crossed even momentarily,
+    halving concurrency every two seconds down to 1 and staying there for the life of the
+    process; and MemoryEstimator re-baselines each window from a value that only rises, so it
+    measures no growth and never learns what an op costs.
+
+    Replacing it means a source of current resident size - `ps -o rss=` through the subprocess
+    call this module already makes for vm_stat, or a ctypes libproc binding - which has to be
+    done on a macOS machine where it can be checked. Until then
+    test_process_memory_reports_current_usage_not_a_high_water_mark fails there on purpose.
+    """
     import resource
 
-    # ru_maxrss is bytes on macOS (kilobytes on Linux). High-water mark rather than current
-    # usage, which is good enough for spotting a run that is growing.
     usage = resource.getrusage(resource.RUSAGE_SELF)  # type: ignore[attr-defined]
     return int(usage.ru_maxrss)
 
