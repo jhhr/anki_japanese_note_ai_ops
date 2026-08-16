@@ -86,6 +86,21 @@ class ResponseAction:
     FAIL = "fail"
 
 
+# 429 is "too many requests" everywhere; Anthropic's 529 is "overloaded", which is the same
+# message about the service as a whole rather than about this one request.
+RATE_LIMIT_STATUSES = frozenset({429, 529})
+
+
+def is_rate_limited(response: "Optional[requests.Response]") -> bool:
+    """Whether a response is the provider telling us we are sending too much.
+
+    Only these justify holding every task for the model back. A timeout, a dropped connection
+    or a 500 is one request going wrong, and making the other fifty tasks wait it out is how a
+    single slow request came to stall a whole run.
+    """
+    return response is not None and response.status_code in RATE_LIMIT_STATUSES
+
+
 def _error_body(response: "requests.Response") -> dict:
     """Parse the JSON error body, returning an empty dict if it isn't JSON."""
     try:
@@ -304,6 +319,9 @@ class RateLimitTracker:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._cooldown_until: dict[str, float] = {}
+        # When each cooldown was installed, for telling a response that predates it from one
+        # that can actually speak to whether the limit has cleared
+        self._cooldown_set_at: dict[str, float] = {}
         self._consecutive: dict[str, int] = {}
 
     def wait_time(self, key: str) -> float:
@@ -315,20 +333,38 @@ class RateLimitTracker:
             remaining = until - time.monotonic()
             if remaining <= 0:
                 del self._cooldown_until[key]
+                self._cooldown_set_at.pop(key, None)
                 return 0.0
             return remaining
 
     def note_rate_limited(self, key: str, delay: float) -> None:
         """Hold off further requests to this model for `delay` seconds."""
         with self._lock:
-            until = time.monotonic() + delay
+            now = time.monotonic()
             # Never shorten an existing cooldown
-            self._cooldown_until[key] = max(until, self._cooldown_until.get(key, 0.0))
+            self._cooldown_until[key] = max(now + delay, self._cooldown_until.get(key, 0.0))
+            self._cooldown_set_at[key] = now
             self._consecutive[key] = self._consecutive.get(key, 0) + 1
 
-    def note_success(self, key: str) -> None:
+    def note_success(self, key: str, sent_at: Optional[float] = None) -> None:
+        """Note a successful response, clearing the model's cooldown unless it is stale.
+
+        `sent_at` is when that request was sent, and it decides whether the response has
+        anything to say about the cooldown. A burst of tasks all have requests in flight when
+        the first 429 comes back, and those requests were accepted before the limit was
+        reached - so their 200s are no evidence that it has cleared. Clearing on one of them
+        released every waiting task straight back into the same limit, where they spent their
+        retries on the same rejection. Only a request that demonstrably started after the
+        cooldown went up can clear it - a tie counts as stale, since time.monotonic on Windows
+        moves in ~16ms steps and two things inside one step tell us nothing about their order.
+        Passing no `sent_at` clears unconditionally.
+        """
         with self._lock:
+            set_at = self._cooldown_set_at.get(key)
+            if set_at is not None and sent_at is not None and sent_at <= set_at:
+                return
             self._cooldown_until.pop(key, None)
+            self._cooldown_set_at.pop(key, None)
             self._consecutive.pop(key, None)
 
     def consecutive_failures(self, key: str) -> int:
@@ -338,6 +374,7 @@ class RateLimitTracker:
     def reset(self) -> None:
         with self._lock:
             self._cooldown_until.clear()
+            self._cooldown_set_at.clear()
             self._consecutive.clear()
 
 
@@ -577,6 +614,9 @@ def post_with_retry(
             if not _sleep_cancellable(cooldown, cancel_state):
                 return None
 
+        # Noted before the request goes out: a 200 only says the limit has cleared if the
+        # request was sent after the cooldown went up. See RateLimitTracker.note_success.
+        sent_at = time.monotonic()
         try:
             _count_request(1)
             try:
@@ -608,7 +648,7 @@ def post_with_retry(
             return None
 
         if action == ResponseAction.OK and response is not None:
-            rate_limit_tracker.note_success(key)
+            rate_limit_tracker.note_success(key, sent_at=sent_at)
             hold_off = preemptive_cooldown(provider, response)
             if hold_off:
                 logger.debug("Model %s is out of request quota, holding off %.1fs", key, hold_off)
@@ -636,7 +676,11 @@ def post_with_retry(
 
         status = response.status_code if response is not None else "no response"
         logger.warning("Retrying %s in %.1fs (status %s)", key, delay, status)
-        rate_limit_tracker.note_rate_limited(key, delay)
+        # Only a rate-limit rejection is worth holding the whole model back for. Everything
+        # else retryable - timeouts, dropped connections, 500s - is this request's problem, so
+        # this task backs off on its own below and the others carry on.
+        if is_rate_limited(response):
+            rate_limit_tracker.note_rate_limited(key, delay)
         if not _sleep_cancellable(delay, cancel_state):
             return None
 
