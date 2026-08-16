@@ -11,6 +11,7 @@ clock makes backoffs pass instantly.
 """
 
 import json
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -504,7 +505,7 @@ class PostWithRetryTestCase(unittest.TestCase):
         api.rate_limit_tracker = self._real_tracker
         api._sessions.clear()
         api._sessions.update(self._real_sessions)
-        api.begin_run()
+        api.end_run()
 
     def serve(self, *outcomes) -> FakeSession:
         session = FakeSession(*outcomes)
@@ -759,6 +760,67 @@ class CancellationTests(PostWithRetryTestCase):
         self.assertTrue(api.is_cancelled(FakeCancelState(cancelled=True)))
         api.cancel_run()
         self.assertTrue(api.is_cancelled(None))
+
+    def test_a_thread_outside_the_run_keeps_working_after_it_is_cancelled(self):
+        # The editor hooks run their single-note ops on the main thread, which takes no part in
+        # any bulk run. With one process-wide flag, cancelling a bulk run left every one of them
+        # - a story or a translation on field unfocus - silently doing nothing from then on.
+        session = self.serve(FakeResponse(200))
+        api.cancel_run()
+
+        outcome = {}
+
+        def outside_the_run():
+            outcome["cancelled"] = api.run_cancelled()
+            outcome["response"] = self.post()
+
+        thread = threading.Thread(target=outside_the_run)
+        thread.start()
+        thread.join(5)
+
+        self.assertFalse(outcome["cancelled"])
+        self.assertIsNotNone(outcome["response"])
+        self.assertEqual(session.call_count, 1)
+
+    def test_a_worker_enrolled_in_the_run_is_cancelled_with_it(self):
+        # The point of the run being shared rather than per-thread: the ops overwhelmingly do
+        # not pass their cancel_state down, so the worker pool has to be stopped by the run.
+        session = self.serve(FakeResponse(200))
+        run = api.begin_run()
+        joined = threading.Event()
+        cancelled = threading.Event()
+        outcome = {}
+
+        def worker():
+            api.join_run(run)
+            joined.set()
+            cancelled.wait(5)
+            outcome["cancelled"] = api.run_cancelled()
+            outcome["response"] = self.post()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        self.assertTrue(joined.wait(5))
+        api.cancel_run()
+        cancelled.set()
+        thread.join(5)
+
+        self.assertTrue(outcome["cancelled"])
+        self.assertIsNone(outcome["response"])
+        self.assertEqual(session.call_count, 0)
+
+    def test_leaving_a_cancelled_run_does_not_uncancel_it(self):
+        # end_run hands the op's thread back uncancelled, because Anki reuses it for unrelated
+        # work. The threads the run abandoned keep seeing the cancellation, which is what stops
+        # them issuing requests for as long as they are alive.
+        run = api.begin_run()
+        api.cancel_run()
+        self.assertTrue(api.run_cancelled())
+
+        api.end_run()
+
+        self.assertFalse(api.run_cancelled())
+        self.assertTrue(run.cancelled.is_set())
 
 
 class SessionTests(unittest.TestCase):

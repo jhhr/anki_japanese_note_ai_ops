@@ -25,7 +25,9 @@ from .api_client import (
     begin_run,
     cancel_run,
     close_all_sessions,
+    end_run,
     is_cancelled,
+    join_run,
     post_with_retry,
     rate_limit_tracker,
     run_cancelled,
@@ -1828,7 +1830,7 @@ def selected_notes_op(
         # collection_access, which refuses while the previous, cancelled run's flag is still
         # set. That turned "cancel a run, then start another" into a RunCancelled traceback out
         # of the new operation before it had done anything.
-        begin_run()
+        run = begin_run()
 
         async def async_wrapper():
             nonlocal edited_nids, edited_other_nids
@@ -2076,6 +2078,10 @@ def selected_notes_op(
         executor = ThreadPoolExecutor(
             max_workers=max_possible_concurrency(config) + 4,
             thread_name_prefix="simple_anki_ai_prompts",
+            # Every worker takes part in this run, so cancelling it stops their requests and
+            # collection reads too - including in the threads the run is abandoning, which
+            # keep the enrolment for as long as they are alive.
+            initializer=partial(join_run, run),
         )
         loop.set_default_executor(executor)
         try:
@@ -2117,6 +2123,14 @@ def selected_notes_op(
                 teardown_started,
                 threads=threading.active_count(),
             )
+            # Last, so everything above still logs as part of the run it belongs to. This
+            # thread is Anki's and goes back to a pool that runs other work, including our own
+            # single-note ops, so its membership of this run must not outlive it: leaving it
+            # enrolled in a cancelled run is what used to make every later op the editor hooks
+            # run - a story or a translation on field unfocus - quietly do nothing for the
+            # rest of the session. The run's own worker threads stay enrolled; they are the
+            # ones that must keep seeing the cancellation.
+            end_run()
 
     return (
         CollectionOp(

@@ -41,35 +41,95 @@ TOGETHER = "together"
 
 # Cancellation used to rely on each op passing its cancel_state down to get_response, and in
 # practice almost none of them did - so a cancelled run kept issuing API calls and collection
-# queries from its abandoned threads for as long as there was work left. Only one bulk op runs
-# at a time, so the run's cancelled state lives here instead and every request checks it
-# whether or not the caller threaded anything through.
-_run_cancelled = threading.Event()
+# queries from its abandoned threads for as long as there was work left. The run's cancelled
+# state lives here instead and every request checks it whether or not the caller threaded
+# anything through.
+#
+# It is per-run and per-thread rather than a single process-wide flag. A cancelled run's flag
+# has to stay set for as long as its abandoned threads are alive, which is well past the point
+# where the operation itself has ended - but work that is not part of that run must not inherit
+# it. The single-note ops the editor hooks run are the case that matters: they call the same
+# request path from the main thread, and with one shared flag a cancelled bulk run left them
+# silently doing nothing for the rest of the session.
+#
+# So each run gets its own flag, and a thread is cancelled by the run it belongs to. Threads
+# that belong to no run - the main thread handling an editor hook - are never cancelled.
 
 
-def begin_run() -> None:
-    """Mark the start of a bulk operation, clearing any previous cancellation."""
-    _run_cancelled.clear()
+class Run:
+    """One bulk operation's cancelled flag, shared by every thread taking part in it."""
+
+    __slots__ = ("cancelled",)
+
+    def __init__(self) -> None:
+        self.cancelled = threading.Event()
+
+
+# The run the calling thread is taking part in, if any.
+_thread_run = threading.local()
+
+# The run currently in progress. Only used as a fallback for cancelling from a thread that is
+# not itself part of the run; the thread-local is what every check reads.
+_current_run: Optional[Run] = None
+
+
+def begin_run() -> Run:
+    """Start a bulk operation on this thread, and return its state.
+
+    Pass the returned run to join_run in every worker thread the operation uses, so they are
+    cancelled along with it.
+    """
+    global _current_run
+    run = Run()
+    _current_run = run
+    _thread_run.run = run
+    return run
+
+
+def join_run(run: Run) -> None:
+    """Enrol the calling thread in `run`, so cancelling the run stops its work too."""
+    _thread_run.run = run
+
+
+def end_run() -> None:
+    """Leave the current run, once the operation has finished with this thread.
+
+    The thread a bulk op runs on is Anki's, and goes back to a pool that later runs unrelated
+    work - including our own single-note ops - so its membership must not outlive the op. The
+    run's own worker threads stay enrolled: a cancelled run's abandoned threads must keep
+    seeing the cancellation for as long as they are alive.
+    """
+    global _current_run
+    run = getattr(_thread_run, "run", None)
+    _thread_run.run = None
+    if run is not None and _current_run is run:
+        _current_run = None
 
 
 def cancel_run() -> None:
-    """Cancel the current bulk operation.
+    """Cancel the bulk operation this thread is part of.
 
     No further requests are issued, and the ones already in flight are aborted rather than
     left to run to completion in threads nothing is waiting for any more.
     """
-    _run_cancelled.set()
+    run = getattr(_thread_run, "run", None) or _current_run
+    if run is None:
+        logger.debug("Cancel requested with no run in progress")
+    else:
+        run.cancelled.set()
     aborted = abort_in_flight_requests()
     logger.info("Run cancelled, aborted %d in-flight request(s)", aborted)
 
 
 def run_cancelled() -> bool:
-    return _run_cancelled.is_set()
+    """True if the run this thread is taking part in has been cancelled."""
+    run = getattr(_thread_run, "run", None)
+    return run is not None and run.cancelled.is_set()
 
 
 def is_cancelled(cancel_state: Optional[Any] = None) -> bool:
     """True if the run was cancelled, or the caller's own cancel state was set."""
-    if _run_cancelled.is_set():
+    if run_cancelled():
         return True
     return cancel_state is not None and cancel_state.is_cancelled()
 
