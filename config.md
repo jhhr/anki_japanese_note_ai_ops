@@ -72,15 +72,18 @@ op in `user_files/memory_estimates.json` and blended with the previous value, so
 an op learns what it costs and later runs start out sized correctly. Deleting that file just
 means the ops get measured again from the default guess.
 
-There is also a fixed backstop of 256 concurrent tasks, which only exists to stop a very cheap op
-on a very empty machine from opening an absurd number of connections at once. Memory is meant to
-be what limits concurrency in practice: with a couple of GB of budget, ops costing more than
-about 8 MB per task are limited by memory rather than by the backstop.
+While nothing is configured there is also a backstop of 256 concurrent tasks, which only exists to
+stop a very cheap op on a very empty machine from opening an absurd number of connections at once.
+Memory is meant to be what limits concurrency in practice: with a couple of GB of budget, ops
+costing more than about 8 MB per task are limited by memory rather than by the backstop.
 
-- `max_concurrent_requests`: Default `0` (automatic). A value above `0` lowers the ceiling but
-  does **not** turn off the memory-based adjustment — the limit still drops under memory pressure
-  and is still capped by what memory allows if that is lower than your value. Use it to hold a
-  device below what its free RAM would otherwise permit.
+- `max_concurrent_requests`: Default `0` (automatic). Any value above `0` takes the place of that
+  backstop, whether it is below 256 or above it, but does **not** turn off the memory-based
+  adjustment — the limit still drops under memory pressure, and what memory allows still caps it
+  if that is lower than your value. So a large value raises what a run *may* grow to rather than
+  what it will get, and a small one holds a device below what its free RAM would otherwise permit.
+  Where free memory cannot be probed at all there is nothing to adapt against, and your value is
+  used exactly as given (the default there is a static 8).
 - `memory_limit_mb`: Default `0` (automatic — keep at least 512 MB, or 10% of total RAM,
   free). A value above `0` caps how much memory the Anki process may use before the addon starts
   backing off.

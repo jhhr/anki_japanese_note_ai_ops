@@ -45,8 +45,9 @@ MAX_PER_TASK_MEMORY = 128 * MB
 
 MIN_CONCURRENCY = 1
 MIN_AUTO_CONCURRENCY = 4
-# Backstop only. Memory is meant to be what limits concurrency; this just stops a very cheap
-# op on a very empty machine from opening an absurd number of connections at once.
+# Backstop only, and only while nothing is configured. Memory is meant to be what limits
+# concurrency; this just stops a very cheap op on a very empty machine from opening an absurd
+# number of connections at once. A max_concurrent_requests takes its place, higher or lower.
 MAX_AUTO_CONCURRENCY = 256
 # Where an adaptive run starts before it has grown into its ceiling
 ADAPTIVE_START_CONCURRENCY = 16
@@ -322,13 +323,22 @@ def memory_per_slot(per_task_memory: float) -> float:
     return max(per_task_memory, MIN_PER_TASK_MEMORY) * TASK_QUEUE_DEPTH
 
 
-def max_concurrency_for(per_task_memory: float) -> int:
+def max_concurrency_for(per_task_memory: float, configured_max: int = 0) -> int:
+    """The ceiling memory allows for an op costing this much per task.
+
+    A configured max replaces the automatic backstop rather than applying under it: the 256 is
+    only there so an unconfigured run on a very empty machine doesn't open an absurd number of
+    connections, and someone who names a number has decided that for themselves. What memory
+    allows still applies on top, so a configured ceiling is what the run may grow to and not
+    what it will get.
+    """
     budget = memory_budget()
     if budget is None:
         return NO_PROBE_CONCURRENCY
+    backstop = configured_max if configured_max > 0 else MAX_AUTO_CONCURRENCY
     return int(
         min(
-            MAX_AUTO_CONCURRENCY,
+            backstop,
             max(MIN_AUTO_CONCURRENCY, budget // memory_per_slot(per_task_memory)),
         )
     )
@@ -341,9 +351,9 @@ def concurrency_limits(
 
     The ceiling comes from how much memory is free divided by what one task costs, so a tablet
     gets a lower one than a desktop, and a heavy op a lower one than a light op, without anyone
-    having to configure it. A configured max_concurrent_requests lowers that ceiling further
-    but does not switch adaptation off - the memory-pressure response still applies underneath
-    it, which is what actually protects the machine.
+    having to configure it. A configured max_concurrent_requests replaces the automatic backstop
+    and may be higher or lower than it, but does not switch adaptation off - the memory-pressure
+    response still applies underneath it, which is what actually protects the machine.
     """
     config = config or {}
     configured = int(config.get("max_concurrent_requests", 0) or 0)
@@ -353,9 +363,7 @@ def concurrency_limits(
         static = configured if configured > 0 else NO_PROBE_CONCURRENCY
         return static, static, False
 
-    max_limit = max_concurrency_for(per_task_memory or DEFAULT_PER_TASK_MEMORY)
-    if configured > 0:
-        max_limit = min(max_limit, configured)
+    max_limit = max_concurrency_for(per_task_memory or DEFAULT_PER_TASK_MEMORY, configured)
     return min(max_limit, ADAPTIVE_START_CONCURRENCY), max_limit, True
 
 
@@ -747,9 +755,7 @@ class ConcurrencyGate:
         if not self.adaptive:
             # Nothing to adapt against; we still learn the cost for next time
             return
-        new_max = max_concurrency_for(self.estimator.estimate)
-        if self.configured_max > 0:
-            new_max = min(new_max, self.configured_max)
+        new_max = max_concurrency_for(self.estimator.estimate, self.configured_max)
         if new_max == self.max_limit:
             return
         logger.debug(

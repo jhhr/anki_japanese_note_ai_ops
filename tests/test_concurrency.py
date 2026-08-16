@@ -171,6 +171,20 @@ class MaxConcurrencyTests(MemoryStubTestCase):
     def test_a_cheap_task_does_not_lift_the_ceiling_without_limit(self):
         self.assertEqual(conc.max_concurrency_for(1), conc.MAX_AUTO_CONCURRENCY)
 
+    def test_a_configured_maximum_takes_the_place_of_the_backstop(self):
+        # The 256 is only there so an unconfigured run stays sane; someone who names a number
+        # has decided for themselves, above it as well as below
+        self.memory.total = 32 * GB
+        self.memory.available = 32 * GB
+        self.assertEqual(conc.max_concurrency_for(1, 1000), 1000)
+        self.assertEqual(conc.max_concurrency_for(1, 12), 12)
+
+    def test_memory_still_caps_a_configured_maximum(self):
+        # It raises what a run may grow to, not what it gets
+        self.memory.total = 8 * GB
+        self.memory.available = 8 * GB  # budget = 2GB
+        self.assertEqual(conc.max_concurrency_for(16 * MB, 1000), 2 * GB // (16 * MB * 4))
+
     def test_an_expensive_task_still_leaves_a_workable_floor(self):
         self.assertEqual(conc.max_concurrency_for(100 * GB), conc.MIN_AUTO_CONCURRENCY)
 
@@ -207,6 +221,13 @@ class ConcurrencyLimitsTests(MemoryStubTestCase):
         self.assertTrue(adaptive)
         self.assertEqual(ceiling, 6)
         self.assertEqual(start, 6)
+
+    def test_a_configured_maximum_above_the_backstop_is_honoured(self):
+        self.memory.total = 32 * GB
+        self.memory.available = 32 * GB
+        _, ceiling, adaptive = conc.concurrency_limits({"max_concurrent_requests": 1000}, 1)
+        self.assertTrue(adaptive)
+        self.assertEqual(ceiling, 1000)
 
     def test_without_a_probe_the_limit_is_static(self):
         self.memory.probe_failed = True
