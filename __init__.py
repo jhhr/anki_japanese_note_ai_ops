@@ -1,6 +1,8 @@
 import os
 import sys
 import logging
+import threading
+import time
 from datetime import datetime
 
 from anki import hooks
@@ -18,6 +20,7 @@ if lib_path not in sys.path:
 
 # E402 - module level import not at top of file
 from .utils import get_field_config  # noqa: E402
+from .async_api_ops.diagnostics import WORKER_THREAD_PREFIX  # noqa: E402
 
 
 from .async_api_ops.clean_meaning import (  # noqa: E402
@@ -89,22 +92,69 @@ setup_addon_logging()
 _ADDON_HANDLER_FLAG = "_simple_anki_ai_prompts_handler"
 
 
+# How long to keep waiting for a run's threads before closing its log file anyway. Long enough
+# for a cancelled run to finish unwinding, short enough that the file doesn't stay open for the
+# session if something never exits.
+_LOG_CLOSE_TIMEOUT_SECONDS = 300
+_LOG_CLOSE_POLL_SECONDS = 2.0
+
+
+def _addon_threads_alive() -> bool:
+    """Whether any of this addon's worker threads is still running.
+
+    A run's threads outlive the operation on purpose: a cancelled run cannot interrupt a
+    request already in flight, so its threads unwind on their own afterwards - and what they
+    log while doing it is the whole point of the cancellation diagnostics.
+    """
+    return any(
+        thread.name.startswith(WORKER_THREAD_PREFIX) and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+def _close_handler_when_idle(handler: logging.Handler) -> None:
+    """Close a detached handler, once nothing is still writing through it.
+
+    Closing it straight away closed the file out from under a cancelled run's threads. They
+    keep logging as they unwind, and a handler whose stream has been closed re-opens the file
+    on the next record - so the descriptor this function exists to release was leaked after
+    all, and the run's last diagnostics ended up somewhere nothing was looking.
+    """
+
+    def close_quietly() -> None:
+        try:
+            handler.close()
+        except Exception:
+            pass
+
+    if not _addon_threads_alive():
+        close_quietly()
+        return
+
+    def wait_and_close() -> None:
+        deadline = time.monotonic() + _LOG_CLOSE_TIMEOUT_SECONDS
+        while time.monotonic() < deadline and _addon_threads_alive():
+            time.sleep(_LOG_CLOSE_POLL_SECONDS)
+        close_quietly()
+
+    threading.Thread(target=wait_and_close, name="sap_log_closer", daemon=True).start()
+
+
 def close_previous_log_handlers(logger_instance: logging.Logger) -> None:
-    """Detach and close any log handler this addon attached earlier.
+    """Detach any log handler this addon attached earlier, and close it once it is idle.
 
     A handler was added every time the browser context menu was built or a field lost focus,
     and none were ever removed. They accumulate for the lifetime of the session, so every log
     record gets written once per handler - and with several worker threads logging at once
     that turns into a great deal of redundant file I/O. It also keeps every previous log file
     open, which is why they can't be deleted until Anki is closed.
+
+    Detaching is immediate; the close waits for the threads that may still be writing.
     """
     for handler in list(logger_instance.handlers):
         if getattr(handler, _ADDON_HANDLER_FLAG, False):
             logger_instance.removeHandler(handler)
-            try:
-                handler.close()
-            except Exception:
-                pass
+            _close_handler_when_idle(handler)
 
 
 def create_call_log_handler(function_name: str) -> logging.Handler:
