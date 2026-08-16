@@ -135,5 +135,14 @@ def get_notes(note_ids: "Iterable[NoteId]") -> "list[Note]":
     ids = list(note_ids)
     if not ids:
         return []
+    notes: "list[Note]" = []
     with collection_access(f"get_notes: {len(ids)} notes"):
-        return [mw.col.get_note(note_id) for note_id in ids]
+        for note_id in ids:
+            # One turn with the collection, but a bounded one. A broad search hands this
+            # thousands of ids, and a batch that runs to the end no matter what is exactly the
+            # stretch of uninterruptible backend work this module exists to avoid: only the
+            # fetch already inside the backend has to be waited out, not all the rest.
+            if _giving_up():
+                raise RunCancelled(f"get_notes: gave up after {len(notes)} of {len(ids)} notes")
+            notes.append(mw.col.get_note(note_id))
+    return notes
