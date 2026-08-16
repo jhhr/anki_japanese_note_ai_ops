@@ -23,7 +23,7 @@ import subprocess
 import sys
 from collections import deque
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -445,7 +445,12 @@ class ConcurrencyGate:
     One gate per bulk run; create it inside the running event loop.
     """
 
-    def __init__(self, config: Optional[dict] = None, op_key: Optional[str] = None):
+    def __init__(
+        self,
+        config: Optional[dict] = None,
+        op_key: Optional[str] = None,
+        on_ceiling_changed: Optional[Callable[[int], None]] = None,
+    ):
         config = config or {}
         memory_limit_mb = int(config.get("memory_limit_mb", 0) or 0)
 
@@ -465,6 +470,12 @@ class ConcurrencyGate:
         self.limit, self.max_limit, self.adaptive = concurrency_limits(
             config, self.estimator.estimate
         )
+
+        # Told whenever the ceiling moves. The connection pool is sized from the ceiling and is
+        # created before the op has been measured, so without this it keeps the size that came
+        # from the starting guess: every request past it then pays a fresh TCP and TLS
+        # handshake, and urllib3 logs a "connection pool is full" warning for each one.
+        self.on_ceiling_changed = on_ceiling_changed
 
         self.in_flight = 0
         self.available_memory = available
@@ -586,6 +597,8 @@ class ConcurrencyGate:
         self.max_limit = new_max
         if self.limit > self.max_limit:
             self.limit = self.max_limit
+        if self.on_ceiling_changed:
+            self.on_ceiling_changed(new_max)
         # A raised ceiling isn't applied at once: the adapt loop grows the limit towards it
         # only while memory stays comfortable.
 

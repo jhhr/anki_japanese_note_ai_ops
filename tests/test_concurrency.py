@@ -6,17 +6,18 @@ reasonable and quietly produces a limit of 4 or of 4000. The other is the gate i
 awkward case is a limit that shrinks while tasks are queued behind it - the point at which a
 lost wakeup would hang a run for good.
 
-Memory probing is stubbed throughout: a test that asked the machine how much RAM it had would
-assert different things on different machines.
+Memory probing is stubbed for all of that: a test that asked the machine how much RAM it had
+would assert different things on different machines. The exception is
+MemoryProbeContractTests, which runs against the real probe on purpose - the platform
+underneath is exactly where those go wrong, so a fake would only prove the fake works.
 
-Not covered here: the connection pool being sized from the gate's ceiling before that ceiling
-has been measured. That lives in base_ops, which needs aqt, so it is out of reach of these
-tests.
+Not covered here: base_ops wiring the gate's ceiling to the connection pool size. That call
+needs aqt. The gate's half of it - reporting the ceiling when it moves - is covered by
+CeilingReportingTests.
 """
 
 import asyncio
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,23 +50,35 @@ class StubMemory:
         return None if self.probe_failed else self.rss
 
 
+# The real functions, captured once at import. A test that wants one of them back must take
+# it from here rather than reading it off the module, which by then holds a stub.
+REAL_SYSTEM_MEMORY = conc.system_memory
+REAL_PROCESS_MEMORY = conc.process_memory
+REAL_LOAD_PER_TASK_ESTIMATES = conc.load_per_task_estimates
+
+
+def install_memory_stubs(memory: StubMemory) -> None:
+    conc.system_memory = memory.system_memory
+    conc.process_memory = memory.process_memory
+    # Never read the real user_files estimates: they differ per machine and per run
+    conc.load_per_task_estimates = lambda: {}
+
+
+def restore_memory_probes() -> None:
+    conc.system_memory = REAL_SYSTEM_MEMORY
+    conc.process_memory = REAL_PROCESS_MEMORY
+    conc.load_per_task_estimates = REAL_LOAD_PER_TASK_ESTIMATES
+
+
 class MemoryStubTestCase(unittest.TestCase):
     """Replaces the memory probes and the estimates file for the duration of a test."""
 
     def setUp(self):
         self.memory = StubMemory()
-        self._real_system_memory = conc.system_memory
-        self._real_process_memory = conc.process_memory
-        self._real_load = conc.load_per_task_estimates
-        conc.system_memory = self.memory.system_memory
-        conc.process_memory = self.memory.process_memory
-        # Never read the real user_files estimates: they differ per machine and per run
-        conc.load_per_task_estimates = lambda: {}
+        install_memory_stubs(self.memory)
 
     def tearDown(self):
-        conc.system_memory = self._real_system_memory
-        conc.process_memory = self._real_process_memory
-        conc.load_per_task_estimates = self._real_load
+        restore_memory_probes()
 
 
 # --- Reading the machine -------------------------------------------------------------------
@@ -97,6 +110,17 @@ class MemoryProbeTests(unittest.TestCase):
         rss = conc.process_memory()
         self.assertIsNotNone(rss, "process memory probe failed on this platform")
         self.assertGreater(rss, 0)
+
+    def test_the_probes_report_bytes(self):
+        # Every one of these reads a source with its own units - kilobytes from /proc, pages
+        # from vm_stat - so a missing multiplication is the easy mistake, and magnitude alone
+        # catches it: a machine with under a gigabyte of RAM will not be running Anki, and a
+        # Python process holding under 5MB does not exist
+        total, _ = conc.system_memory()
+        self.assertGreater(total, 1 * GB, "system memory looks like kilobytes, not bytes")
+        rss = conc.process_memory()
+        self.assertGreater(rss, 5 * MB, "process memory looks like kilobytes, not bytes")
+        self.assertLess(rss, total, "process memory is larger than the machine")
 
 
 class MemoryBudgetTests(MemoryStubTestCase):
@@ -248,6 +272,26 @@ class MemoryEstimatorTests(MemoryStubTestCase):
         estimator = conc.MemoryEstimator("op")
         self.assertIsNone(estimator.end_window())
 
+    def test_a_window_started_without_a_working_probe_teaches_nothing(self):
+        # Rather than measuring growth against a baseline it never had
+        estimator = conc.MemoryEstimator("op")
+        self.memory.probe_failed = True
+        estimator.begin_window()
+        self.memory.probe_failed = False
+        self.memory.rss = 900 * MB
+        estimator.sample(self.memory.rss, 10)
+        self.assertIsNone(estimator.end_window())
+
+    def test_a_probe_that_fails_for_one_tick_leaves_the_peak_alone(self):
+        # A missing reading is not a reading of zero
+        estimator = conc.MemoryEstimator("op")
+        self.memory.rss = 500 * MB
+        estimator.begin_window()
+        self.memory.rss = 540 * MB
+        estimator.sample(self.memory.rss, 10)
+        estimator.sample(None, 10)
+        self.assertEqual(estimator.end_window(), 4 * MB)
+
 
 class EstimatesFileTests(MemoryStubTestCase):
     def setUp(self):
@@ -255,10 +299,10 @@ class EstimatesFileTests(MemoryStubTestCase):
         self._tempdir = tempfile.TemporaryDirectory()
         self.path = Path(self._tempdir.name) / "memory_estimates.json"
         self._real_path = conc._estimates_path
-        self._real_load = conc.load_per_task_estimates
         conc._estimates_path = lambda: self.path
-        # Undo MemoryStubTestCase's stub: these tests exercise the real reader
-        conc.load_per_task_estimates = self._real_load
+        # Undo MemoryStubTestCase's stub - these tests exercise the real reader, pointed at a
+        # temporary file rather than the add-on's own user_files
+        conc.load_per_task_estimates = REAL_LOAD_PER_TASK_ESTIMATES
 
     def tearDown(self):
         conc._estimates_path = self._real_path
@@ -314,25 +358,32 @@ class GateTestCase(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.memory = StubMemory()
-        self._real_system_memory = conc.system_memory
-        self._real_process_memory = conc.process_memory
-        self._real_load = conc.load_per_task_estimates
-        conc.system_memory = self.memory.system_memory
-        conc.process_memory = self.memory.process_memory
-        conc.load_per_task_estimates = lambda: {}
+        install_memory_stubs(self.memory)
 
     def tearDown(self):
-        conc.system_memory = self._real_system_memory
-        conc.process_memory = self._real_process_memory
-        conc.load_per_task_estimates = self._real_load
+        restore_memory_probes()
 
     def make_gate(self, limit=None, max_limit=None, config=None):
-        gate = conc.ConcurrencyGate(config or {}, op_key="test op")
+        # Every gate records the ceilings it reports, so any test can assert on them
+        self.reported_ceilings: list[int] = []
+        gate = conc.ConcurrencyGate(
+            config or {},
+            op_key="test op",
+            on_ceiling_changed=self.reported_ceilings.append,
+        )
         if limit is not None:
             gate.limit = limit
         if max_limit is not None:
             gate.max_limit = max_limit
         return gate
+
+    def measure_window(self, gate, baseline, peak, in_flight):
+        """Run one window through the gate, ending with `peak` reached by `in_flight` tasks."""
+        self.memory.rss = baseline
+        gate.begin_window()
+        self.memory.rss = peak
+        gate.estimator.sample(self.memory.rss, in_flight)
+        gate.end_window()
 
     async def settle(self):
         """Let queued tasks reach their next await."""
@@ -525,15 +576,11 @@ class GateAdaptationTests(GateTestCase):
     async def test_a_measured_window_can_raise_the_ceiling(self):
         # The op turned out cheaper than the default guess, so more of it fits
         self.memory.total = 8 * GB
-        self.memory.available = 8 * GB  # budget = 2GB, so 8MB/task gives a ceiling of 256
+        self.memory.available = 8 * GB  # budget = 2GB, so 1MB/task gives a ceiling of 256
         gate = self.make_gate()
         gate.max_limit = 32
 
-        self.memory.rss = 500 * MB
-        gate.begin_window()
-        self.memory.rss = 504 * MB
-        gate.estimator.sample(self.memory.rss, 4)  # 1MB per task
-        gate.end_window()
+        self.measure_window(gate, baseline=500 * MB, peak=504 * MB, in_flight=4)  # 1MB/task
 
         self.assertEqual(gate.max_limit, conc.MAX_AUTO_CONCURRENCY)
 
@@ -542,22 +589,14 @@ class GateAdaptationTests(GateTestCase):
         self.memory.available = 8 * GB
         gate = self.make_gate(limit=200, max_limit=256)
 
-        self.memory.rss = 500 * MB
-        gate.begin_window()
-        self.memory.rss = 500 * MB + 128 * MB
-        gate.estimator.sample(self.memory.rss, 2)  # 64MB per task
-        gate.end_window()
+        self.measure_window(gate, baseline=500 * MB, peak=628 * MB, in_flight=2)  # 64MB/task
 
         self.assertEqual(gate.max_limit, 32)
         self.assertLessEqual(gate.limit, gate.max_limit)
 
     async def test_a_configured_maximum_survives_re_measuring(self):
         gate = self.make_gate(config={"max_concurrent_requests": 10})
-        self.memory.rss = 500 * MB
-        gate.begin_window()
-        self.memory.rss = 501 * MB
-        gate.estimator.sample(self.memory.rss, 50)  # very cheap
-        gate.end_window()
+        self.measure_window(gate, baseline=500 * MB, peak=501 * MB, in_flight=50)  # very cheap
         self.assertEqual(gate.max_limit, 10)
 
     async def test_a_window_that_measured_nothing_leaves_the_ceiling_alone(self):
@@ -566,27 +605,148 @@ class GateAdaptationTests(GateTestCase):
         gate.end_window()
         self.assertEqual(gate.max_limit, 64)
 
+    async def test_probes_that_start_failing_mid_run_do_not_break_the_adapt_loop(self):
+        """The probes can stop answering part way through - a WMI hiccup, a missing /proc.
 
-class MacOSMemoryProbeTests(unittest.TestCase):
-    @unittest.skipUnless(sys.platform == "darwin", "the peak-RSS probe is macOS-only")
-    def test_process_memory_reports_current_usage_not_a_high_water_mark(self):
-        """The macOS probe returns resource.ru_maxrss, which never falls once it has risen.
-
-        Everything that reads process_memory() assumes it tracks what the process is using
-        now: the gate backs off while it is above the configured limit, and the estimator
-        measures per-task cost as the growth over a window's baseline. A high-water mark makes
-        the first latch on forever and the second measure zero growth for the rest of the
-        session.
+        The run has to carry on. Without a reading there is no pressure signal, so the gate
+        goes on growing towards the ceiling it was given; that ceiling was budgeted from a real
+        reading at the start, which is what bounds the damage.
         """
+        gate = self.make_gate(limit=16, max_limit=64)
+        gate.in_flight = gate.limit
+        self.memory.probe_failed = True
+
+        for _ in range(10):
+            await gate._adapt_once()
+            gate.in_flight = gate.limit
+
+        self.assertLessEqual(gate.limit, gate.max_limit)
+        self.assertEqual(gate.available_memory, 0)
+
+    async def test_a_window_whose_memory_is_freed_still_measures_its_peak(self):
+        """What has to fit in RAM is the high-water mark of the window, not where it ended.
+
+        Tasks release their notes and response buffers as they finish, so by the time the last
+        one is done the process has usually given the memory back. Measuring at that point
+        would put the per-task cost at nothing and the ceiling at its maximum.
+        """
+        self.memory.total = 8 * GB
+        self.memory.available = 8 * GB
+        gate = self.make_gate()
+
+        self.memory.rss = 500 * MB
+        gate.begin_window()
+        self.memory.rss = 628 * MB  # 2 tasks at 64MB each, both in flight
+        gate.estimator.sample(self.memory.rss, 2)
+        self.memory.rss = 500 * MB  # both finished and their memory was freed
+        gate.end_window()
+
+        self.assertEqual(gate.estimator.measured, 64 * MB)
+
+
+class CeilingReportingTests(GateTestCase):
+    """The connection pool is sized from the ceiling, so it has to hear when the ceiling moves.
+
+    set_connection_pool_size runs once at the start of a run, from a ceiling worked out from
+    the starting guess at what a task costs. end_window can move that ceiling after measuring
+    the real cost, and without this the pool keeps the size it was given: every request past it
+    is a fresh TCP and TLS handshake plus a "connection pool is full" warning.
+    """
+
+    async def test_a_raised_ceiling_is_reported(self):
+        self.memory.total = 8 * GB
+        self.memory.available = 8 * GB
+        gate = self.make_gate()
+        gate.max_limit = 32
+
+        self.measure_window(gate, baseline=500 * MB, peak=504 * MB, in_flight=4)
+
+        self.assertEqual(self.reported_ceilings, [conc.MAX_AUTO_CONCURRENCY])
+
+    async def test_a_lowered_ceiling_is_reported(self):
+        self.memory.total = 8 * GB
+        self.memory.available = 8 * GB
+        gate = self.make_gate(limit=200, max_limit=256)
+
+        self.measure_window(gate, baseline=500 * MB, peak=628 * MB, in_flight=2)
+
+        self.assertEqual(self.reported_ceilings, [32])
+
+    async def test_a_window_that_measured_nothing_reports_nothing(self):
+        gate = self.make_gate(limit=16, max_limit=64)
+        gate.begin_window()
+        gate.end_window()
+        self.assertEqual(self.reported_ceilings, [])
+
+    async def test_a_measurement_that_leaves_the_ceiling_where_it_was_reports_nothing(self):
+        # Resizing the pool drops every session, so doing it once per window for a ceiling
+        # that has not moved would rebuild connections all run long
+        self.memory.total = 8 * GB
+        self.memory.available = 8 * GB
+        gate = self.make_gate()
+        self.assertEqual(gate.max_limit, conc.MAX_AUTO_CONCURRENCY)
+
+        self.measure_window(gate, baseline=500 * MB, peak=504 * MB, in_flight=4)
+
+        self.assertEqual(gate.max_limit, conc.MAX_AUTO_CONCURRENCY)
+        self.assertEqual(self.reported_ceilings, [])
+
+    async def test_a_non_adaptive_gate_never_reports(self):
+        # Nothing to adapt against, so the ceiling it was given is the ceiling it keeps
+        self.memory.probe_failed = True
+        gate = self.make_gate()
+        self.assertFalse(gate.adaptive)
+
+        self.measure_window(gate, baseline=500 * MB, peak=504 * MB, in_flight=4)
+
+        self.assertEqual(self.reported_ceilings, [])
+
+    async def test_a_gate_with_nobody_listening_still_works(self):
+        self.memory.total = 8 * GB
+        self.memory.available = 8 * GB
+        gate = conc.ConcurrencyGate({}, op_key="test op")
+        gate.max_limit = 32
+        self.measure_window(gate, baseline=500 * MB, peak=504 * MB, in_flight=4)
+        self.assertEqual(gate.max_limit, conc.MAX_AUTO_CONCURRENCY)
+
+
+class MemoryProbeContractTests(unittest.TestCase):
+    """The one thing every platform's probe has to agree on, checked against the real probe.
+
+    Deliberately not faked: a fake would only assert that the fake behaves, and the whole point
+    is that the platform underneath is where these go wrong. This runs on whatever machine the
+    suite runs on and fails on the one whose probe is broken.
+    """
+
+    def test_process_memory_reports_current_usage_not_a_high_water_mark(self):
+        """Everything reading process_memory() assumes it tracks usage now, not the peak ever.
+
+        The gate backs off while it is above the configured memory limit, and the estimator
+        takes per-task cost from the growth over a window's baseline. A probe that cannot fall
+        latches the first on forever - halving concurrency every two seconds down to 1 for the
+        rest of the session - and makes the second measure zero growth.
+
+        Expected to FAIL on macOS, and that is the point: _macos_process_memory returns
+        resource.ru_maxrss, which is a high-water mark. Fixing it means reading current
+        resident size there instead (`ps -o rss=`, or a ctypes libproc binding).
+        """
+        size = 256 * MB
         before = conc.process_memory()
-        blob = bytearray(400 * MB)
+        if before is None:
+            self.skipTest("no process memory probe on this platform")
+
+        blob = bytearray(size)
         blob[::4096] = bytes(len(blob[::4096]))  # touch every page so it is resident
         peak = conc.process_memory()
         del blob
         after = conc.process_memory()
 
-        self.assertGreater(peak, before, "allocating did not move the probe")
-        self.assertLess(after, peak, "the probe reports a peak, not current usage")
+        self.assertGreater(peak - before, size // 2, "allocating barely moved the probe")
+        self.assertLess(
+            after - before,
+            size // 4,
+            "the probe did not fall after the memory was freed, so it reports a peak",
+        )
 
 
 if __name__ == "__main__":

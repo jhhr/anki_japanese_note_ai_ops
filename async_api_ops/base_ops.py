@@ -1350,8 +1350,10 @@ async def bulk_nested_notes_op(
 
     progress_updater.set_total_notes(len(notes))
 
-    # The message doubles as the op's identity for the learned per-task memory cost
-    gate = ConcurrencyGate(config, op_key=message)
+    # The message doubles as the op's identity for the learned per-task memory cost. The pool
+    # is sized to the gate's ceiling, which is a guess until the op has been measured - so the
+    # gate says when it moves it and the pool follows, rather than staying at the guess.
+    gate = ConcurrencyGate(config, op_key=message, on_ceiling_changed=set_connection_pool_size)
     progress_updater.gate = gate
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
@@ -1610,8 +1612,10 @@ async def bulk_notes_op(
     # Can start auto updater now that we're in an async context with a running loop
     progress_updater.start_autoupdate()
 
-    # The message doubles as the op's identity for the learned per-task memory cost
-    gate = ConcurrencyGate(config, op_key=message)
+    # The message doubles as the op's identity for the learned per-task memory cost. The pool
+    # is sized to the gate's ceiling, which is a guess until the op has been measured - so the
+    # gate says when it moves it and the pool follows, rather than staying at the guess.
+    gate = ConcurrencyGate(config, op_key=message, on_ceiling_changed=set_connection_pool_size)
     progress_updater.gate = gate
     gate.start_adapting()
     set_connection_pool_size(gate.max_limit)
