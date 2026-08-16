@@ -319,6 +319,17 @@ class ClassifyResponseTests(unittest.TestCase):
             (api.ResponseAction.RETRY, None),
         )
 
+    def test_an_error_member_that_is_not_an_object_is_still_classified(self):
+        # A proxy in front of the provider may answer with a bare string there. Reaching into
+        # it for a code raised AttributeError, which turned a retryable 429 into a hard failure
+        # for that note.
+        for provider in (api.OPENAI, api.TOGETHER, api.GEMINI):
+            self.assertEqual(
+                api.classify_response(provider, FakeResponse(429, body={"error": "slow down"})),
+                (api.ResponseAction.RETRY, None),
+                provider,
+            )
+
     def test_openai_server_errors_are_retryable_and_client_errors_are_not(self):
         for status in (500, 502, 503, 504):
             action, _ = api.classify_response(api.OPENAI, FakeResponse(status, body={}))

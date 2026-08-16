@@ -169,6 +169,18 @@ def _error_body(response: "requests.Response") -> dict:
     return decoded if isinstance(decoded, dict) else {}
 
 
+def _error_object(body: dict) -> dict:
+    """The body's `error` member, or an empty dict when it isn't the shape the providers use.
+
+    Not everything answering at an API base URL is the provider itself - a proxy or a gateway
+    in front of one may send a bare `{"error": "rate limit exceeded"}`. Reaching straight into
+    that for a code or a message raised AttributeError out of classify_response, which turned a
+    429 that should have been retried into a failure for that note.
+    """
+    error = body.get("error")
+    return error if isinstance(error, dict) else {}
+
+
 def parse_seconds_header(value: Optional[str]) -> Optional[float]:
     """Parse a Retry-After header value expressed in seconds."""
     if not value:
@@ -240,7 +252,7 @@ def parse_google_duration(value: Optional[str]) -> Optional[float]:
 
 
 def _gemini_details(body: dict) -> list:
-    details = body.get("error", {}).get("details")
+    details = _error_object(body).get("details")
     return details if isinstance(details, list) else []
 
 
@@ -312,7 +324,7 @@ def classify_response(provider: str, response: "requests.Response") -> tuple[str
             if _gemini_is_daily_quota(body):
                 logger.error(
                     "Gemini daily quota exhausted, not retrying: %s",
-                    body.get("error", {}).get("message", response.text),
+                    _error_object(body).get("message", response.text),
                 )
                 return ResponseAction.FAIL, None
             return ResponseAction.RETRY, _gemini_retry_delay(body)
@@ -322,11 +334,12 @@ def classify_response(provider: str, response: "requests.Response") -> tuple[str
 
     # OpenAI and Together share the same error shape
     if status == 429:
-        code = str(body.get("error", {}).get("code") or body.get("error", {}).get("type") or "")
+        error = _error_object(body)
+        code = str(error.get("code") or error.get("type") or "")
         if code == "insufficient_quota":
             logger.error(
                 "OpenAI-compatible API reports insufficient quota (billing), not retrying: %s",
-                body.get("error", {}).get("message", response.text),
+                error.get("message", response.text),
             )
             return ResponseAction.FAIL, None
         delay = parse_seconds_header(headers.get("Retry-After"))
