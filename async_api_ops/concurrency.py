@@ -24,6 +24,7 @@ import os
 import subprocess
 import sys
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -260,6 +261,11 @@ def process_memory() -> Optional[int]:
         _warn_probe_unavailable("process memory", e)
         return None
     return None
+
+
+def _read_memory_probes() -> "tuple[Optional[tuple[int, int]], Optional[int]]":
+    """Both probes in one call, so one hop to a thread covers the pair."""
+    return system_memory(), process_memory()
 
 
 def format_bytes(value: Optional[int]) -> str:
@@ -558,6 +564,10 @@ class ConcurrencyGate:
         self.available_memory = available
         self._waiters: deque[asyncio.Future] = deque()
         self._adapt_task: Optional[asyncio.Task] = None
+        # One thread of its own for the memory probes; see _probe_memory. Not the loop's
+        # default executor, whose threads are all busy running the op's tasks - a probe queued
+        # behind them would stall adaptation exactly when memory is tightest.
+        self._probe_executor: Optional[ThreadPoolExecutor] = None
         self._aborted = False
 
         logger.debug(
@@ -637,12 +647,21 @@ class ConcurrencyGate:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
+        if self._probe_executor is None:
+            self._probe_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="simple_anki_ai_prompts_memprobe"
+            )
         self._adapt_task = loop.create_task(self._adapt_loop())
 
     def stop_adapting(self) -> None:
         if self._adapt_task:
             self._adapt_task.cancel()
             self._adapt_task = None
+        if self._probe_executor is not None:
+            # Not waited for: a probe already inside a subprocess call has its own timeout and
+            # nothing depends on its answer any more
+            self._probe_executor.shutdown(wait=False)
+            self._probe_executor = None
 
     def finish(self) -> None:
         """End of the run: stop adapting and remember what this op cost."""
@@ -696,12 +715,21 @@ class ConcurrencyGate:
         except asyncio.CancelledError:
             pass
 
+    async def _probe_memory(self) -> "tuple[Optional[tuple[int, int]], Optional[int]]":
+        """Read both probes off the event loop.
+
+        On macOS each one spawns a subprocess with a five-second timeout, so reading them here
+        directly blocked the loop twice every two seconds - and the loop is what polls for
+        cancellation and redraws the progress dialog.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._probe_executor, _read_memory_probes)
+
     async def _adapt_once(self) -> None:
-        memory = system_memory()
+        # Sampled every tick both for the hard cap and to learn what a task costs
+        memory, rss = await self._probe_memory()
         available = memory[1] if memory else None
         self.available_memory = available or 0
-        # Sampled every tick both for the hard cap and to learn what a task costs
-        rss = process_memory()
         self.estimator.sample(rss, self.in_flight)
 
         under_pressure = (available is not None and self.reserve and available < self.reserve) or (

@@ -19,6 +19,7 @@ CeilingReportingTests.
 import asyncio
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -566,6 +567,30 @@ class GateAcquireReleaseTests(GateTestCase):
 
 
 class GateAdaptationTests(GateTestCase):
+    async def test_the_probes_run_off_the_event_loop(self):
+        # On macOS each probe spawns a subprocess with a five-second timeout, twice every two
+        # seconds. On the loop that is what polls for cancellation and redraws the progress
+        # dialog, so the probes must not be read there.
+        loop_thread = threading.current_thread()
+        stub = self.memory.system_memory
+        probe_threads: list = []
+
+        def recording_probe():
+            probe_threads.append(threading.current_thread())
+            return stub()
+
+        gate = self.make_gate(limit=8)
+        # Only the adapt tick is at issue; the gate's one-off reads while being built are not
+        conc.system_memory = recording_probe
+        gate.start_adapting()
+        try:
+            await gate._adapt_once()
+        finally:
+            gate.stop_adapting()
+
+        self.assertTrue(probe_threads)
+        self.assertNotIn(loop_thread, probe_threads)
+
     async def test_a_saturated_gate_grows_while_memory_is_comfortable(self):
         gate = self.make_gate(limit=16, max_limit=256)
         gate.in_flight = gate.limit
