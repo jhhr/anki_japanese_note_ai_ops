@@ -19,8 +19,6 @@ from typing import Any, Optional
 
 import requests  # type: ignore
 from requests.adapters import HTTPAdapter  # type: ignore
-from urllib3.connection import HTTPConnection, HTTPSConnection  # type: ignore
-from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -473,20 +471,43 @@ class _TrackedConnection:
         super().close()  # type: ignore[misc]
 
 
-class _TrackedHTTPConnection(_TrackedConnection, HTTPConnection):
-    pass
+_tracked_pool_classes: "dict[type, type]" = {}
 
 
-class _TrackedHTTPSConnection(_TrackedConnection, HTTPSConnection):
-    pass
+def _tracked_pool_class(pool_class: type) -> type:
+    """Derive a pool class whose connections register themselves, from any pool class.
+
+    Derived rather than hardcoded to the plain HTTP(S) pools because a proxied session does not
+    use those: an HTTP proxy has its own pools and a SOCKS one has pools with an entirely
+    different connection class. Subclassing whatever the manager was going to use adds the
+    tracking without replacing the behaviour that gets the connection made in the first place.
+    """
+    tracked = _tracked_pool_classes.get(pool_class)
+    if tracked is None:
+        connection_class = pool_class.ConnectionCls  # type: ignore[attr-defined]
+        tracked = type(
+            f"_Tracked{pool_class.__name__}",
+            (pool_class,),
+            {
+                "ConnectionCls": type(
+                    f"_Tracked{connection_class.__name__}",
+                    (_TrackedConnection, connection_class),
+                    {},
+                )
+            },
+        )
+        _tracked_pool_classes[pool_class] = tracked
+    return tracked
 
 
-class _TrackedHTTPConnectionPool(HTTPConnectionPool):
-    ConnectionCls = _TrackedHTTPConnection
-
-
-class _TrackedHTTPSConnectionPool(HTTPSConnectionPool):
-    ConnectionCls = _TrackedHTTPSConnection
+def _track_connections(manager: Any) -> None:
+    """Make a pool manager hand out connections that can be aborted mid-request."""
+    # The mapping is assigned per instance by PoolManager.__init__, so replacing it here only
+    # affects this manager and never anything else in the process using requests
+    manager.pool_classes_by_scheme = {
+        scheme: _tracked_pool_class(pool_class)
+        for scheme, pool_class in manager.pool_classes_by_scheme.items()
+    }
 
 
 class _TrackedAdapter(HTTPAdapter):
@@ -494,12 +515,18 @@ class _TrackedAdapter(HTTPAdapter):
 
     def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
         super().init_poolmanager(*args, **kwargs)
-        # PoolManager copies the scheme->pool mapping onto the instance, so this only affects
-        # this adapter's pools and never anything else in the process using requests
-        self.poolmanager.pool_classes_by_scheme = {
-            "http": _TrackedHTTPConnectionPool,
-            "https": _TrackedHTTPSConnectionPool,
-        }
+        _track_connections(self.poolmanager)
+
+    def proxy_manager_for(self, *args: Any, **kwargs: Any) -> Any:
+        # A proxied request never touches self.poolmanager: it goes through a separate manager
+        # built here, with stock pool classes. Without this, a user behind a proxy has no
+        # connection registered at all, so cancelling finds nothing to abort and the run sits
+        # out the full request timeout instead.
+        manager = super().proxy_manager_for(*args, **kwargs)
+        if not getattr(manager, "_connections_tracked", False):
+            _track_connections(manager)
+            manager._connections_tracked = True
+        return manager
 
 
 def abort_in_flight_requests() -> int:

@@ -872,6 +872,30 @@ class SessionTests(unittest.TestCase):
         session = api.get_session(api.GEMINI)
         self.assertIsInstance(session.get_adapter("https://example.invalid"), api._TrackedAdapter)
 
+    def test_direct_connections_are_registered_for_aborting(self):
+        adapter = api.get_session(api.GEMINI).get_adapter("https://example.invalid")
+        for pool_class in adapter.poolmanager.pool_classes_by_scheme.values():
+            self.assertTrue(issubclass(pool_class.ConnectionCls, api._TrackedConnection))
+
+    def test_proxied_connections_are_registered_too(self):
+        # A proxied request never touches the adapter's own poolmanager, so without this the
+        # sockets to abort on cancellation are not registered anywhere and a cancel waits out
+        # the whole request timeout
+        adapter = api.get_session(api.GEMINI).get_adapter("https://example.invalid")
+        manager = adapter.proxy_manager_for("http://proxy.invalid:8080")
+        for pool_class in manager.pool_classes_by_scheme.values():
+            self.assertTrue(issubclass(pool_class.ConnectionCls, api._TrackedConnection))
+
+    def test_tracking_keeps_whatever_pool_the_manager_was_going_to_use(self):
+        # Subclassed rather than replaced: a proxy's pools know how to reach the proxy, and a
+        # SOCKS proxy's connection class is not an HTTP one at all
+        from urllib3.connectionpool import HTTPSConnectionPool
+
+        tracked = api._tracked_pool_class(HTTPSConnectionPool)
+        self.assertTrue(issubclass(tracked, HTTPSConnectionPool))
+        self.assertTrue(issubclass(tracked.ConnectionCls, HTTPSConnectionPool.ConnectionCls))
+        self.assertIs(api._tracked_pool_class(HTTPSConnectionPool), tracked)
+
     def test_closing_sessions_is_safe_when_there_are_none(self):
         api.close_all_sessions()
         api.close_all_sessions()
