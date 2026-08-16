@@ -11,6 +11,7 @@ import logging
 import random
 import re
 import socket
+import sys
 import threading
 import time
 import weakref
@@ -560,11 +561,22 @@ def abort_in_flight_requests() -> int:
         except OSError:
             # Already closed, or never finished connecting
             pass
-        # On Windows it is not: shutdown() leaves a thread already blocked in recv sitting
-        # there, and sock.close() does not help either because http.client reads through a
-        # makefile() wrapper, whose reference keeps close() from actually releasing the
-        # descriptor. Detaching and closing the descriptor itself is what makes the pending
+        if sys.platform != "win32":
+            # Everywhere else the shutdown is the whole story, and the socket object is left
+            # alone: whoever is reading it closes it on the way out. Freeing the descriptor
+            # here instead would put the number back in circulation while a thread is still
+            # reading from it, so a socket or file opened moments later could be handed the
+            # same number and be read by that thread.
+            aborted += 1
+            continue
+        # On Windows the shutdown is not enough: it leaves a thread already blocked in recv
+        # sitting there, and sock.close() does not help either because http.client reads
+        # through a makefile() wrapper, whose reference keeps close() from actually releasing
+        # the descriptor. Detaching and closing the descriptor itself is what makes the pending
         # read return - it fails with "not a socket", which is exactly what we want it to do.
+        # It is the reader's descriptor we are pulling out from under it, which is the risk
+        # described above, and it is accepted here because the alternative is a cancelled run
+        # whose threads stay blocked for the whole request timeout.
         try:
             fileno = sock.detach()
         except Exception as e:

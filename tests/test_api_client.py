@@ -11,6 +11,7 @@ clock makes backoffs pass instantly.
 """
 
 import json
+import socket
 import threading
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -902,6 +903,59 @@ class SessionTests(unittest.TestCase):
 
     def test_aborting_with_no_live_connections_reports_nothing_aborted(self):
         self.assertEqual(api.abort_in_flight_requests(), 0)
+
+
+class FakeSocket:
+    """Records what aborting did to it."""
+
+    family = socket.AF_INET
+    type = socket.SOCK_STREAM
+    proto = 0
+
+    def __init__(self):
+        self.shutdown_calls = 0
+        self.detached = False
+
+    def shutdown(self, how):
+        self.shutdown_calls += 1
+
+    def detach(self):
+        self.detached = True
+        return -1
+
+
+class FakeConnection:
+    def __init__(self):
+        self.sock = FakeSocket()
+
+
+class AbortingRequestsTests(unittest.TestCase):
+    def setUp(self):
+        self.connection = FakeConnection()
+        api._live_connections.add(self.connection)
+
+    def tearDown(self):
+        api._live_connections.clear()
+
+    def abort_as(self, platform: str) -> int:
+        real = api.sys.platform
+        api.sys.platform = platform
+        try:
+            return api.abort_in_flight_requests()
+        finally:
+            api.sys.platform = real
+
+    def test_windows_takes_the_descriptor_away_because_a_shutdown_is_not_enough(self):
+        self.abort_as("win32")
+        self.assertEqual(self.connection.sock.shutdown_calls, 1)
+        self.assertTrue(self.connection.sock.detached)
+
+    def test_elsewhere_the_shutdown_is_the_whole_story(self):
+        # Freeing the descriptor here would put the number back in circulation while a thread
+        # is still reading from it, and something opened moments later could be handed it
+        self.assertEqual(self.abort_as("linux"), 1)
+        self.assertEqual(self.connection.sock.shutdown_calls, 1)
+        self.assertFalse(self.connection.sock.detached)
 
 
 if __name__ == "__main__":
