@@ -555,10 +555,11 @@ class GateAdaptationTests(GateTestCase):
         """Backing off has to be temporary, which is why the probe must report current usage.
 
         The whole pressure response rests on process_memory() falling again when the run's
-        memory is freed. A probe that reports a high-water mark instead - which is what
-        resource.ru_maxrss gives on macOS - can never fall, so the halving here would repeat
-        every two seconds down to a limit of 1 and stay there for the rest of the session.
-        See test_process_memory_reports_current_usage_not_a_high_water_mark.
+        memory is freed. Against a probe that reports a high-water mark the halving here would
+        repeat every two seconds down to a limit of 1 and stay there for the rest of the
+        session - which is what the macOS probe used to do. Whether a platform's probe can
+        actually fall is checked by
+        test_process_memory_reports_current_usage_not_a_high_water_mark.
         """
         gate = self.make_gate(config={"memory_limit_mb": 900})
         gate.limit, gate.max_limit = 16, 256
@@ -726,9 +727,11 @@ class MemoryProbeContractTests(unittest.TestCase):
         latches the first on forever - halving concurrency every two seconds down to 1 for the
         rest of the session - and makes the second measure zero growth.
 
-        Expected to FAIL on macOS, and that is the point: _macos_process_memory returns
-        resource.ru_maxrss, which is a high-water mark. Fixing it means reading current
-        resident size there instead (`ps -o rss=`, or a ctypes libproc binding).
+        macOS is the platform this catches: _macos_process_memory used to return
+        resource.ru_maxrss, a high-water mark, and now shells out to `ps -o rss=` instead. That
+        replacement has not been run on a Mac yet, so this test is what will say whether it
+        works - along with test_the_probes_report_bytes, which catches the KB-to-bytes
+        conversion `ps` needs and `ru_maxrss` did not.
         """
         size = 256 * MB
         before = conc.process_memory()

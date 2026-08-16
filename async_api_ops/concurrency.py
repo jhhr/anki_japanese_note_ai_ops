@@ -10,8 +10,10 @@ word and can create notes and call several other ops, while translating a field 
 request — so the cost is measured while running rather than assumed, and remembered per op for
 next time.
 
-Memory probing is stdlib-only (ctypes on Windows, /proc on Linux) because Anki's bundled Python
-has no psutil.
+Memory probing is stdlib-only (ctypes on Windows, /proc on Linux, vm_stat and ps on macOS)
+because Anki's bundled Python has no psutil. Whatever the source, every probe has to report
+what is in use now rather than a high-water mark: the pressure response and the per-task
+measurement both depend on the number being able to fall.
 """
 
 import asyncio
@@ -202,24 +204,29 @@ def _macos_system_memory() -> Optional[tuple[int, int]]:
 
 
 def _macos_process_memory() -> Optional[int]:
-    """Known broken: reports the peak rather than current usage. Needs replacing.
+    """Current resident size, via ps.
 
-    ru_maxrss is in bytes on macOS (kilobytes on Linux), but it is a high-water mark and never
-    falls, which both callers of process_memory() need it to do. The pressure response in
-    _adapt_once latches on once a configured memory_limit_mb has been crossed even momentarily,
-    halving concurrency every two seconds down to 1 and staying there for the life of the
-    process; and MemoryEstimator re-baselines each window from a value that only rises, so it
-    measures no growth and never learns what an op costs.
+    This used to read resource.getrusage().ru_maxrss, which is a high-water mark: it never
+    falls, and both callers of process_memory() need it to. The pressure response in
+    _adapt_once would latch on once a configured memory_limit_mb had been crossed even
+    momentarily, halving concurrency every two seconds down to 1 for the life of the process,
+    and MemoryEstimator would re-baseline each window from a value that only rises, so it
+    measured no growth and never learned what an op costs.
 
-    Replacing it means a source of current resident size - `ps -o rss=` through the subprocess
-    call this module already makes for vm_stat, or a ctypes libproc binding - which has to be
-    done on a macOS machine where it can be checked. Until then
-    test_process_memory_reports_current_usage_not_a_high_water_mark fails there on purpose.
+    ps costs a process spawn, on top of the one _macos_system_memory already makes for vm_stat
+    every adapt tick. That is the price of a reading that can go down. It was preferred to a
+    ctypes libproc binding because a wrong struct layout there would fail silently on a
+    platform this is not developed on, leaving the gate quietly unable to adapt.
     """
-    import resource
-
-    usage = resource.getrusage(resource.RUSAGE_SELF)  # type: ignore[attr-defined]
-    return int(usage.ru_maxrss)
+    # ps reports RSS in kilobytes
+    output = subprocess.run(
+        ["ps", "-o", "rss=", "-p", str(os.getpid())],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True,
+    ).stdout
+    return int(output.strip()) * 1024
 
 
 def system_memory() -> Optional[tuple[int, int]]:
