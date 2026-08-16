@@ -150,6 +150,11 @@ def close_previous_log_handlers(logger_instance: logging.Logger) -> None:
     open, which is why they can't be deleted until Anki is closed.
 
     Detaching is immediate; the close waits for the threads that may still be writing.
+
+    Nothing detached here can belong to an operation still running. Every caller is a UI hook -
+    building the browser context menu, unfocusing a field, adding a note - and Anki's progress
+    dialog owns the UI while an operation is in progress, so none of them can fire until it has
+    finished. Cancelling is the only thing the user can do meanwhile.
     """
     for handler in list(logger_instance.handlers):
         if getattr(handler, _ADDON_HANDLER_FLAG, False):

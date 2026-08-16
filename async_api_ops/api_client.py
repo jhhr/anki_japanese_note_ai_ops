@@ -110,6 +110,11 @@ def cancel_run() -> None:
 
     No further requests are issued, and the ones already in flight are aborted rather than
     left to run to completion in threads nothing is waiting for any more.
+
+    The abort is process-wide rather than this run's own sockets, because connections are
+    pooled and carry no run of their own. Nothing else can be holding one: Anki's progress
+    dialog owns the UI while an operation runs, so no editor hook can start a request alongside
+    it and there is never more than one operation in progress.
     """
     run = getattr(_thread_run, "run", None) or _current_run
     if run is None:
