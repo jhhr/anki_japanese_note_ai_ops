@@ -22,6 +22,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from addon_modules import load_addon_module  # type: ignore
 
@@ -385,6 +386,28 @@ class EstimatesFileTests(MemoryStubTestCase):
         self.path.write_text(json.dumps(contents), encoding="utf-8")
         conc.save_per_task_estimate("Making meanings", 2 * MB)
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), contents)
+
+    def test_a_corrupt_file_is_left_alone_rather_than_overwritten(self):
+        # It is unreadable here, but it may still hold what every other op measured; replacing
+        # it with only this op's value would throw those away
+        self.path.write_text("{not json", encoding="utf-8")
+        conc.save_per_task_estimate("Making meanings", 2 * MB)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{not json")
+
+    def test_a_file_holding_something_other_than_a_mapping_is_left_alone(self):
+        self.path.write_text("[1, 2, 3]", encoding="utf-8")
+        conc.save_per_task_estimate("Making meanings", 2 * MB)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "[1, 2, 3]")
+
+    def test_a_failed_write_leaves_the_previous_file_intact(self):
+        # The file is written beside itself and moved into place, so a crash partway through
+        # cannot leave half a file behind - which is how it came to be unreadable above
+        conc.save_per_task_estimate("Making meanings", 1 * MB)
+        before = self.path.read_text(encoding="utf-8")
+        with mock.patch.object(conc.json, "dump", side_effect=OSError("disk full")):
+            conc.save_per_task_estimate("Translating sentences", 4 * MB)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+        self.assertFalse(self.path.with_name(f"{self.path.name}.tmp").exists())
 
     def test_later_measurements_are_blended_so_one_odd_run_cannot_skew_it(self):
         conc.save_per_task_estimate("Making meanings", 1 * MB)

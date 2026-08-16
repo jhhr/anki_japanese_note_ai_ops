@@ -379,18 +379,26 @@ def _estimates_path() -> Path:
     return Path(__file__).resolve().parent.parent / "user_files" / ESTIMATES_FILE
 
 
-def _read_estimates_file() -> Optional[dict]:
-    """What the file holds, or None if there is nothing readable there."""
+def _read_estimates_file() -> "tuple[Optional[dict], bool]":
+    """What the file holds, and whether it was readable at all.
+
+    The two empty answers have to stay apart. A file that isn't there yet is ours to write; one
+    we couldn't parse may still hold every other op's measurements, and rewriting it with only
+    this op's would be how they get lost.
+    """
     path = _estimates_path()
     if not path.exists():
-        return None
+        return None, True
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         logger.debug("Could not read memory estimates: %s", e)
-        return None
-    return data if isinstance(data, dict) else None
+        return None, False
+    if not isinstance(data, dict):
+        # Valid JSON, but not a shape this ever wrote; treat it as someone else's file
+        return None, False
+    return data, True
 
 
 def _written_by_a_newer_version(data: Optional[dict]) -> bool:
@@ -419,13 +427,20 @@ def _estimates_in(data: Optional[dict]) -> dict:
 
 
 def load_per_task_estimates() -> dict:
-    return _estimates_in(_read_estimates_file())
+    return _estimates_in(_read_estimates_file()[0])
 
 
 def save_per_task_estimate(op_key: str, value: float) -> None:
     path = _estimates_path()
+    temp = path.with_name(f"{path.name}.tmp")
     try:
-        data = _read_estimates_file()
+        data, readable = _read_estimates_file()
+        if not readable:
+            logger.debug(
+                "Memory estimates file could not be read; leaving it alone rather than"
+                " replacing what other ops measured with just this one"
+            )
+            return
         if _written_by_a_newer_version(data):
             # Its numbers are unreadable here, but they are not ours to throw away: downgrading
             # for one session would otherwise destroy what the newer version had measured.
@@ -441,7 +456,11 @@ def save_per_task_estimate(op_key: str, value: float) -> None:
             value = previous * (1 - ESTIMATE_BLEND) + value * ESTIMATE_BLEND
         estimates[op_key] = int(value)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        # Written beside the file and moved into place, so a crash or a force-quit partway
+        # through leaves the previous file intact. Writing over it directly is how it came to
+        # be half a file, which the read above then has to refuse to overwrite - at which point
+        # nothing can be saved until the user deletes it.
+        with open(temp, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "version": ESTIMATES_VERSION,
@@ -450,9 +469,17 @@ def save_per_task_estimate(op_key: str, value: float) -> None:
                 f,
                 indent=2,
             )
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, path)
         logger.debug("Saved per-task memory estimate for %r: %s", op_key, format_bytes(int(value)))
     except Exception as e:
         logger.debug("Could not save memory estimate for %r: %s", op_key, e)
+        try:
+            temp.unlink()
+        except Exception:
+            # Never written, gone already, or not a path that can be written at all
+            pass
 
 
 class MemoryEstimator:
