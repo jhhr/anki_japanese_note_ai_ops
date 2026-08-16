@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RETRIES = 5
 DEFAULT_MAX_RETRY_WAIT_SECONDS = 120
-# Fallback wait when a provider says "rate limited" without saying for how long
+# Ceiling on the exponential backoff used when a provider gives no hint about how long to wait
 DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60.0
 # Cooldowns are slept off in slices this long so cancellation stays responsive
 CANCEL_POLL_INTERVAL = 0.5
@@ -322,7 +322,6 @@ class RateLimitTracker:
         # When each cooldown was installed, for telling a response that predates it from one
         # that can actually speak to whether the limit has cleared
         self._cooldown_set_at: dict[str, float] = {}
-        self._consecutive: dict[str, int] = {}
 
     def wait_time(self, key: str) -> float:
         """Seconds left on this model's cooldown, 0 if it's clear."""
@@ -344,7 +343,6 @@ class RateLimitTracker:
             # Never shorten an existing cooldown
             self._cooldown_until[key] = max(now + delay, self._cooldown_until.get(key, 0.0))
             self._cooldown_set_at[key] = now
-            self._consecutive[key] = self._consecutive.get(key, 0) + 1
 
     def note_success(self, key: str, sent_at: Optional[float] = None) -> None:
         """Note a successful response, clearing the model's cooldown unless it is stale.
@@ -365,17 +363,11 @@ class RateLimitTracker:
                 return
             self._cooldown_until.pop(key, None)
             self._cooldown_set_at.pop(key, None)
-            self._consecutive.pop(key, None)
-
-    def consecutive_failures(self, key: str) -> int:
-        with self._lock:
-            return self._consecutive.get(key, 0)
 
     def reset(self) -> None:
         with self._lock:
             self._cooldown_until.clear()
             self._cooldown_set_at.clear()
-            self._consecutive.clear()
 
 
 rate_limit_tracker = RateLimitTracker()

@@ -415,19 +415,12 @@ class RateLimitTrackerTests(unittest.TestCase):
         self.tracker.note_rate_limited(self.key, 30.0)
         self.assertEqual(self.tracker.wait_time("openai:gpt-4o-mini"), 0.0)
 
-    def test_consecutive_failures_count_up_and_reset_on_success(self):
-        self.tracker.note_rate_limited(self.key, 1.0)
-        self.tracker.note_rate_limited(self.key, 1.0)
-        self.assertEqual(self.tracker.consecutive_failures(self.key), 2)
-        self.clock.advance(5)
-        self.tracker.note_success(self.key, sent_at=self.clock.monotonic())
-        self.assertEqual(self.tracker.consecutive_failures(self.key), 0)
-
-    def test_reset_clears_everything(self):
+    def test_reset_clears_every_model_so_a_new_run_starts_clean(self):
         self.tracker.note_rate_limited(self.key, 30.0)
+        self.tracker.note_rate_limited("gemini:gemini-3.5-flash-lite", 30.0)
         self.tracker.reset()
         self.assertEqual(self.tracker.wait_time(self.key), 0.0)
-        self.assertEqual(self.tracker.consecutive_failures(self.key), 0)
+        self.assertEqual(self.tracker.wait_time("gemini:gemini-3.5-flash-lite"), 0.0)
 
     # -- Finding A ---------------------------------------------------------------------------
 
