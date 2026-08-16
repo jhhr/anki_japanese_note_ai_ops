@@ -378,6 +378,14 @@ class EstimatesFileTests(MemoryStubTestCase):
         )
         self.assertEqual(conc.load_per_task_estimates(), {})
 
+    def test_a_file_from_a_later_version_is_left_alone_rather_than_overwritten(self):
+        # Ignoring what it holds is right; destroying it is not. Running an older version for
+        # one session would otherwise throw away everything the newer one had measured.
+        contents = {"version": conc.ESTIMATES_VERSION + 1, "estimates": {"op": 1 * MB}}
+        self.path.write_text(json.dumps(contents), encoding="utf-8")
+        conc.save_per_task_estimate("Making meanings", 2 * MB)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), contents)
+
     def test_later_measurements_are_blended_so_one_odd_run_cannot_skew_it(self):
         conc.save_per_task_estimate("Making meanings", 1 * MB)
         conc.save_per_task_estimate("Making meanings", 2 * MB)

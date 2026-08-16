@@ -379,17 +379,27 @@ def _estimates_path() -> Path:
     return Path(__file__).resolve().parent.parent / "user_files" / ESTIMATES_FILE
 
 
-def load_per_task_estimates() -> dict:
+def _read_estimates_file() -> Optional[dict]:
+    """What the file holds, or None if there is nothing readable there."""
     path = _estimates_path()
     if not path.exists():
-        return {}
+        return None
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         logger.debug("Could not read memory estimates: %s", e)
-        return {}
-    if not isinstance(data, dict):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _written_by_a_newer_version(data: Optional[dict]) -> bool:
+    version = (data or {}).get("version")
+    return isinstance(version, int) and version > ESTIMATES_VERSION
+
+
+def _estimates_in(data: Optional[dict]) -> dict:
+    if data is None:
         return {}
     version = data.get("version")
     if version is None:
@@ -408,10 +418,24 @@ def load_per_task_estimates() -> dict:
     return estimates if isinstance(estimates, dict) else {}
 
 
+def load_per_task_estimates() -> dict:
+    return _estimates_in(_read_estimates_file())
+
+
 def save_per_task_estimate(op_key: str, value: float) -> None:
     path = _estimates_path()
     try:
-        estimates = load_per_task_estimates()
+        data = _read_estimates_file()
+        if _written_by_a_newer_version(data):
+            # Its numbers are unreadable here, but they are not ours to throw away: downgrading
+            # for one session would otherwise destroy what the newer version had measured.
+            logger.debug(
+                "Memory estimates file is version %s, newer than this add-on writes;"
+                " leaving it alone",
+                (data or {}).get("version"),
+            )
+            return
+        estimates = _estimates_in(data)
         previous = estimates.get(op_key)
         if isinstance(previous, (int, float)) and previous > 0:
             value = previous * (1 - ESTIMATE_BLEND) + value * ESTIMATE_BLEND
