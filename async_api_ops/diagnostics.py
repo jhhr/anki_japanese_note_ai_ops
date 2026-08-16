@@ -199,6 +199,18 @@ def note_cancel_time() -> None:
         _cancelled_at = time.monotonic()
 
 
+def clear_cancel_time() -> None:
+    """Forget the previous cancel, at the start of a run.
+
+    The marker is process-wide, and left standing it made every later run report every task as
+    having "returned Ns after the cancel" - a cancel that happened in some earlier run and has
+    nothing to do with the work being timed.
+    """
+    global _cancelled_at
+    with _cancel_marker_lock:
+        _cancelled_at = None
+
+
 def seconds_since_cancel() -> Optional[float]:
     with _cancel_marker_lock:
         if _cancelled_at is None:

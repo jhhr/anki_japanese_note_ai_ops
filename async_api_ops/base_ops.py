@@ -36,6 +36,7 @@ from .api_client import (
 from .collection_access import RunCancelled, begin_cleanup_phase, end_cleanup_phase
 from .concurrency import TASK_QUEUE_DEPTH, ConcurrencyGate, max_possible_concurrency
 from .diagnostics import (
+    clear_cancel_time,
     diagnostic_level,
     dump_thread_stacks,
     note_cancel_time,
@@ -1839,6 +1840,10 @@ def selected_notes_op(
         # set. That turned "cancel a run, then start another" into a RunCancelled traceback out
         # of the new operation before it had done anything.
         run = begin_run()
+        # And the same for the cancel marker the diagnostics time everything against: a run
+        # that starts after a cancelled one must not report its tasks as having returned
+        # minutes after a cancel that belongs to the previous run.
+        clear_cancel_time()
 
         async def async_wrapper():
             nonlocal edited_nids, edited_other_nids
