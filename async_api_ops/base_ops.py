@@ -1434,6 +1434,10 @@ async def bulk_nested_notes_op(
                 note_plan.spawn(tasks)
             if not tasks:
                 continue
+            # All of them are alive from here, whether or not they hold a gate slot yet, and
+            # each holds its note and prompt. That count is what the window's memory growth
+            # has to be divided by to get what one task costs.
+            gate.note_window_tasks(len(tasks))
             progress_updater.update_progress()
 
             cancel_manager = CancelManager(
@@ -1699,6 +1703,10 @@ async def bulk_notes_op(
                 )
             if not tasks:
                 continue
+            # All of them are alive from here, whether or not they hold a gate slot yet, and
+            # each holds its note and prompt. That count is what the window's memory growth
+            # has to be divided by to get what one task costs.
+            gate.note_window_tasks(len(tasks))
             progress_updater.update_progress()
 
             cancel_manager = CancelManager(

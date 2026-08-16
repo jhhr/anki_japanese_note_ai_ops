@@ -31,10 +31,12 @@ logger = logging.getLogger(__name__)
 
 MB = 1024 * 1024
 
-# Starting guess for what one in-flight operation costs: a worker thread's committed stack, the
-# connection, the request/response buffers and the note objects the task holds onto. Only used
-# until the op has been measured once; see MemoryEstimator.
-DEFAULT_PER_TASK_MEMORY = 8 * MB
+# Starting guess for what one live task costs: the note and prompt it holds from the moment it
+# is created, and once it has a slot, a worker thread's committed stack, the connection and the
+# request/response buffers. A limit of N keeps N * TASK_QUEUE_DEPTH tasks alive, which is why
+# max_concurrency_for divides the budget by that many of these. Only used until the op has been
+# measured once; see MemoryEstimator.
+DEFAULT_PER_TASK_MEMORY = 2 * MB
 # Measured values are clamped to this range. Anything outside it is measurement noise rather
 # than a real per-task cost.
 MIN_PER_TASK_MEMORY = 512 * 1024
@@ -73,7 +75,8 @@ GROWTH_RATE = 0.25
 # How many tasks to have queued behind the gate, as a multiple of the current limit. Some
 # queue is needed: a slot must be claimed the instant one frees, and the gate can only tell
 # it is the bottleneck (and so may grow) while tasks are waiting on it. Kept small because
-# queued tasks hold their note and prompt in memory just like running ones.
+# queued tasks hold their note and prompt in memory just like running ones - which is also why
+# both halves of the memory arithmetic count them: see memory_per_slot and MemoryEstimator.
 TASK_QUEUE_DEPTH = 4
 
 
@@ -302,6 +305,17 @@ def max_possible_concurrency(config: Optional[dict] = None) -> int:
     return max(configured, MAX_AUTO_CONCURRENCY)
 
 
+def memory_per_slot(per_task_memory: float) -> float:
+    """What one place in the limit really costs in memory.
+
+    Not one task's worth: the ops keep TASK_QUEUE_DEPTH tasks alive per slot so a freed slot is
+    claimed the instant it opens, and a queued task holds its note and its prompt exactly like
+    a running one does. Budgeting a slot at one task's cost would plan a limit whose window
+    needs TASK_QUEUE_DEPTH times the memory the budget allowed for.
+    """
+    return max(per_task_memory, MIN_PER_TASK_MEMORY) * TASK_QUEUE_DEPTH
+
+
 def max_concurrency_for(per_task_memory: float) -> int:
     budget = memory_budget()
     if budget is None:
@@ -309,7 +323,7 @@ def max_concurrency_for(per_task_memory: float) -> int:
     return int(
         min(
             MAX_AUTO_CONCURRENCY,
-            max(MIN_AUTO_CONCURRENCY, budget // max(per_task_memory, MIN_PER_TASK_MEMORY)),
+            max(MIN_AUTO_CONCURRENCY, budget // memory_per_slot(per_task_memory)),
         )
     )
 
@@ -342,6 +356,10 @@ def concurrency_limits(
 # --- Learning what an op actually costs ---------------------------------------------------
 
 ESTIMATES_FILE = "memory_estimates.json"
+# Bumped whenever what a stored number means changes. Version 1 was an unversioned mapping
+# holding the cost of a place in the limit - a whole window slice of tasks - because the
+# measurement divided a window's growth by the tasks in flight rather than the tasks alive.
+ESTIMATES_VERSION = 2
 # Weight given to a new run's measurement when blending it into the stored value. Low enough
 # that one unusual run doesn't throw the estimate off, high enough to track real changes.
 ESTIMATE_BLEND = 0.4
@@ -362,10 +380,26 @@ def load_per_task_estimates() -> dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
     except Exception as e:
         logger.debug("Could not read memory estimates: %s", e)
         return {}
+    if not isinstance(data, dict):
+        return {}
+    version = data.get("version")
+    if version is None:
+        # Version 1: a bare mapping, whose numbers were a slot's worth of tasks rather than
+        # one task's. Converting keeps what those runs measured instead of throwing it away.
+        return {
+            key: value / TASK_QUEUE_DEPTH
+            for key, value in data.items()
+            if isinstance(value, (int, float)) and value > 0
+        }
+    if version != ESTIMATES_VERSION:
+        # Written by a later version of the add-on; measure it again rather than guess at
+        # what the numbers mean
+        return {}
+    estimates = data.get("estimates")
+    return estimates if isinstance(estimates, dict) else {}
 
 
 def save_per_task_estimate(op_key: str, value: float) -> None:
@@ -378,19 +412,32 @@ def save_per_task_estimate(op_key: str, value: float) -> None:
         estimates[op_key] = int(value)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(dict(sorted(estimates.items())), f, indent=2)
+            json.dump(
+                {
+                    "version": ESTIMATES_VERSION,
+                    "estimates": {key: int(item) for key, item in sorted(estimates.items())},
+                },
+                f,
+                indent=2,
+            )
         logger.debug("Saved per-task memory estimate for %r: %s", op_key, format_bytes(int(value)))
     except Exception as e:
         logger.debug("Could not save memory estimate for %r: %s", op_key, e)
 
 
 class MemoryEstimator:
-    """Measures what one in-flight operation of a given op actually costs.
+    """Measures what one live task of a given op actually costs.
 
     Measured per window of tasks. The bulk ops process notes in windows, and between windows
     nothing is in flight, which gives a clean baseline: memory that has accumulated over the
     run so far (results dicts and the like) is absorbed into the new baseline, so only the
     growth caused by the window's concurrent tasks is attributed to per-task cost.
+
+    The growth is divided by how many tasks were alive to cause it, which is the whole window
+    and not just the few holding a gate slot: every task is created up front and holds its note
+    and prompt from then on, so a window is TASK_QUEUE_DEPTH times the limit in tasks. Dividing
+    by the slots alone charged the queue's memory to the running tasks and put the cost of one
+    at several times what it is.
 
     Within a run the largest measurement wins, because what has to fit in RAM is the peak, not
     the average. Across runs the value is blended into the stored one so a single odd run
@@ -405,6 +452,7 @@ class MemoryEstimator:
         self._baseline: Optional[int] = None
         self._peak_rss = 0
         self._peak_in_flight = 0
+        self._peak_tasks = 0
 
     def begin_window(self) -> None:
         """Called when nothing is in flight, to re-baseline."""
@@ -412,11 +460,16 @@ class MemoryEstimator:
         self._baseline = rss
         self._peak_rss = rss or 0
         self._peak_in_flight = 0
+        self._peak_tasks = 0
 
     def sample(self, rss: Optional[int], in_flight: int) -> None:
         if rss is not None:
             self._peak_rss = max(self._peak_rss, rss)
         self._peak_in_flight = max(self._peak_in_flight, in_flight)
+
+    def note_tasks(self, count: int) -> None:
+        """Called with how many tasks the window has alive, once they have been created."""
+        self._peak_tasks = max(self._peak_tasks, count)
 
     def end_window(self) -> Optional[float]:
         """Fold this window into the estimate. Returns the new estimate if it changed."""
@@ -430,7 +483,11 @@ class MemoryEstimator:
         if growth <= 0:
             # Memory the allocator already held was reused; that tells us nothing new
             return None
-        per_task = growth / self._peak_in_flight
+        # A task holding a slot is alive too, so the live count can never be below the
+        # in-flight peak; taking the larger also keeps the measurement honest for a caller
+        # that runs tasks through the gate without reporting a window at all.
+        live_tasks = max(self._peak_tasks, self._peak_in_flight)
+        per_task = growth / live_tasks
         per_task = min(MAX_PER_TASK_MEMORY, max(MIN_PER_TASK_MEMORY, per_task))
         if self.measured is not None and per_task <= self.measured:
             return None
@@ -439,9 +496,10 @@ class MemoryEstimator:
         self.estimate = per_task
         self.from_measurement = True
         logger.debug(
-            "Measured per-task memory for %r: %s over %d concurrent tasks (was %s)",
+            "Measured per-task memory for %r: %s over %d live tasks, %d of them at once (was %s)",
             self.op_key,
             format_bytes(int(per_task)),
+            live_tasks,
             self._peak_in_flight,
             format_bytes(int(previous)),
         )
@@ -594,6 +652,15 @@ class ConcurrencyGate:
     def begin_window(self) -> None:
         """Called by the bulk ops before starting a window of tasks, with nothing in flight."""
         self.estimator.begin_window()
+
+    def note_window_tasks(self, count: int) -> None:
+        """Called by the bulk ops with the number of tasks a window created.
+
+        The gate only ever sees the ones holding a slot, and they are a quarter of the tasks
+        alive - the rest are queued on acquire(), holding their note and prompt meanwhile. The
+        estimator needs the whole count, or it charges the queue's memory to the running tasks.
+        """
+        self.estimator.note_tasks(count)
 
     def end_window(self) -> None:
         """Called once a window's tasks have all finished."""

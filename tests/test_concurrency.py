@@ -150,10 +150,21 @@ class MemoryBudgetTests(MemoryStubTestCase):
 
 
 class MaxConcurrencyTests(MemoryStubTestCase):
-    def test_the_ceiling_is_the_budget_divided_by_what_a_task_costs(self):
+    def test_the_ceiling_is_the_budget_divided_by_what_a_slot_costs(self):
         self.memory.total = 8 * GB
         self.memory.available = 8 * GB  # budget = 2GB
-        self.assertEqual(conc.max_concurrency_for(16 * MB), 128)
+        self.assertEqual(conc.max_concurrency_for(16 * MB), 2 * GB // (16 * MB * 4))
+
+    def test_a_slot_is_budgeted_for_the_queue_behind_it_too(self):
+        # A limit of N keeps N * TASK_QUEUE_DEPTH tasks alive, all holding their note and
+        # prompt. Budgeting a slot at one task's cost plans a window the budget can't hold.
+        self.memory.total = 8 * GB
+        self.memory.available = 8 * GB
+        self.assertEqual(conc.memory_per_slot(16 * MB), 16 * MB * conc.TASK_QUEUE_DEPTH)
+        self.assertEqual(
+            conc.max_concurrency_for(16 * MB) * conc.TASK_QUEUE_DEPTH * 16 * MB,
+            conc.memory_budget(),
+        )
 
     def test_a_cheap_task_does_not_lift_the_ceiling_without_limit(self):
         self.assertEqual(conc.max_concurrency_for(1), conc.MAX_AUTO_CONCURRENCY)
@@ -210,17 +221,39 @@ class ConcurrencyLimitsTests(MemoryStubTestCase):
 
 
 class MemoryEstimatorTests(MemoryStubTestCase):
-    def measure(self, baseline: int, peak: int, in_flight: int):
-        """Run one window: baseline at the start, `peak` reached with `in_flight` tasks."""
+    def measure(self, baseline: int, peak: int, in_flight: int, tasks: int = 0):
+        """Run one window: baseline at the start, `peak` reached with `in_flight` tasks.
+
+        `tasks` is the whole window, the queued ones included, as the bulk ops report it.
+        """
         estimator = conc.MemoryEstimator("op")
         self.memory.rss = baseline
         estimator.begin_window()
+        if tasks:
+            estimator.note_tasks(tasks)
         self.memory.rss = peak
         estimator.sample(self.memory.rss, in_flight)
         return estimator, estimator.end_window()
 
     def test_growth_is_attributed_across_the_tasks_that_caused_it(self):
         _, per_task = self.measure(baseline=500 * MB, peak=540 * MB, in_flight=10)
+        self.assertEqual(per_task, 4 * MB)
+
+    def test_the_queued_tasks_are_charged_for_their_own_memory(self):
+        # A window is TASK_QUEUE_DEPTH times the limit in tasks and every one of them holds a
+        # note and a prompt from the moment it is created. Dividing the window's growth by the
+        # ten holding a slot said each task cost four times what it does.
+        _, per_task = self.measure(baseline=500 * MB, peak=540 * MB, in_flight=10, tasks=40)
+        self.assertEqual(per_task, 1 * MB)
+
+    def test_a_window_smaller_than_the_queue_is_measured_as_it_ran(self):
+        # The last window of a run holds whatever notes were left, not a full queue's worth
+        _, per_task = self.measure(baseline=500 * MB, peak=540 * MB, in_flight=10, tasks=16)
+        self.assertEqual(per_task, 2.5 * MB)
+
+    def test_a_window_never_counts_fewer_tasks_than_ran_at_once(self):
+        # Whatever the caller reports, a task holding a slot is a live task
+        _, per_task = self.measure(baseline=500 * MB, peak=540 * MB, in_flight=10, tasks=4)
         self.assertEqual(per_task, 4 * MB)
 
     def test_a_window_that_never_ran_enough_at_once_teaches_nothing(self):
@@ -324,8 +357,25 @@ class EstimatesFileTests(MemoryStubTestCase):
     def test_the_first_measurement_is_stored_as_is(self):
         conc.save_per_task_estimate("Making meanings", 2 * MB)
         self.assertEqual(
-            json.loads(self.path.read_text(encoding="utf-8")), {"Making meanings": 2 * MB}
+            json.loads(self.path.read_text(encoding="utf-8")),
+            {"version": conc.ESTIMATES_VERSION, "estimates": {"Making meanings": 2 * MB}},
         )
+
+    def test_a_version_1_file_is_converted_rather_than_thrown_away(self):
+        # Its numbers were a slot's worth of tasks, measured before the queue behind the gate
+        # was counted. Read as they stand they would be TASK_QUEUE_DEPTH times too high.
+        self.path.write_text(json.dumps({"Making meanings": 8 * MB}), encoding="utf-8")
+        self.assertEqual(
+            conc.load_per_task_estimates()["Making meanings"], 8 * MB / conc.TASK_QUEUE_DEPTH
+        )
+
+    def test_a_file_from_a_later_version_is_ignored(self):
+        # Measuring again beats guessing at what its numbers mean
+        self.path.write_text(
+            json.dumps({"version": conc.ESTIMATES_VERSION + 1, "estimates": {"op": 1 * MB}}),
+            encoding="utf-8",
+        )
+        self.assertEqual(conc.load_per_task_estimates(), {})
 
     def test_later_measurements_are_blended_so_one_odd_run_cannot_skew_it(self):
         conc.save_per_task_estimate("Making meanings", 1 * MB)
@@ -377,10 +427,16 @@ class GateTestCase(unittest.IsolatedAsyncioTestCase):
             gate.max_limit = max_limit
         return gate
 
-    def measure_window(self, gate, baseline, peak, in_flight):
-        """Run one window through the gate, ending with `peak` reached by `in_flight` tasks."""
+    def measure_window(self, gate, baseline, peak, in_flight, tasks=0):
+        """Run one window through the gate, ending with `peak` reached by `in_flight` tasks.
+
+        `tasks` is the whole window as the bulk ops report it, queued ones included; left out,
+        the window is measured as though every task alive was holding a slot.
+        """
         self.memory.rss = baseline
         gate.begin_window()
+        if tasks:
+            gate.note_window_tasks(tasks)
         self.memory.rss = peak
         gate.estimator.sample(self.memory.rss, in_flight)
         gate.end_window()
@@ -587,13 +643,26 @@ class GateAdaptationTests(GateTestCase):
 
     async def test_a_measured_window_can_lower_the_ceiling_and_the_limit_with_it(self):
         self.memory.total = 8 * GB
+        self.memory.available = 8 * GB  # budget = 2GB
+        gate = self.make_gate(limit=200, max_limit=256)
+
+        # 128MB over 2 live tasks, so 64MB each and 256MB for a slot and its queue
+        self.measure_window(gate, baseline=500 * MB, peak=628 * MB, in_flight=2)
+
+        self.assertEqual(gate.max_limit, 2 * GB // (64 * MB * conc.TASK_QUEUE_DEPTH))
+        self.assertLessEqual(gate.limit, gate.max_limit)
+
+    async def test_a_windows_queued_tasks_count_towards_what_one_costs(self):
+        # The same window, now reported in full: the 128MB was 40 tasks' doing, not 2, so a
+        # task costs a fortieth of it and the ceiling lands far higher
+        self.memory.total = 8 * GB
         self.memory.available = 8 * GB
         gate = self.make_gate(limit=200, max_limit=256)
 
-        self.measure_window(gate, baseline=500 * MB, peak=628 * MB, in_flight=2)  # 64MB/task
+        self.measure_window(gate, baseline=500 * MB, peak=628 * MB, in_flight=10, tasks=40)
 
-        self.assertEqual(gate.max_limit, 32)
-        self.assertLessEqual(gate.limit, gate.max_limit)
+        self.assertEqual(gate.estimator.measured, 3.2 * MB)
+        self.assertEqual(gate.max_limit, int(2 * GB // (3.2 * MB * conc.TASK_QUEUE_DEPTH)))
 
     async def test_a_configured_maximum_survives_re_measuring(self):
         gate = self.make_gate(config={"max_concurrent_requests": 10})
@@ -666,12 +735,13 @@ class CeilingReportingTests(GateTestCase):
 
     async def test_a_lowered_ceiling_is_reported(self):
         self.memory.total = 8 * GB
-        self.memory.available = 8 * GB
+        self.memory.available = 8 * GB  # budget = 2GB
         gate = self.make_gate(limit=200, max_limit=256)
 
+        # 64MB per live task, so 256MB per slot and its queue
         self.measure_window(gate, baseline=500 * MB, peak=628 * MB, in_flight=2)
 
-        self.assertEqual(self.reported_ceilings, [32])
+        self.assertEqual(self.reported_ceilings, [2 * GB // (64 * MB * conc.TASK_QUEUE_DEPTH)])
 
     async def test_a_window_that_measured_nothing_reports_nothing(self):
         gate = self.make_gate(limit=16, max_limit=64)
