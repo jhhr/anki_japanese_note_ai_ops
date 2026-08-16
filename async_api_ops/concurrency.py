@@ -498,7 +498,7 @@ class MemoryEstimator:
         self._peak_in_flight = max(self._peak_in_flight, in_flight)
 
     def note_tasks(self, count: int) -> None:
-        """Called with how many tasks the window has alive, once they have been created."""
+        """Called with how many API tasks the window has alive, once they have been created."""
         self._peak_tasks = max(self._peak_tasks, count)
 
     def end_window(self) -> Optional[float]:
@@ -647,6 +647,11 @@ class ConcurrencyGate:
                         self._wake_waiters(1)
                 raise
         self.in_flight += 1
+        # Recorded here rather than left to the adapt tick: a window that began and finished
+        # between two ticks sampled an in-flight peak of zero, and end_window then threw its
+        # measurement away as too small to mean anything. A short op could go a whole run
+        # without ever being measured, and start the next one from the default guess again.
+        self.estimator.sample(None, self.in_flight)
 
     def release(self) -> None:
         self.in_flight -= 1
@@ -697,11 +702,14 @@ class ConcurrencyGate:
         self.estimator.begin_window()
 
     def note_window_tasks(self, count: int) -> None:
-        """Called by the bulk ops with the number of tasks a window created.
+        """Called by the bulk ops with the number of API tasks a window created.
 
         The gate only ever sees the ones holding a slot, and they are a quarter of the tasks
         alive - the rest are queued on acquire(), holding their note and prompt meanwhile. The
         estimator needs the whole count, or it charges the queue's memory to the running tasks.
+
+        Only the API tasks, though: an op that also creates bookkeeping tasks to write its
+        results back would otherwise divide the window's growth by more tasks than caused it.
         """
         self.estimator.note_tasks(count)
 

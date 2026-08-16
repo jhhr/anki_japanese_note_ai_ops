@@ -1421,7 +1421,10 @@ async def bulk_nested_notes_op(
             # Always take at least one note, however many tasks it turns out to want
             while index < len(plans) and (not window or window_task_count < task_budget):
                 window.append(plans[index])
-                window_task_count += plans[index].task_count
+                # A plan with no API tasks of its own still creates the bookkeeping tasks that
+                # write its note back, so it cannot count as free: a run of them would never
+                # move the budget and every note would land in one window.
+                window_task_count += max(1, plans[index].task_count)
                 index += 1
 
             # Nothing is in flight here, so this is a clean baseline to measure the window's
@@ -1429,16 +1432,21 @@ async def bulk_nested_notes_op(
             gate.begin_window()
 
             tasks: list[asyncio.Task] = []
+            window_api_tasks = 0
             for note_plan in window:
                 if mw.progress.want_cancel():
                     break
                 note_plan.spawn(tasks)
+                window_api_tasks += note_plan.task_count
             if not tasks:
                 continue
-            # All of them are alive from here, whether or not they hold a gate slot yet, and
-            # each holds its note and prompt. That count is what the window's memory growth
-            # has to be divided by to get what one task costs.
-            gate.note_window_tasks(len(tasks))
+            # The API tasks are alive from here, whether or not they hold a gate slot yet, and
+            # each holds its note and prompt. That count is what the window's memory growth has
+            # to be divided by to get what one task costs. Not len(tasks): spawn() also creates
+            # a per-word-list and a per-note bookkeeping task, which hold no prompt and would
+            # only dilute the average - and task_count is the unit the budget above is spent
+            # in, so both halves of the memory arithmetic stay in the same one.
+            gate.note_window_tasks(window_api_tasks)
             progress_updater.update_progress()
 
             cancel_manager = CancelManager(
