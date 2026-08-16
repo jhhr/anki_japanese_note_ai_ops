@@ -608,6 +608,15 @@ class RetryFailureTests(PostWithRetryTestCase):
         self.assertIsNone(response)
         self.assertEqual(session.call_count, 2)
 
+    def test_an_expired_hint_backs_off_rather_than_retrying_at_once(self):
+        # A reset header that has already passed parses as 0.0. Taken at face value it would
+        # spend every attempt in a burst and leave the model's cooldown at nothing.
+        self.serve(FakeResponse(429, headers={"Retry-After": "0"}, body={}))
+        self.post(max_retries=3)
+        self.assertGreater(self.clock.total_slept, 7.0)
+        self.assertLess(self.clock.total_slept, 11.0)
+        self.assertTrue(all(delay > 0 for _, delay in self.tracker.rate_limited_calls))
+
     def test_backoff_grows_between_attempts_when_the_provider_gives_no_hint(self):
         self.serve(FakeResponse(500, body={}))
         self.post(max_retries=3)

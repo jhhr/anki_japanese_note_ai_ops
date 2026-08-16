@@ -715,7 +715,11 @@ def post_with_retry(
             logger.error("Giving up on %s after %d attempts", key, attempt + 1)
             return last_response
 
-        if delay is None:
+        # A hint of zero is not a hint. An Anthropic *-reset header that has already passed, or
+        # a Gemini retryDelay of "0s", would otherwise be taken at face value: all six attempts
+        # fire back to back with no wait at all, and the cooldown the other tasks for this model
+        # wait on is set to nothing.
+        if delay is None or delay <= 0:
             delay = _backoff_delay(attempt)
         if delay > max_retry_wait:
             logger.error(
